@@ -1,6 +1,17 @@
-'''
-Here is the contents of the _init_.py file in UniBM.zip.
-'''
+# Copyright (C) 2024- Tuoyuan Cheng, Kan Chen
+#
+# UniBM is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# UniBM is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with UniBM. If not, see <http://www.gnu.org/licenses/>.
 
 
 from pathlib import Path
@@ -44,13 +55,13 @@ def cdf_func_kernel(vec: np.array, is_scott: bool = True) -> callable:
     return func_cdf
 
 
-def est_tail_dep_coeff_up(
+def est_tail_dep_coeff(
     vec_1: np.array,
     vec_2: np.array,
     is_FF: bool = True,
     is_upper: bool = True,
 ) -> float:
-    """pairwise upper-tail tail dependence coefficient estimator
+    """pairwise tail dependence coefficient (λ) estimator
 
     :param vec_1: observations of variable 1
     :type vec_1: np.array
@@ -100,7 +111,7 @@ def est_extremal_index_reciprocal(
     is_geom: bool = None,
     is_retn_vec: bool = False,
 ) -> dict:
-    """extremal index estimator, by reciprocal of the mean of the block maxima;
+    """extremal index reciprocal (1/θ) estimator, by reciprocal of the mean of the block maxima;
 
     :param srs: a time series of observations
     :type srs: pd.Series
@@ -206,8 +217,8 @@ def viz_eir(
     file_path: Path = None,
     fig_title: str = None,
     is_save: bool = False,
-    xlabel: str = None,
-    ylabel: str = None,
+    xlabel: str = "log (block size)",
+    ylabel: str = "Z",
 ) -> None:
     """chart results from est_extremal_index_reciprocal(is_retn_vec=True)
 
@@ -224,10 +235,6 @@ def viz_eir(
     :param ylabel: _description_, defaults to None
     :type ylabel: str, optional
     """
-    if xlabel is None:
-        xlabel = "log (block size)"
-    if ylabel is None:
-        ylabel = "Z"
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=173)
     tmp_df = pd.DataFrame(
         {
@@ -324,7 +331,7 @@ def est_extreme_value_index(
     cov_type: str = "hc0",
     use_t: bool = True,
 ) -> dict:
-    """extreme value index estimator, by MPMR & EMR
+    """extreme value index (ξ) estimator, by MPMR & EMR
 
     :param vec: a vector of observations
     :type vec: np.array
@@ -585,7 +592,7 @@ def viz_evi_reg(
     file_path: Path = None,
     fig_title: str = None,
     is_save: bool = False,
-    xlabel: str = None,
+    xlabel: str = "log (block size)",
     ylabel: str = None,
 ) -> None:
     """chart results from est_extreme_value_index(is_retn_vec=True)
@@ -603,8 +610,6 @@ def viz_evi_reg(
     :param ylabel: _description_, defaults to None
     :type ylabel: str, optional
     """
-    if xlabel is None:
-        xlabel = "log (block size)"
     if ylabel is None:
         ylabel = "log (block maxima)" if dct_res["is_frechet"] else "block maxima"
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=173)
