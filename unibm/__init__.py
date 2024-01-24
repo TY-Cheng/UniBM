@@ -592,6 +592,7 @@ def viz_evi_reg(
     file_path: Path = None,
     fig_title: str = None,
     is_save: bool = False,
+    is_gaussian: bool = False,
     xlabel: str = "log (block size)",
     ylabel: str = None,
 ) -> None:
@@ -635,17 +636,6 @@ def viz_evi_reg(
     tmp_df["vec_emr_fit"] += _
     tmp_df["vec_emr"] += _
     #
-    tmp_df.plot(
-        ax=ax,
-        y=["vec_mpmr_fit", "vec_emr_fit"],
-        style=["-.", "-."],
-        label=[
-            f"mpmr_fit, slope={dct_res['slope_mpmr']:.4f}",
-            f"emr_fit, slope={dct_res['slope_emr']:.4f}",
-        ],
-        alpha=0.5,
-        color=["tab:cyan", "tab:red"],
-    )
     ax.scatter(
         x=tmp_df["vec_l_size"],
         y=tmp_df["vec_mpmr"],
@@ -670,23 +660,35 @@ def viz_evi_reg(
         color="tab:green",
         label="std.dev.",
     )
-    ax.vlines(
-        x=np.log([dct_res["size_min"], dct_res["size_max"]]),
-        ymin=np.min([tmp_df["vec_emr"].iloc[0], tmp_df["vec_sd"].min()]) - 0.1,
-        ymax=np.max([tmp_df["vec_emr_fit"].iloc[-1], tmp_df["vec_sd"].max()]) + 0.1,
-        colors="k",
-        linestyles=":",
-        lw=1.1,
-    )
-    if not dct_res["is_deming"]:
-        ax.hlines(
-            y=dct_res["sd_ref"],
-            xmin=tmp_df["vec_l_size"].iloc[0] - 0.1,
-            xmax=tmp_df["vec_l_size"].iloc[-1] + 0.1,
+    if not is_gaussian:
+        tmp_df.plot(
+            ax=ax,
+            y=["vec_mpmr_fit", "vec_emr_fit"],
+            style=["-.", "-."],
+            label=[
+                f"mpmr_fit, slope={dct_res['slope_mpmr']:.4f}",
+                f"emr_fit, slope={dct_res['slope_emr']:.4f}",
+            ],
+            alpha=0.5,
+            color=["tab:cyan", "tab:red"],
+        )
+        ax.vlines(
+            x=np.log([dct_res["size_min"], dct_res["size_max"]]),
+            ymin=np.min([tmp_df["vec_emr"].iloc[0], tmp_df["vec_sd"].min()]) - 0.1,
+            ymax=np.max([tmp_df["vec_emr_fit"].iloc[-1], tmp_df["vec_sd"].max()]) + 0.1,
             colors="k",
             linestyles=":",
-            lw=0.9,
+            lw=1.1,
         )
+        if not dct_res["is_deming"]:
+            ax.hlines(
+                y=dct_res["sd_ref"],
+                xmin=tmp_df["vec_l_size"].iloc[0] - 0.1,
+                xmax=tmp_df["vec_l_size"].iloc[-1] + 0.1,
+                colors="k",
+                linestyles=":",
+                lw=0.9,
+            )
     ax.set_xlabel(xlabel=xlabel)
     ax.set_ylabel(ylabel=ylabel)
     ax.set_title(fig_title)
@@ -694,6 +696,7 @@ def viz_evi_reg(
     ax.grid()
     fig.tight_layout()
     if is_save:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(fname=file_path)
         plt.close()
     pass
