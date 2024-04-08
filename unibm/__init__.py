@@ -39,14 +39,11 @@ def cdf_func_kernel(vec: np.array, is_scott: bool = True) -> callable:
     if is_scott:
         # * bandwidth by Scott 1992
         band_width = (
-            np.diff(np.nanquantile(a=vec, q=(0.25, 0.75), method="median_unbiased"))
-            / 1.349
+            np.diff(np.nanquantile(a=vec, q=(0.25, 0.75), method="median_unbiased")) / 1.349
         )
         band_width = 1.059 * min(np.nanstd(vec), band_width) * vec.size ** (-0.2)
     else:
-        band_width = (
-            np.nanstd(vec) * 0.6973425390765554 * (vec.size) ** (-0.1111111111111111)
-        )
+        band_width = np.nanstd(vec) * 0.6973425390765554 * (vec.size) ** (-0.1111111111111111)
 
     @np.vectorize
     def func_cdf(q: np.array) -> np.array:
@@ -94,10 +91,7 @@ def est_tail_dep_coeff(
         return 2 - 2 * np.exp(
             (
                 0.5
-                * (
-                    np.log(np.log(np.reciprocal(vec_u_1)))
-                    + np.log(np.log(np.reciprocal(vec_u_2)))
-                )
+                * (np.log(np.log(np.reciprocal(vec_u_1))) + np.log(np.log(np.reciprocal(vec_u_2))))
                 - np.log(2 * np.log(np.reciprocal(vec_u_max)))
             ).mean()
         )
@@ -152,18 +146,16 @@ def est_extremal_index_reciprocal(
         if num_step is None:
             num_step = int(min(128, np.log(size_stop) * 100))
         vec_size = np.unique(
-            (
-                np.geomspace(
-                    start=size_start, stop=size_stop, num=num_step, endpoint=False
-                )
-            ).astype(int)
+            (np.geomspace(start=size_start, stop=size_stop, num=num_step, endpoint=False)).astype(
+                int
+            )
         )
     else:
         if num_step == None:
             num_step = size_stop if size_stop < 5e3 else size_stop // 2
-        vec_size = np.arange(
-            start=size_start, stop=size_stop, step=size_stop // num_step
-        ).astype(int)
+        vec_size = np.arange(start=size_start, stop=size_stop, step=size_stop // num_step).astype(
+            int
+        )
 
     dct_res = {"vec_l_size": np.log(vec_size)}
 
@@ -215,6 +207,7 @@ def est_extremal_index_reciprocal(
 def viz_eir(
     dct_res: dict,
     file_path: Path = None,
+    dpi: int = 1200,
     fig_title: str = None,
     is_save: bool = False,
     xlabel: str = "log (block size)",
@@ -235,7 +228,7 @@ def viz_eir(
     :param ylabel: _description_, defaults to None
     :type ylabel: str, optional
     """
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=173)
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=dpi)
     tmp_df = pd.DataFrame(
         {
             k: dct_res[k]
@@ -250,45 +243,45 @@ def viz_eir(
             ]
         }
     )
-    tmp_df.plot(
-        ax=ax,
-        kind="scatter",
-        x="vec_l_size",
-        y="vec_eir_Northrop",
+    ax.scatter(
+        x=tmp_df["vec_l_size"],
+        y=tmp_df["vec_eir_Northrop"],
         label=f"eir_Northrop, {dct_res['eir_Northrop']:.4f}",
+        alpha=0.7,
         color="tab:cyan",
-        alpha=0.7,
-        s=3,
+        facecolors="none",
+        marker="^",
+        s=5,
     )
-    tmp_df.plot(
-        ax=ax,
-        kind="scatter",
-        x="vec_l_size",
-        y="vec_sd_Northrop",
+    ax.scatter(
+        x=tmp_df["vec_l_size"],
+        y=tmp_df["vec_sd_Northrop"],
         label="sd_Northrop",
+        alpha=0.7,
         color="tab:blue",
-        alpha=0.7,
-        s=2.5,
-    )
-    tmp_df.plot(
-        ax=ax,
-        kind="scatter",
-        x="vec_l_size",
-        y="vec_eir_BB",
-        label=f"eir_BB, {dct_res['eir_BB']:.4f}",
-        color="tab:red",
-        alpha=0.7,
+        facecolors="none",
+        marker="v",
         s=3,
     )
-    tmp_df.plot(
-        ax=ax,
-        kind="scatter",
-        x="vec_l_size",
-        y="vec_sd_BB",
-        label="sd_BB",
-        color="tab:purple",
+    ax.scatter(
+        x=tmp_df["vec_l_size"],
+        y=tmp_df["vec_eir_BB"],
+        label=f"eir_BB, {dct_res['eir_BB']:.4f}",
         alpha=0.7,
-        s=2.5,
+        color="tab:red",
+        facecolors="none",
+        marker="^",
+        s=5,
+    )
+    ax.scatter(
+        x=tmp_df["vec_l_size"],
+        y=tmp_df["vec_sd_BB"],
+        label="sd_BB",
+        alpha=0.7,
+        color="tab:purple",
+        facecolors="none",
+        marker="v",
+        s=3,
     )
     _ = tmp_df.columns.difference(["vec_l_size"])
     _min, _max = tmp_df[_].min().min(), tmp_df[_].max().max()
@@ -378,9 +371,7 @@ def est_extreme_value_index(
         if num_step is None:
             num_step = int(min(128, np.log(size_stop) * 100))
         vec_size = np.unique(
-            (
-                np.geomspace(start=1, stop=size_stop, num=num_step, endpoint=False)
-            ).astype(int)
+            (np.geomspace(start=1, stop=size_stop, num=num_step, endpoint=False)).astype(int)
         )
     else:
         if num_step == None:
@@ -400,10 +391,7 @@ def est_extreme_value_index(
         # ! size start from 1
         vec_i = np.arange(start=size, stop=N1, step=1)
         vec_pmf = size * np.exp(
-            loggamma(N1 - size)
-            - loggamma(N1)
-            + loggamma(vec_i)
-            - loggamma(vec_i - size + 1)
+            loggamma(N1 - size) - loggamma(N1) + loggamma(vec_i) - loggamma(vec_i - size + 1)
         )
         # those with larger value (or rank)
         vec_up = vec_x[(size - 1) :]
@@ -416,16 +404,13 @@ def est_extreme_value_index(
         vec_up = np.log1p(vec_x[(size - 1) :])
         # bandwidth by Scott 1992
         band_width = (
-            np.diff(np.quantile(a=vec_up, q=(0.25, 0.75), method="median_unbiased"))
-            / 1.349
+            np.diff(np.quantile(a=vec_up, q=(0.25, 0.75), method="median_unbiased")) / 1.349
         )
         band_width = 1.059 * min(vec_up.std(), band_width) * vec_up.size ** (-0.2)
         mode_x_0 = vec_up.mean()
         for _ in range(1000):
             mode_x_1 = mode_x_0
-            vec_kernel = np.exp(-np.square(vec_up - mode_x_1) / band_width).clip(
-                min=0, max=None
-            )
+            vec_kernel = np.exp(-np.square(vec_up - mode_x_1) / band_width).clip(min=0, max=None)
             mode_x_0 = ((vec_kernel * vec_up) @ vec_pmf) / (vec_kernel @ vec_pmf)
             if np.isclose(a=mode_x_0, b=mode_x_1):
                 break
@@ -489,10 +474,8 @@ def est_extreme_value_index(
             s_yy_emr - delta * s_xx_emr,
         )
         slope_mpmr, slope_emr = (
-            (ymdx_mpmr + np.sqrt(ymdx_mpmr**2 + 4 * delta * s_xy_mpmr**2))
-            / (2 * s_xy_mpmr),
-            (ymdx_emr + np.sqrt(ymdx_emr**2 + 4 * delta * s_xy_emr**2))
-            / (2 * s_xy_emr),
+            (ymdx_mpmr + np.sqrt(ymdx_mpmr**2 + 4 * delta * s_xy_mpmr**2)) / (2 * s_xy_mpmr),
+            (ymdx_emr + np.sqrt(ymdx_emr**2 + 4 * delta * s_xy_emr**2)) / (2 * s_xy_emr),
         )
         intercept_mpmr, intercept_emr = (
             ym_mpmr - slope_mpmr * xm_mpmr,
@@ -544,18 +527,16 @@ def est_extreme_value_index(
         )
         vec_hnum = digamma(vec_size + 1) + euler_gamma
         # mpmr
-        X = np.hstack(
-            (np.ones_like(vec_l_size)[:, np.newaxis], vec_l_size[:, np.newaxis])
-        )
+        X = np.hstack((np.ones_like(vec_l_size)[:, np.newaxis], vec_l_size[:, np.newaxis]))
         if X.size > 2:
             if is_geom:
                 mdl = OLS(endog=vec_mpmr, exog=X, hasconst=True).fit(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
             else:
-                mdl = WLS(
-                    endog=vec_mpmr, exog=X, weights=1 / vec_size, hasconst=True
-                ).fit(method="pinv", cov_type=cov_type, use_t=use_t)
+                mdl = WLS(endog=vec_mpmr, exog=X, weights=1 / vec_size, hasconst=True).fit(
+                    method="pinv", cov_type=cov_type, use_t=use_t
+                )
             intercept_mpmr, slope_mpmr = mdl.params
         else:
             intercept_mpmr, slope_mpmr = None, None
@@ -567,9 +548,9 @@ def est_extreme_value_index(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
             else:
-                mdl = WLS(
-                    endog=vec_emr, exog=X, weights=1 / (1 + vec_size), hasconst=True
-                ).fit(method="pinv", cov_type=cov_type, use_t=use_t)
+                mdl = WLS(endog=vec_emr, exog=X, weights=1 / (1 + vec_size), hasconst=True).fit(
+                    method="pinv", cov_type=cov_type, use_t=use_t
+                )
 
             intercept_emr, slope_emr = mdl.params
         else:
@@ -590,6 +571,7 @@ def est_extreme_value_index(
 def viz_evi_reg(
     dct_res: dict,
     file_path: Path = None,
+    dpi: int = 1200,
     fig_title: str = None,
     is_save: bool = False,
     is_gaussian: bool = False,
@@ -613,7 +595,7 @@ def viz_evi_reg(
     """
     if ylabel is None:
         ylabel = "log (block maxima)" if dct_res["is_frechet"] else "block maxima"
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=173)
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=dpi)
     tmp_df = pd.DataFrame(
         {
             k: dct_res[k]
@@ -630,47 +612,51 @@ def viz_evi_reg(
     )
     tmp_df["vec_mpmr_fit"] += _
     tmp_df["vec_mpmr"] += _
-    tmp_df["vec_emr_fit"] = (
-        tmp_df["vec_hnum"] * dct_res["slope_emr"] + dct_res["intercept_emr"]
-    )
+    tmp_df["vec_emr_fit"] = tmp_df["vec_hnum"] * dct_res["slope_emr"] + dct_res["intercept_emr"]
     tmp_df["vec_emr_fit"] += _
     tmp_df["vec_emr"] += _
     #
     ax.scatter(
         x=tmp_df["vec_l_size"],
         y=tmp_df["vec_mpmr"],
-        s=3,
+        label="mpmr_est",
         alpha=0.7,
         color="tab:blue",
-        label="mpmr_est",
+        facecolors="none",
+        marker="^",
+        s=5,
     )
     ax.scatter(
         x=tmp_df["vec_l_size"],
         y=tmp_df["vec_emr"],
-        s=3,
+        label="emr_est",
         alpha=0.7,
         color="tab:purple",
-        label="emr_est",
+        facecolors="none",
+        marker="v",
+        s=5,
     )
     ax.scatter(
         x=tmp_df["vec_l_size"],
         y=tmp_df["vec_sd"],
-        s=3,
+        label="std.dev.",
         alpha=0.7,
         color="tab:green",
-        label="std.dev.",
+        facecolors="none",
+        marker=".",
+        s=5,
     )
     if not is_gaussian:
         tmp_df.plot(
             ax=ax,
             y=["vec_mpmr_fit", "vec_emr_fit"],
-            style=["-.", "-."],
             label=[
                 f"mpmr_fit, slope={dct_res['slope_mpmr']:.4f}",
                 f"emr_fit, slope={dct_res['slope_emr']:.4f}",
             ],
             alpha=0.5,
             color=["tab:cyan", "tab:red"],
+            style=["--", "-."],
         )
         ax.vlines(
             x=np.log([dct_res["size_min"], dct_res["size_max"]]),

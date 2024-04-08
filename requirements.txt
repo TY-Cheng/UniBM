@@ -1,3 +1,5 @@
+
+ipykernel
 matplotlib
 numpy
 pandas

@@ -30,7 +30,7 @@ The scripts are licensed under the GNU Lesser General Public License Version 3 (
 
 ------
 
->  Copyright (C) 2024 Tuoyuan Cheng, Kan Chen
+>  Copyright (C) 2024- Tuoyuan Cheng, Kan Chen
 >
 > UniBM is free software: you can redistribute it and/or modify
 > it under the terms of the GNU Lesser General Public License as published by
