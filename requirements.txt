@@ -1,7 +1,0 @@
-
-ipykernel
-matplotlib
-numpy
-pandas
-scipy
-statsmodels

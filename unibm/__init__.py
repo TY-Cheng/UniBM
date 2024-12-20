@@ -12,8 +12,6 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with UniBM. If not, see <http://www.gnu.org/licenses/>.
-
-
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -39,11 +37,14 @@ def cdf_func_kernel(vec: np.array, is_scott: bool = True) -> callable:
     if is_scott:
         # * bandwidth by Scott 1992
         band_width = (
-            np.diff(np.nanquantile(a=vec, q=(0.25, 0.75), method="median_unbiased")) / 1.349
+            np.diff(np.nanquantile(a=vec, q=(0.25, 0.75), method="median_unbiased"))
+            / 1.349
         )
         band_width = 1.059 * min(np.nanstd(vec), band_width) * vec.size ** (-0.2)
     else:
-        band_width = np.nanstd(vec) * 0.6973425390765554 * (vec.size) ** (-0.1111111111111111)
+        band_width = (
+            np.nanstd(vec) * 0.6973425390765554 * (vec.size) ** (-0.1111111111111111)
+        )
 
     @np.vectorize
     def func_cdf(q: np.array) -> np.array:
@@ -91,7 +92,10 @@ def est_tail_dep_coeff(
         return 2 - 2 * np.exp(
             (
                 0.5
-                * (np.log(np.log(np.reciprocal(vec_u_1))) + np.log(np.log(np.reciprocal(vec_u_2))))
+                * (
+                    np.log(np.log(np.reciprocal(vec_u_1)))
+                    + np.log(np.log(np.reciprocal(vec_u_2)))
+                )
                 - np.log(2 * np.log(np.reciprocal(vec_u_max)))
             ).mean()
         )
@@ -146,16 +150,18 @@ def est_extremal_index_reciprocal(
         if num_step is None:
             num_step = int(min(128, np.log(size_stop) * 100))
         vec_size = np.unique(
-            (np.geomspace(start=size_start, stop=size_stop, num=num_step, endpoint=False)).astype(
-                int
-            )
+            (
+                np.geomspace(
+                    start=size_start, stop=size_stop, num=num_step, endpoint=False
+                )
+            ).astype(int)
         )
     else:
         if num_step == None:
             num_step = size_stop if size_stop < 5e3 else size_stop // 2
-        vec_size = np.arange(start=size_start, stop=size_stop, step=size_stop // num_step).astype(
-            int
-        )
+        vec_size = np.arange(
+            start=size_start, stop=size_stop, step=size_stop // num_step
+        ).astype(int)
 
     dct_res = {"vec_l_size": np.log(vec_size)}
 
@@ -315,9 +321,10 @@ def viz_eir(
 
 def est_extreme_value_index(
     vec: np.array,
-    delta: float = 0.17,
+    delta: float = 1e-1,
     num_step: int = None,
     is_frechet: bool = True,
+    is_weighted: bool = True,
     is_geom: bool = None,
     is_deming: bool = False,
     is_retn_vec: bool = False,
@@ -363,6 +370,9 @@ def est_extreme_value_index(
     # Oorschot, J., Segers, J. and Zhou, C., 2023. Tail inference using extreme U-statistics. Electronic Journal of Statistics, 17(1), pp.1113-1159.
     N1 = vec_x.size + 1
     size_stop = int(np.exp(np.log(N1) * 0.8646647167633873))
+    if not is_weighted:
+        is_deming = False
+        is_geom = False
     if is_deming:
         is_geom = True
     if is_geom is None:
@@ -371,14 +381,17 @@ def est_extreme_value_index(
         if num_step is None:
             num_step = int(min(128, np.log(size_stop) * 100))
         vec_size = np.unique(
-            (np.geomspace(start=1, stop=size_stop, num=num_step, endpoint=False)).astype(int)
+            (
+                np.geomspace(start=1, stop=size_stop, num=num_step, endpoint=False)
+            ).astype(int)
         )
     else:
-        if num_step == None:
+        if num_step is None:
             num_step = size_stop if size_stop < 5e3 else size_stop // 2
         vec_size = np.arange(start=1, stop=size_stop, step=size_stop // num_step)
 
     dct_res = {}
+    dct_res["is_weighted"] = is_weighted
     dct_res["is_frechet"] = is_frechet
     dct_res["is_geom"] = is_geom
     dct_res["is_deming"] = is_deming
@@ -391,7 +404,10 @@ def est_extreme_value_index(
         # ! size start from 1
         vec_i = np.arange(start=size, stop=N1, step=1)
         vec_pmf = size * np.exp(
-            loggamma(N1 - size) - loggamma(N1) + loggamma(vec_i) - loggamma(vec_i - size + 1)
+            loggamma(N1 - size)
+            - loggamma(N1)
+            + loggamma(vec_i)
+            - loggamma(vec_i - size + 1)
         )
         # those with larger value (or rank)
         vec_up = vec_x[(size - 1) :]
@@ -404,13 +420,16 @@ def est_extreme_value_index(
         vec_up = np.log1p(vec_x[(size - 1) :])
         # bandwidth by Scott 1992
         band_width = (
-            np.diff(np.quantile(a=vec_up, q=(0.25, 0.75), method="median_unbiased")) / 1.349
+            np.diff(np.quantile(a=vec_up, q=(0.25, 0.75), method="median_unbiased"))
+            / 1.349
         )
         band_width = 1.059 * min(vec_up.std(), band_width) * vec_up.size ** (-0.2)
         mode_x_0 = vec_up.mean()
         for _ in range(1000):
             mode_x_1 = mode_x_0
-            vec_kernel = np.exp(-np.square(vec_up - mode_x_1) / band_width).clip(min=0, max=None)
+            vec_kernel = np.exp(-np.square(vec_up - mode_x_1) / band_width).clip(
+                min=0, max=None
+            )
             mode_x_0 = ((vec_kernel * vec_up) @ vec_pmf) / (vec_kernel @ vec_pmf)
             if np.isclose(a=mode_x_0, b=mode_x_1):
                 break
@@ -474,8 +493,10 @@ def est_extreme_value_index(
             s_yy_emr - delta * s_xx_emr,
         )
         slope_mpmr, slope_emr = (
-            (ymdx_mpmr + np.sqrt(ymdx_mpmr**2 + 4 * delta * s_xy_mpmr**2)) / (2 * s_xy_mpmr),
-            (ymdx_emr + np.sqrt(ymdx_emr**2 + 4 * delta * s_xy_emr**2)) / (2 * s_xy_emr),
+            (ymdx_mpmr + np.sqrt(ymdx_mpmr**2 + 4 * delta * s_xy_mpmr**2))
+            / (2 * s_xy_mpmr),
+            (ymdx_emr + np.sqrt(ymdx_emr**2 + 4 * delta * s_xy_emr**2))
+            / (2 * s_xy_emr),
         )
         intercept_mpmr, intercept_emr = (
             ym_mpmr - slope_mpmr * xm_mpmr,
@@ -527,14 +548,20 @@ def est_extreme_value_index(
         )
         vec_hnum = digamma(vec_size + 1) + euler_gamma
         # mpmr
-        X = np.hstack((np.ones_like(vec_l_size)[:, np.newaxis], vec_l_size[:, np.newaxis]))
+        X = np.hstack(
+            (np.ones_like(vec_l_size)[:, np.newaxis], vec_l_size[:, np.newaxis])
+        )
         if X.size > 2:
             if is_geom:
                 mdl = OLS(endog=vec_mpmr, exog=X, hasconst=True).fit(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
+            elif is_weighted:
+                mdl = WLS(
+                    endog=vec_mpmr, exog=X, weights=1 / vec_size, hasconst=True
+                ).fit(method="pinv", cov_type=cov_type, use_t=use_t)
             else:
-                mdl = WLS(endog=vec_mpmr, exog=X, weights=1 / vec_size, hasconst=True).fit(
+                mdl = OLS(endog=vec_mpmr, exog=X, hasconst=True).fit(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
             intercept_mpmr, slope_mpmr = mdl.params
@@ -547,11 +574,14 @@ def est_extreme_value_index(
                 mdl = OLS(endog=vec_emr, exog=X, hasconst=True).fit(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
+            elif is_weighted:
+                mdl = WLS(
+                    endog=vec_emr, exog=X, weights=1 / (1 + vec_size), hasconst=True
+                ).fit(method="pinv", cov_type=cov_type, use_t=use_t)
             else:
-                mdl = WLS(endog=vec_emr, exog=X, weights=1 / (1 + vec_size), hasconst=True).fit(
+                mdl = OLS(endog=vec_emr, exog=X, hasconst=True).fit(
                     method="pinv", cov_type=cov_type, use_t=use_t
                 )
-
             intercept_emr, slope_emr = mdl.params
         else:
             intercept_emr, slope_emr = None, None
@@ -560,11 +590,12 @@ def est_extreme_value_index(
         dct_res["slope_emr"] = slope_emr
         dct_res["intercept_mpmr"] = intercept_mpmr
         dct_res["intercept_emr"] = intercept_emr
-        dct_res["mpmr_min"] = vec_mpmr[0]
-        dct_res["emr_min"] = vec_emr[0]
-        dct_res["size_min"] = vec_size[0]
-        dct_res["size_max"] = vec_size[-1]
+        dct_res["mpmr_min"] = vec_mpmr[0] if vec_mpmr.size else None
+        dct_res["emr_min"] = vec_emr[0] if vec_emr.size else None
+        dct_res["size_min"] = vec_size[0] if vec_size.size else None
+        dct_res["size_max"] = vec_size[-1] if vec_size.size else None
         dct_res["sd_ref"] = sd_ref
+        dct_res["delta"] = delta
         return dct_res
 
 
@@ -612,7 +643,9 @@ def viz_evi_reg(
     )
     tmp_df["vec_mpmr_fit"] += _
     tmp_df["vec_mpmr"] += _
-    tmp_df["vec_emr_fit"] = tmp_df["vec_hnum"] * dct_res["slope_emr"] + dct_res["intercept_emr"]
+    tmp_df["vec_emr_fit"] = (
+        tmp_df["vec_hnum"] * dct_res["slope_emr"] + dct_res["intercept_emr"]
+    )
     tmp_df["vec_emr_fit"] += _
     tmp_df["vec_emr"] += _
     #
