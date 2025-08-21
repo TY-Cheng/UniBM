@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "unibm"
+version = "0.0.0"
+requires-python = ">=3.11"
+authors = [{ name = "Tuoyuan Cheng", email = "tuoyuan.cheng@nus.edu.sg" }]
+readme = "README.md"
+dependencies = ["numpy>=2", "scipy", "statsmodels"]
+
+
+[dependency-groups]
+dev = [
+    "coverage",
+    "flake8",
+    "ipykernel",
+    "matplotlib",
+    "missingno",
+    "pandas",
+    "python-dotenv",
+    "requests",
+    "ruff",
+]
+
+[project.optional-dependencies]
+cpu = ["torch>=2"]
+cu126 = ["torch>=2"]
+cu128 = ["torch>=2"]
+
+[tool.uv]
+managed = true
+default-groups = ["dev"]
+conflicts = [[{ extra = "cpu" }, { extra = "cu126" }, { extra = "cu128" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "torch-cpu", extra = "cpu" },
+    { index = "torch-cu126", extra = "cu126" },
+    { index = "torch-cu128", extra = "cu128" },
+]
+
+[[tool.uv.index]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "torch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "torch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = 99
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 99
+max-line-length = 99
+
+[tool.docformatter]
+wrap-summaries = 99
+wrap-descriptions = 99
+blank-lines-around-summary = true
+in-place = true
+make-summary-multi-line = true
+pre-summary-space = true
+recursive = true
+skip-ignore = false

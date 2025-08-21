@@ -1,17 +1,3 @@
-# Copyright (C) 2024- Tuoyuan Cheng, Kan Chen
-#
-# UniBM is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# UniBM is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with UniBM. If not, see <http://www.gnu.org/licenses/>.
 import pickle
 from multiprocessing import Pool
 from pathlib import Path
@@ -21,6 +7,7 @@ import numpy as np
 from . import est_EVI_benchmark
 
 file_out = Path("./out/dct_res_expon_ar1.pkl")
+file_out.parent.mkdir(parents=True, exist_ok=True)
 
 
 def generate_parameters():

@@ -1,14 +1,41 @@
-## README
+# UniBM
 
-The Python scripts and the Jupyter Notebook (`vignette.ipynb`) in this repository are developed for extreme value statistical analysis.
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2506.14556-b31b1b.svg)](https://arxiv.org/abs/2506.14556)
 
-Users are encouraged to refer to the accompanying paper for detailed method explanations and applications of these functions.
+`UniBM` is a Python toolkit for extreme risk modeling and statistical analysis, with a focus on methods like sub-sampling block maxima as exampled in [`vignette.ipynb`](./vignette.ipynb).
+The functions in this repository are designed to accompany the methods detailed in our research paper. For in-depth explanations and applications, users are strongly encouraged to consult the paper.
 
 All bug reports and feature requests are welcomed.
 
-The scripts are licensed under the GNU Lesser General Public License Version 3 (LGPL-3.0).
+The scripts are licensed under the [MIT License](./LICENSE).
 
-(# TODO: add proper paper citation)
+## Citation
+
+If you use `unibm` in your work, please cite:
+
+> Cheng, T., Peng, X., Choiruddin, A., He, X., & Chen, K. (2025). Environmental extreme risk modeling via sub-sampling block maxima. arXiv preprint arXiv:2506.14556.
+
+```latex
+@article{cheng2025environmental,
+title={Environmental extreme risk modeling via sub-sampling block maxima},
+author={Cheng, Tuoyuan and Peng, Xiao and Choiruddin, Achmad and He, Xiaogang and Chen, Kan},
+journal={arXiv preprint arXiv:2506.14556},
+year={2025}
+}
+```
+
+## (Recommended) [uv](https://docs.astral.sh/uv/getting-started/) for Dependency Management and Packaging
+
+After `git clone https://github.com/TY-Cheng/UniBM.git`, `cd` into the project root where [`pyproject.toml`](./pyproject.toml) exists,
+
+```bash
+# From inside the project root folder
+# Sync dependencies with CPU support (default)
+uv sync --extra cpu
+```
+
+## Functions
 
 `unibm`
 
@@ -24,23 +51,6 @@ The scripts are licensed under the GNU Lesser General Public License Version 3 (
 >
 > `viz_evi_reg` chart results from `est_extreme_value_index(is_retn_vec=True)`
 
+## License
 
-
-
-
-------
-
->  Copyright (C) 2024- Tuoyuan Cheng, Kan Chen
->
-> UniBM is free software: you can redistribute it and/or modify
-> it under the terms of the GNU Lesser General Public License as published by
-> the Free Software Foundation, either version 3 of the License, or
-> (at your option) any later version.
->
-> UniBM is distributed in the hope that it will be useful,
-> but WITHOUT ANY WARRANTY; without even the implied warranty of
-> MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-> GNU Lesser General Public License for more details.
->
-> You should have received a copy of the GNU Lesser General Public License
-> along with UniBM. If not, see <http://www.gnu.org/licenses/>.
+This project is released under the [MIT License](./LICENSE) (© 2024- Tuoyuan Cheng, Kan Chen).

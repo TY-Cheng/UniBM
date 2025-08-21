@@ -1,17 +1,3 @@
-# Copyright (C) 2024- Tuoyuan Cheng, Kan Chen
-#
-# UniBM is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# UniBM is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with UniBM. If not, see <http://www.gnu.org/licenses/>.
 import torch
 from scipy.stats import expon
 
@@ -46,9 +32,7 @@ def est_extreme_value_index_hill(vec: torch.tensor, k: int = None) -> float:
     return (torch.log(vec[-k:] / vec[-k - 1]).sum() / k).item()
 
 
-def est_extreme_value_index_schultze_steinebach(
-    vec: torch.tensor, k: int = None
-) -> float:
+def est_extreme_value_index_schultze_steinebach(vec: torch.tensor, k: int = None) -> float:
     # ! assuming vec is preprocessed (via pot or bm, and sorted!)
     if k is None:
         k = len(vec) // 20
@@ -66,9 +50,7 @@ def est_extreme_value_index_smith(vec: torch.tensor, q: float = None) -> float:
 
 
 def est_extreme_value_index_meerschaert_scheffler(vec: torch.tensor) -> float:
-    return (
-        (vec - vec.mean()).square().sum().log() / torch.as_tensor(vec.size()).log() / 2
-    ).item()
+    return ((vec - vec.mean()).square().sum().log() / torch.as_tensor(vec.size()).log() / 2).item()
 
 
 def est_EVI_benchmark(arg_in: tuple) -> dict:
