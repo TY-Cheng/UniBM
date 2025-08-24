@@ -1,13 +1,12 @@
+import logging
 import pickle
+import time
 from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
 
 from . import est_EVI_benchmark
-
-file_out = Path("./out/dct_res_expon_ar1.pkl")
-file_out.parent.mkdir(parents=True, exist_ok=True)
 
 
 def generate_parameters():
@@ -38,4 +37,16 @@ def main(file: str):
 
 
 if __name__ == "__main__":
+    t0 = time.perf_counter()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_out = Path("./out/dct_res_expon_ar1.pkl")
+    file_out.parent.mkdir(parents=True, exist_ok=True)
+    logging.info("Starting benchmark...")
     main(file=file_out)
+    logging.info("Benchmark completed in %.2fs", time.perf_counter() - t0)
+    logging.info("Results saved to %s", file_out)
+    logging.shutdown()
