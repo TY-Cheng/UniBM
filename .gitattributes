@@ -1,0 +1,27 @@
+# Default: normalise line endings to LF on checkout across all platforms.
+* text=auto eol=lf
+
+# Notebook – explicit LF so diffs stay consistent across OS.
+scripts/vignette.ipynb text eol=lf
+
+# Binary data files – never touch line endings, never attempt text diff.
+*.pkl     binary
+*.pkl.gz  binary
+*.npz     binary
+*.csv.gz  binary
+
+# Images
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.svg  text eol=lf
+
+# Archives
+*.zip  binary
+*.gz   binary
+*.tar  binary
+
+# PDF
+*.pdf  binary
