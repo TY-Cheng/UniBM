@@ -38,10 +38,20 @@ class PreparedSeries:
 
 def read_ghcn_station_csv(path: Path | str) -> pd.DataFrame:
     """Read a by-station GHCN CSV or CSV.GZ file."""
-    df = pd.read_csv(path, header=None, names=GHCN_COLUMNS, low_memory=False)
+    df = pd.read_csv(
+        path,
+        header=None,
+        names=GHCN_COLUMNS,
+        usecols=["station_id", "date", "element", "value", "qflag"],
+        dtype={
+            "station_id": "string",
+            "element": "category",
+            "qflag": "string",
+        },
+        low_memory=False,
+    )
     df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d")
-    for col in ["mflag", "qflag", "sflag", "obstime"]:
-        df[col] = df[col].replace({"": np.nan})
+    df["qflag"] = df["qflag"].replace({"": np.nan})
     return df
 
 
