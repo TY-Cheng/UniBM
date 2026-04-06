@@ -1,6 +1,6 @@
 # UniBM
 
-UniBM packages reusable statistical code for block-maxima inference under serial dependence.
+UniBM packages reusable statistical code for block-maxima inference under serial dependence, with benchmark and application workflows for both the extreme value index (`xi`) and the extremal index (`theta`).
 
 ## Getting Started
 
@@ -42,11 +42,55 @@ uv run python scripts/workflows/ei_report.py
 ### Run the application workflow
 
 ```bash
+uv run python scripts/workflows/freeze_usgs_station_selection.py
 uv run python scripts/workflows/application.py
 ```
 
-This materializes the application CSV outputs and manuscript-facing figures. If
-the required GHCN raw files are missing locally, the workflow downloads them.
+The application package is `SERRA`-oriented and currently materializes six
+series across three environmental-risk layers:
+
+- Houston wet-season precipitation
+- Phoenix hot-dry severity (secondary compound-hazard case)
+- Texas streamflow
+- Florida streamflow
+- Texas NFIP daily building payouts
+- Florida NFIP daily building payouts
+
+`freeze_usgs_station_selection.py` screens a curated Texas/Florida gauge pool and
+freezes one flagship USGS site per state into
+`data/metadata/application/usgs_frozen_sites.json`. The main application
+workflow then downloads any missing raw inputs and writes manuscript-facing CSVs
+and figures.
+
+Provider-specific notes:
+
+- `GHCN-Daily` is used for Houston and Phoenix.
+- `USGS daily discharge` is used for Texas and Florida streamflow.
+- `OpenFEMA NFIP claims` is used for Texas and Florida impact series.
+- NFIP uses `positive-payout-day` totals for EVI and `zero-filled daily` totals
+  for EI so claim-wave timing is preserved.
+
+If stale one-day USGS extracts are present locally, the workflow automatically
+refreshes them before fitting.
+
+The main application outputs are written to `out/applications/`:
+
+- `application_series_registry.csv`
+- `application_screening.csv`
+- `application_summary.csv`
+- `application_return_levels.csv`
+- `application_methods.csv`
+- `application_ei_methods.csv`
+- `application_usgs_site_screening.csv`
+
+Manuscript-facing application figures are written to
+`UniBM_manuscript/Figure/`, including:
+
+- `application_ts_<stem>.pdf`
+- `application_evi_<stem>.pdf`
+- `application_ei_<stem>.pdf`
+- `application_rl_<stem>.pdf`
+- `application_overview.pdf`
 
 ### Rebuild the vignette notebook
 
@@ -59,4 +103,6 @@ uv run python scripts/rebuild_vignette.py
 - `scripts/unibm/` contains the reusable statistical core.
 - `scripts/workflows/` contains benchmark, manuscript, and application pipelines.
 - `scripts/data_prep/` contains application-specific preprocessing helpers.
+- `data/metadata/application/` contains frozen USGS site selections and the CPI
+  deflator table used by the NFIP workflow.
 - `scripts/rebuild_vignette.py` regenerates `scripts/vignette.ipynb`.

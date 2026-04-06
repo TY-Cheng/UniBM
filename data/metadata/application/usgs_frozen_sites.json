@@ -1,0 +1,14 @@
+{
+  "TX": {
+    "site_no": "08066500",
+    "station_name": "Trinity River at Romayor, TX",
+    "state_code": "TX",
+    "screening_source": "default_application_metadata"
+  },
+  "FL": {
+    "site_no": "02366500",
+    "station_name": "Choctawhatchee River near Bruce, FL",
+    "state_code": "FL",
+    "screening_source": "default_application_metadata"
+  }
+}

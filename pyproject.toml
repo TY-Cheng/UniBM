@@ -14,6 +14,8 @@ keywords = [
     "block maxima",
     "environmental extremes",
     "extreme value theory",
+    "extremal index",
+    "heavy tails",
     "return levels",
     "serial dependence",
     "sliding blocks",
@@ -26,7 +28,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
 ]
-dependencies = ["matplotlib>=3.8", "numpy>=2", "pandas>=2", "scipy>=1.13"]
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=2",
+    "pandas>=2",
+    "python-dotenv",
+    "scipy>=1.13",
+]
 
 [project.urls]
 Repository = "https://github.com/TY-Cheng/UniBM"
@@ -50,6 +58,8 @@ packages = ["scripts/unibm"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/LICENSE",
+    "/README.md",
+    "/data/metadata/application",
     "/pyproject.toml",
     "/scripts/config.py",
     "/scripts/data_prep",
@@ -57,6 +67,7 @@ include = [
     "/scripts/unibm",
     "/scripts/vignette.ipynb",
     "/scripts/workflows",
+    "/tests",
 ]
 
 [tool.uv]

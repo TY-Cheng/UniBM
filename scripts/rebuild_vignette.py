@@ -49,9 +49,9 @@ def build_notebook() -> dict:
             The notebook mirrors the revised manuscript:
             1. synthetic benchmark evidence;
             2. dataset screening;
-            3. Houston wet-season precipitation as the flagship application;
-            4. Phoenix hot-dry severity as a modern climate-risk secondary application;
-            5. one appendix-style legacy diagnostic retained outside the main paper narrative.
+            3. Houston precipitation plus Texas/Florida streamflow as the physical-hazard applications;
+            4. Texas/Florida NFIP building payouts as the hazard-to-impact applications;
+            5. Phoenix hot-dry severity as a secondary compound-hazard case.
             """
         ),
         md_cell(
@@ -121,9 +121,13 @@ def build_notebook() -> dict:
             """
             REBUILD_OUTPUTS = False
             REQUIRED_OUTPUTS = [
+                OUT / "application_series_registry.csv",
                 OUT / "application_screening.csv",
                 OUT / "application_summary.csv",
+                OUT / "application_return_levels.csv",
                 OUT / "application_methods.csv",
+                OUT / "application_ei_methods.csv",
+                OUT / "application_usgs_site_screening.csv",
                 BENCH / "summary.csv",
                 BENCH / "external_summary.csv",
                 BENCH / "ei_summary.csv",

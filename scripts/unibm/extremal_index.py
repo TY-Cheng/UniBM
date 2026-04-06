@@ -179,6 +179,17 @@ def _finite_positive_series(vec: np.ndarray | list[float]) -> np.ndarray:
     )
 
 
+def _finite_nonnegative_series(vec: np.ndarray | list[float]) -> np.ndarray:
+    """Return the non-negative finite series used by application-side EI fits."""
+    values = np.asarray(vec, dtype=float).reshape(-1)
+    finite = values[np.isfinite(values) & (values >= 0)]
+    if finite.size < 32:
+        raise ValueError(
+            "extremal-index benchmark requires at least 32 finite non-negative observations."
+        )
+    return finite
+
+
 def _central_wald_interval(
     center: float,
     standard_error: float,
@@ -388,9 +399,10 @@ def prepare_ei_bundle(
     *,
     block_sizes: np.ndarray | None = None,
     threshold_quantiles: tuple[float, ...] = (0.90, 0.95),
+    allow_zeros: bool = False,
 ) -> EiPreparedBundle:
     """Build all reusable EI benchmark ingredients for one replicate."""
-    values = _finite_positive_series(vec)
+    values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
     if block_sizes is None:
         block_sizes = generate_block_sizes(values.size)
     block_sizes = np.asarray(block_sizes, dtype=int)
@@ -411,6 +423,7 @@ def bootstrap_bm_ei_path_draws(
     bootstrap_samples: np.ndarray,
     *,
     block_sizes: np.ndarray,
+    allow_zeros: bool = False,
 ) -> dict[tuple[str, bool], np.ndarray]:
     """Transform one raw bootstrap bank into all four BM-EI z-path draw matrices.
 
@@ -428,7 +441,11 @@ def bootstrap_bm_ei_path_draws(
     }
     for rep, sample in enumerate(samples):
         try:
-            sample_values = _finite_positive_series(sample)
+            sample_values = (
+                _finite_nonnegative_series(sample)
+                if allow_zeros
+                else _finite_positive_series(sample)
+            )
             sample_paths = _build_bm_paths_from_values(sample_values, block_sizes)
         except ValueError:
             continue
@@ -445,6 +462,7 @@ def bootstrap_bm_ei_path(
     block_sizes: np.ndarray,
     reps: int,
     random_state: int,
+    allow_zeros: bool = False,
 ) -> dict[str, np.ndarray | None]:
     """Bootstrap the transformed BM-EI path on the full block-size grid.
 
@@ -453,7 +471,7 @@ def bootstrap_bm_ei_path(
     FGLS from discarding a bootstrap draw just because some unused large block
     size became non-finite.
     """
-    values = _finite_positive_series(vec)
+    values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
     samples = draw_circular_block_bootstrap_samples(
         values,
         reps=reps,
@@ -462,6 +480,7 @@ def bootstrap_bm_ei_path(
     z_draws = bootstrap_bm_ei_path_draws(
         samples,
         block_sizes=np.asarray(block_sizes, dtype=int),
+        allow_zeros=allow_zeros,
     )[(base_path, sliding)]
     return {
         "block_sizes": np.asarray(block_sizes, dtype=int),

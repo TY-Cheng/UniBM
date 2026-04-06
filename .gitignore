@@ -5,6 +5,15 @@
 /doc/
 /out/
 /data/
+!/data/
+/data/*
+!/data/metadata/
+/data/metadata/*
+!/data/metadata/application/
+/data/metadata/application/*
+!/data/metadata/application/cpi_u_calendar_2025_base.csv
+!/data/metadata/application/usgs_candidate_sites.json
+!/data/metadata/application/usgs_frozen_sites.json
 scratch*
 *.pkl
 *.csv.gz

@@ -11,11 +11,14 @@ The workflow package is intentionally small:
 - ``benchmark_design.py`` defines the simulation and method grids;
 - ``benchmark_common.py`` provides shared scoring and table helpers;
 - ``application.py`` is the runnable application entrypoint;
+- ``application_metadata.py`` creates default metadata assets when local copies are missing;
+- ``freeze_usgs_station_selection.py`` freezes the Texas/Florida USGS application sites;
 - ``application_screening.py`` contains application-side screening helpers.
 """
 
 __all__ = [
     "application",
+    "application_metadata",
     "application_screening",
     "benchmark_common",
     "benchmark_design",
@@ -25,4 +28,5 @@ __all__ = [
     "evi_benchmark",
     "evi_benchmark_external",
     "evi_report",
+    "freeze_usgs_station_selection",
 ]
