@@ -470,24 +470,88 @@ def bootstrap_bm_ei_path(
     }
 
 
+EI_DEFAULT_COVARIANCE_SHRINKAGE = 0.35
+
+
+def _regularize_ei_covariance(
+    covariance: np.ndarray,
+    *,
+    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+) -> np.ndarray:
+    """Shrink and ridge-regularize an EI bootstrap covariance matrix."""
+    cov = np.asarray(covariance, dtype=float).copy()
+    shrinkage = float(np.clip(covariance_shrinkage, 0.0, 1.0))
+    if shrinkage > 0:
+        diagonal = np.diag(np.diag(cov))
+        cov = (1.0 - shrinkage) * cov + shrinkage * diagonal
+    scale = np.trace(cov) / max(cov.shape[0], 1)
+    ridge = max(abs(float(scale)) * 1e-8, 1e-12)
+    return cov + np.eye(cov.shape[0]) * ridge
+
+
+def _fit_pooled_z_model(
+    z_values: np.ndarray,
+    *,
+    covariance: np.ndarray | None = None,
+    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+) -> dict[str, float | np.ndarray]:
+    """Fit the pooled intercept-only model on the z-scale."""
+    z = np.asarray(z_values, dtype=float)
+    X = np.ones((z.size, 1), dtype=float)
+
+    if covariance is not None and covariance.shape == (z.size, z.size):
+        regularized = _regularize_ei_covariance(
+            covariance,
+            covariance_shrinkage=covariance_shrinkage,
+        )
+        inv_cov = np.linalg.pinv(regularized)
+        normal_matrix = X.T @ inv_cov @ X
+        beta = np.linalg.pinv(normal_matrix) @ (X.T @ inv_cov @ z)
+        cov_beta = np.linalg.pinv(normal_matrix)
+        fitted = X @ beta
+        resid = z - fitted
+        objective = float(resid @ inv_cov @ resid)
+    else:
+        normal_matrix = X.T @ X
+        beta, *_ = np.linalg.lstsq(X, z, rcond=None)
+        fitted = X @ beta
+        resid = z - fitted
+        objective = float(resid @ resid)
+        dof = max(z.size - X.shape[1], 1)
+        sigma2 = objective / float(dof) if z.size > X.shape[1] else 0.0
+        cov_beta = sigma2 * np.linalg.pinv(normal_matrix)
+    try:
+        condition_number = float(np.linalg.cond(normal_matrix))
+    except np.linalg.LinAlgError:
+        condition_number = float("inf")
+
+    result: dict[str, float | np.ndarray] = {
+        "intercept": float(beta[0]),
+        "standard_error": float(np.sqrt(max(float(cov_beta[0, 0]), 0.0))),
+        "objective": objective,
+        "condition_number": condition_number,
+        "fitted": fitted,
+        "cov_beta": cov_beta,
+    }
+    return result
+
+
 def _pooled_z_fit(
     z_values: np.ndarray,
     *,
     covariance: np.ndarray | None = None,
-) -> tuple[float, float]:
-    """Return the intercept-only pooled estimate and its SE on the z-scale."""
+    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+) -> tuple[float, float, str]:
+    """Return the pooled estimate, its SE, and the fit variant."""
     z = np.asarray(z_values, dtype=float)
-    if covariance is not None and covariance.shape == (z.size, z.size):
-        inv_cov = np.linalg.pinv(covariance)
-        ones = np.ones(z.size, dtype=float)
-        denom = float(ones @ inv_cov @ ones)
-        if denom > 0 and np.isfinite(denom):
-            z_hat = float((ones @ inv_cov @ z) / denom)
-            se = float(np.sqrt(1.0 / denom))
-            return z_hat, se
-    z_hat = float(np.mean(z))
-    se = float(np.std(z, ddof=1) / np.sqrt(max(z.size, 1))) if z.size >= 2 else 0.0
-    return z_hat, se
+    use_gls = covariance is not None and covariance.shape == (z.size, z.size)
+    model = _fit_pooled_z_model(
+        z,
+        covariance=covariance if use_gls else None,
+        covariance_shrinkage=covariance_shrinkage,
+    )
+    variant = "bootstrap_cov" if use_gls else "ols"
+    return float(model["intercept"]), float(model["standard_error"]), variant
 
 
 def _build_bm_estimate(
@@ -511,7 +575,7 @@ def _build_bm_estimate(
         ):
             covariance = raw_cov
             used_gls = True
-    z_hat, se = _pooled_z_fit(
+    z_hat, se, ci_variant = _pooled_z_fit(
         selected_z,
         covariance=covariance if regression == "FGLS" else None,
     )
@@ -519,9 +583,7 @@ def _build_bm_estimate(
     # approximation respects the positive reciprocal-EI geometry and the final
     # interval can be mapped back monotonically to (0, 1].
     theta_hat = float(np.exp(-z_hat))
-    if regression == "FGLS":
-        ci_variant = "bootstrap_cov" if used_gls else "ols_fallback_no_cov"
-    else:
+    if regression == "FGLS" and not used_gls:
         ci_variant = "ols"
     return ExtremalIndexEstimate(
         method=method,
@@ -684,8 +746,9 @@ def estimate_pooled_bm_ei(
 ) -> ExtremalIndexEstimate:
     """Estimate theta by pooling the BM reciprocal-EI path over a stable window."""
     path = bundle.paths[(base_path, sliding)]
+    method = f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}"
     return _build_bm_estimate(
-        f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}",
+        method,
         path,
         regression=regression,
         bootstrap_result=bootstrap_result,

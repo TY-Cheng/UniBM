@@ -40,6 +40,8 @@ from unibm.external import (
 )
 
 from .benchmark_design import (
+    _atomic_savez,
+    _try_load_npz,
     BENCHMARK_CACHE_VERSION,
     COMMON_BOOTSTRAP_REPS,
     FAMILY_LABELS,
@@ -47,6 +49,8 @@ from .benchmark_design import (
     METHOD_LABELS,
     SimulationConfig,
     TARGET_METHODS,
+    UNIVERSAL_BENCHMARK_SET,
+    family_label,
     default_simulation_configs,
     load_or_draw_raw_bootstrap_samples,
     load_or_simulate_series_bank,
@@ -68,13 +72,16 @@ from .benchmark_common import (
 )
 
 
-EXTERNAL_METHOD_ORDER = [
+PROPOSED_EVI_METHODS = [
     "sliding_median_fgls",
+]
+EXTERNAL_BASELINE_METHODS = [
     "hill_raw",
     "max_spectrum_raw",
     "pickands_raw",
     "dedh_moment_raw",
 ]
+EXTERNAL_METHOD_ORDER = [*PROPOSED_EVI_METHODS, *EXTERNAL_BASELINE_METHODS]
 TARGET_PLUS_EXTERNAL_METHODS = [
     *TARGET_METHODS,
     "hill_raw",
@@ -121,6 +128,31 @@ EXTERNAL_ESTIMATORS = {
     "dedh_moment_raw": estimate_dedh_moment_evi,
 }
 
+_EXTERNAL_TUNING_AXES = {
+    "hill_raw": "k",
+    "pickands_raw": "k",
+    "dedh_moment_raw": "k",
+    "max_spectrum_raw": "scale_start",
+}
+_EVI_METRIC_Y_UPPER_STEPS = {
+    "ape": (1.05, 1.25, 1.5, 2.0, 3.0, 5.0),
+    "interval_score": (
+        10.0,
+        20.0,
+        25.0,
+        30.0,
+        50.0,
+        75.0,
+        100.0,
+        150.0,
+        200.0,
+        250.0,
+        300.0,
+        400.0,
+        500.0,
+    ),
+}
+
 
 def _estimator_from_method(method: str):
     """Resolve one external xi estimator from its benchmark method id."""
@@ -146,11 +178,59 @@ def _contains(interval: tuple[float, float], value: float) -> bool:
     return bool(interval[0] <= value <= interval[1])
 
 
+def _failed_external_estimate(method: str) -> ExternalXiEstimate:
+    """Return a sentinel estimate when one external baseline is undefined."""
+    return ExternalXiEstimate(
+        method=method,
+        xi_hat=float("nan"),
+        selected_level=None,
+        stable_window=None,
+        path_level=(),
+        path_xi=(),
+        standard_error=float("nan"),
+        confidence_interval=(float("nan"), float("nan")),
+        ci_method="asymptotic",
+        tuning_axis=_EXTERNAL_TUNING_AXES.get(method, "k"),
+        fixed_upper_level=None,
+    )
+
+
+def _round_up_metric_upper(metric: str, value: float) -> float:
+    """Round one metric upper bound to a stable display scale."""
+    steps = _EVI_METRIC_Y_UPPER_STEPS.get(metric)
+    if steps is None or not np.isfinite(value):
+        return float(value)
+    padded = max(float(value) * 1.02, steps[0])
+    for step in steps:
+        if padded <= step:
+            return float(step)
+    return float(steps[-1])
+
+
+def _panel_metric_ylim(
+    frame: pd.DataFrame,
+    *,
+    metric: str,
+    methods: Iterable[str],
+) -> tuple[float, float] | None:
+    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
+    method_list = [method for method in methods if method in frame["method"].unique()]
+    if not method_list:
+        return None
+    _, _, upper_col = _metric_columns(metric)
+    value_col = upper_col if upper_col is not None else _metric_columns(metric)[0]
+    values = frame.loc[frame["method"].isin(method_list), value_col].to_numpy(dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
+
+
 # Optional sensitivity path: shared raw-series bootstrap percentile intervals.
 def bootstrap_external_intervals(
     bootstrap_samples: np.ndarray,
     *,
-    methods: Iterable[str] = EXTERNAL_METHOD_ORDER[1:],
+    methods: Iterable[str] = EXTERNAL_BASELINE_METHODS,
     ci_level: float = EXTERNAL_CI_LEVEL,
 ) -> dict[str, tuple[tuple[float, float], np.ndarray]]:
     """Reuse one bootstrap sample bank across all external xi estimators.
@@ -198,18 +278,20 @@ def _load_or_compute_external_bootstrap_intervals(
             bootstrap_reps=bootstrap_reps,
         )
         if cache_file.exists():
-            with np.load(cache_file) as data:
-                methods = [str(method) for method in np.asarray(data["methods"])]
-                results: dict[str, tuple[tuple[float, float], np.ndarray]] = {}
-                for method in methods:
-                    results[method] = (
-                        (
-                            float(data[f"{method}__ci_lo"]),
-                            float(data[f"{method}__ci_hi"]),
-                        ),
-                        np.asarray(data[f"{method}__draws"], dtype=float),
-                    )
-                return results
+            loaded = _try_load_npz(cache_file)
+            if loaded is not None:
+                with loaded as data:
+                    methods = [str(method) for method in np.asarray(data["methods"])]
+                    results: dict[str, tuple[tuple[float, float], np.ndarray]] = {}
+                    for method in methods:
+                        results[method] = (
+                            (
+                                float(data[f"{method}__ci_lo"]),
+                                float(data[f"{method}__ci_hi"]),
+                            ),
+                            np.asarray(data[f"{method}__draws"], dtype=float),
+                        )
+                    return results
     bootstrap_samples = load_or_draw_raw_bootstrap_samples(
         vec,
         cache_dir=cache_dir,
@@ -224,8 +306,7 @@ def _load_or_compute_external_bootstrap_intervals(
             arrays[f"{method}__ci_lo"] = float(interval[0])
             arrays[f"{method}__ci_hi"] = float(interval[1])
             arrays[f"{method}__draws"] = np.asarray(draws, dtype=float)
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache_file, **arrays)
+        _atomic_savez(cache_file, compressed=False, **arrays)
     return results
 
 
@@ -301,7 +382,12 @@ def evaluate_external_config(
         cache_dir=cache_dir,
     )
     for rep, vec in enumerate(series_bank):
-        estimates = {method: estimator(vec) for method, estimator in EXTERNAL_ESTIMATORS.items()}
+        estimates: dict[str, ExternalXiEstimate] = {}
+        for method, estimator in EXTERNAL_ESTIMATORS.items():
+            try:
+                estimates[method] = estimator(vec)
+            except ValueError:
+                estimates[method] = _failed_external_estimate(method)
         shared_intervals: dict[str, tuple[tuple[float, float], np.ndarray]] = {}
         if ci_method == "bootstrap" and bootstrap_reps >= 2:
             shared_intervals = _load_or_compute_external_bootstrap_intervals(
@@ -406,7 +492,7 @@ def external_benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
     grouped["method"] = pd.Categorical(
         grouped["method"],
-        categories=EXTERNAL_METHOD_ORDER[1:],
+        categories=EXTERNAL_BASELINE_METHODS,
         ordered=True,
     )
     grouped["family"] = pd.Categorical(
@@ -483,7 +569,7 @@ def external_story_table(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = EXTERNAL_METHOD_ORDER,
 ) -> pd.DataFrame:
     """Create a compact appendix table for proposed-vs-external xi comparison."""
@@ -547,7 +633,7 @@ def external_story_latex(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     caption: str,
     label: str,
 ) -> str:
@@ -564,7 +650,7 @@ def target_plus_external_story_table(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = TARGET_PLUS_EXTERNAL_METHODS,
 ) -> pd.DataFrame:
     """Combine the sliding-FGLS target comparison with external xi baselines."""
@@ -620,7 +706,7 @@ def target_plus_external_story_latex(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     caption: str,
     label: str,
 ) -> str:
@@ -637,7 +723,7 @@ def interval_sharpness_story_table(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = INTERVAL_DIAGNOSTIC_METHODS,
 ) -> pd.DataFrame:
     """Summarize 95% interval sharpness and calibration across the xi grid."""
@@ -679,7 +765,7 @@ def interval_sharpness_story_latex(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     caption: str,
     label: str,
 ) -> str:
@@ -707,7 +793,7 @@ def plot_external_comparison_panels(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = EXTERNAL_METHOD_ORDER,
     file_path: Path | None = None,
     dpi: int = 600,
@@ -742,9 +828,12 @@ def plot_external_comparison_panels(
 
     for family_idx, family in enumerate(families):
         family_frame = combined[combined["family"] == family]
+        internal_methods = [method for method in methods if method in METHOD_LABELS]
+        ylim_methods = internal_methods if internal_methods else list(methods)
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
+            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -786,6 +875,8 @@ def plot_external_comparison_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
                     ax.set_title(f"$\\theta$ = {theta:.2f}")
@@ -795,7 +886,7 @@ def plot_external_comparison_panels(
                         if metric == "ape"
                         else "Winkler interval score"
                     )
-                    ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\n{ylabel}")
+                    ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
                 if row_idx == len(families) * len(metrics) - 1:
                     ax.set_xlabel("true $\\xi$")
 
@@ -856,7 +947,7 @@ def plot_target_plus_external_panels(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = TARGET_PLUS_EXTERNAL_METHODS,
     file_path: Path | None = None,
     dpi: int = 600,
@@ -893,9 +984,12 @@ def plot_target_plus_external_panels(
 
     for family_idx, family in enumerate(families):
         family_frame = combined[combined["family"] == family]
+        internal_methods = [method for method in methods if method in METHOD_LABELS]
+        ylim_methods = internal_methods if internal_methods else list(methods)
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
+            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -940,6 +1034,8 @@ def plot_target_plus_external_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
                     ax.set_title(f"$\\theta$ = {theta:.2f}")
@@ -949,7 +1045,7 @@ def plot_target_plus_external_panels(
                         if metric == "ape"
                         else "Winkler interval score"
                     )
-                    ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\n{ylabel}")
+                    ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
                 if row_idx == len(families) * len(metrics) - 1:
                     ax.set_xlabel("true $\\xi$")
 
@@ -994,7 +1090,7 @@ def plot_interval_sharpness_scatter(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = INTERVAL_DIAGNOSTIC_METHODS,
     file_path: Path | None = None,
     dpi: int = 600,
@@ -1057,7 +1153,7 @@ def plot_interval_sharpness_scatter(
             if row_idx == 0:
                 ax.set_title(f"$\\theta$ = {theta:.2f}")
             if col_idx == 0:
-                ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\nmedian coverage")
+                ax.set_ylabel(f"{family_label(family)}\nmedian coverage")
             if row_idx == len(families) - 1:
                 ax.set_xlabel("median 95% interval width")
 

@@ -42,7 +42,7 @@ from data_prep.ghcn import (
 )
 import numpy as np
 import pandas as pd
-from workflows.benchmark_design import METHOD_LOOKUP, fit_methods_for_series
+from workflows.benchmark_design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
 from workflows.application_screening import screen_extreme_series, screening_dataframe
 from unibm.core import estimate_evi_quantile, estimate_return_level
 from unibm.diagnostics import estimate_extremal_index_reciprocal, target_stability_summary
@@ -284,7 +284,7 @@ def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]
             {
                 "application": bundle.spec.key,
                 "method": method,
-                "method_label": f"{spec.block_scheme} {spec.summary_target} ({spec.regression})",
+                "method_label": METHOD_LABELS[method],
                 "summary_target": spec.summary_target,
                 "block_scheme": spec.block_scheme,
                 "regression": spec.regression,

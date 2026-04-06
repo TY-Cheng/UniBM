@@ -52,6 +52,8 @@ if _STANDALONE_SCRIPT:
         BLOCK_LINESTYLES,
         CORE_METHODS,
         FAMILY_LABELS,
+        UNIVERSAL_BENCHMARK_SET,
+        family_label,
         ordered_families,
         METHOD_LABELS,
         METHOD_LOOKUP,
@@ -77,6 +79,8 @@ else:
         BLOCK_LINESTYLES,
         CORE_METHODS,
         FAMILY_LABELS,
+        UNIVERSAL_BENCHMARK_SET,
+        family_label,
         ordered_families,
         METHOD_LABELS,
         METHOD_LOOKUP,
@@ -161,6 +165,58 @@ def benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
     return sort_by_method_order(grouped)
 
 
+_EVI_METRIC_Y_UPPER_STEPS = {
+    "ape": (1.05, 1.25, 1.5, 2.0, 3.0, 5.0),
+    "interval_score": (
+        5.0,
+        10.0,
+        20.0,
+        25.0,
+        30.0,
+        50.0,
+        75.0,
+        100.0,
+        150.0,
+        200.0,
+        250.0,
+        300.0,
+        400.0,
+        500.0,
+    ),
+}
+
+
+def _round_up_metric_upper(metric: str, value: float) -> float:
+    """Round one metric upper bound to a stable manuscript-friendly display scale."""
+    steps = _EVI_METRIC_Y_UPPER_STEPS.get(metric)
+    if steps is None or not np.isfinite(value):
+        return float(value)
+    padded = max(float(value) * 1.02, steps[0])
+    for step in steps:
+        if padded <= step:
+            return float(step)
+    return float(steps[-1])
+
+
+def _panel_metric_ylim(
+    frame: pd.DataFrame,
+    *,
+    metric: str,
+    methods: Iterable[str],
+) -> tuple[float, float] | None:
+    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
+    method_list = [method for method in methods if method in frame["method"].unique()]
+    if not method_list:
+        return None
+    _, _, upper_col = _metric_columns(metric)
+    value_col = upper_col if upper_col is not None else _metric_columns(metric)[0]
+    values = frame.loc[frame["method"].isin(method_list), value_col].to_numpy(dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
+
+
 def benchmark_table(summary: pd.DataFrame, *, benchmark_set: str | None = None) -> pd.DataFrame:
     """Return the long-form benchmark table used in the notebook appendix."""
     columns = [
@@ -204,9 +260,9 @@ def benchmark_story_table(
     summary: pd.DataFrame,
     *,
     methods: Iterable[str],
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> pd.DataFrame:
-    """Summarize the main benchmark story into one compact LaTeX-friendly table."""
+    """Summarize the benchmark story into one compact LaTeX-friendly table."""
     subset = summary.loc[summary["benchmark_set"] == benchmark_set].copy()
     methods = [method for method in methods if method in subset["method"].unique()]
     label_order = [METHOD_LABELS[method] for method in methods]
@@ -250,7 +306,7 @@ def benchmark_story_latex(
     summary: pd.DataFrame,
     *,
     methods: Iterable[str],
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     caption: str,
     label: str,
 ) -> str:
@@ -447,6 +503,7 @@ def plot_benchmark_panels(
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
+            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=methods)
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -473,7 +530,12 @@ def plot_benchmark_panels(
                                 linewidth=0,
                             )
                         elif interval_style == "errorbar":
-                            yerr = np.vstack([np.maximum(y - lo, 0.0), np.maximum(hi - y, 0.0)])
+                            yerr = np.vstack(
+                                [
+                                    np.maximum(y - lo, 0.0),
+                                    np.maximum(hi - y, 0.0),
+                                ]
+                            )
                             ax.errorbar(
                                 x_plot,
                                 y,
@@ -502,13 +564,15 @@ def plot_benchmark_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
                 if stress_cutoff is not None:
                     ax.axvline(stress_cutoff, color="0.5", linestyle="--", lw=0.8, alpha=0.9)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
                     ax.set_title(f"$\\theta$ = {theta:.2f}")
                 if col_idx == 0:
-                    ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\n{METRIC_LABELS[metric]}")
+                    ax.set_ylabel(f"{family_label(family)}\n{METRIC_LABELS[metric]}")
                 if row_idx == nrows - 1:
                     ax.set_xlabel("true $\\xi$")
     if legend_mode == "explicit":
@@ -535,11 +599,11 @@ def plot_benchmark_panels(
 
 
 def _main_evi_benchmark_n_obs(summary: pd.DataFrame) -> int:
-    """Infer the EVI benchmark sample size from the main summary rows."""
-    main_rows = summary.loc[summary["benchmark_set"] == "main", "n_obs"].dropna()
-    if main_rows.empty:
-        raise ValueError("Benchmark summary does not contain any main-benchmark rows.")
-    return int(round(float(main_rows.median())))
+    """Infer the EVI benchmark sample size from the universal summary rows."""
+    rows = summary.loc[summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET, "n_obs"].dropna()
+    if rows.empty:
+        raise ValueError("Benchmark summary does not contain any universal-benchmark rows.")
+    return int(round(float(rows.median())))
 
 
 def write_evi_benchmark_manuscript_artifacts(
@@ -572,10 +636,11 @@ def write_evi_benchmark_manuscript_artifacts(
         benchmark_story_latex(
             benchmark_summary_df,
             methods=CORE_METHODS,
-            benchmark_set="main",
+            benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Necessary-components EVI benchmark across the xi grid 0.10 to 10.00 "
-                f"at fixed theta in {{1.00, 0.70, 0.50, 0.35}} with n_obs={n_obs}. "
+                f"Necessary-components EVI benchmark on the Universal grid across the xi grid "
+                f"0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
+                f"with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05)."
@@ -587,10 +652,11 @@ def write_evi_benchmark_manuscript_artifacts(
         target_plus_external_story_latex(
             benchmark_summary_df,
             external_benchmark_summary,
-            benchmark_set="main",
+            benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Target-comparison EVI benchmark across the xi grid 0.10 to 10.00 "
-                f"at fixed theta in {{1.00, 0.70, 0.50, 0.35}} with n_obs={n_obs}. "
+                f"Target-comparison EVI benchmark on the Universal grid across the xi grid "
+                f"0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
+                f"with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05)."
@@ -602,10 +668,10 @@ def write_evi_benchmark_manuscript_artifacts(
         interval_sharpness_story_latex(
             benchmark_summary_df,
             external_benchmark_summary,
-            benchmark_set="main",
+            benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Appendix interval sharpness-versus-calibration summary across the xi "
-                f"grid 0.10 to 10.00 at fixed theta in {{1.00, 0.70, 0.50, 0.35}} "
+                f"Appendix interval sharpness-versus-calibration summary on the Universal xi "
+                f"grid 0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
                 f"with n_obs={n_obs}. Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
             ),
@@ -614,17 +680,18 @@ def write_evi_benchmark_manuscript_artifacts(
     )
     (table_dir / "benchmark_overview_main.tex").write_text(
         render_latex_table(
-            benchmark_table(benchmark_summary_df, benchmark_set="main"),
+            benchmark_table(benchmark_summary_df, benchmark_set=UNIVERSAL_BENCHMARK_SET),
             caption=(
-                f"Appendix full EVI benchmark overview across the xi grid 0.10 to 10.00 "
-                f"at fixed theta in {{1.00, 0.70, 0.50, 0.35}} with n_obs={n_obs}."
+                f"Appendix full EVI benchmark overview on the Universal grid across the xi "
+                f"grid 0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
+                f"with n_obs={n_obs}."
             ),
             label="tab:benchmark-overview-main",
         )
     )
     plot_benchmark_panels(
         benchmark_summary_df,
-        benchmark_set="main",
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
         methods=CORE_METHODS,
         title="Necessary components: from disjoint OLS baselines to sliding-median FGLS",
         legend_mode="explicit",
@@ -645,7 +712,7 @@ def write_evi_benchmark_manuscript_artifacts(
     plot_target_plus_external_panels(
         benchmark_summary_df,
         external_benchmark_summary,
-        benchmark_set="main",
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
         title="Target comparison under sliding-block FGLS",
         file_path=fig_dir / "benchmark_targets.pdf",
         save=True,
@@ -653,7 +720,7 @@ def write_evi_benchmark_manuscript_artifacts(
     plot_interval_sharpness_scatter(
         benchmark_summary_df,
         external_benchmark_summary,
-        benchmark_set="main",
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
         title="Appendix: 95% interval sharpness versus calibration",
         file_path=fig_dir / "benchmark_interval_sharpness.pdf",
         save=True,

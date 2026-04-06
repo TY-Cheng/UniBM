@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sys
 
@@ -73,12 +74,12 @@ def _output_paths(out_dir: Path, *, n_obs: int) -> dict[str, Path]:
     }
 
 
-def _expected_main_xi(configs: list[SimulationConfig]) -> list[float]:
-    return sorted({cfg.xi_true for cfg in configs if cfg.benchmark_set == "main"})
+def _expected_universal_xi(configs: list[SimulationConfig]) -> list[float]:
+    return sorted({cfg.xi_true for cfg in configs})
 
 
-def _expected_main_theta(configs: list[SimulationConfig]) -> list[float]:
-    return sorted({cfg.theta_true for cfg in configs if cfg.benchmark_set == "main"})
+def _expected_universal_theta(configs: list[SimulationConfig]) -> list[float]:
+    return sorted({cfg.theta_true for cfg in configs})
 
 
 def _summary_matches_contract(
@@ -91,17 +92,15 @@ def _summary_matches_contract(
     benchmark_sets = (
         set(summary["benchmark_set"].dropna().unique()) if "benchmark_set" in summary else set()
     )
-    main_xi = sorted(summary.loc[summary["benchmark_set"] == "main", "xi_true"].dropna().unique())
-    main_theta = sorted(
-        summary.loc[summary["benchmark_set"] == "main", "theta_true"].dropna().unique()
-    )
+    universal_xi = sorted(summary["xi_true"].dropna().unique())
+    universal_theta = sorted(summary["theta_true"].dropna().unique())
     expected_sets = {cfg.benchmark_set for cfg in configs}
     return (
         _EI_SUMMARY_REQUIRED_COLUMNS.issubset(summary.columns)
         and method_names == expected_methods
         and benchmark_sets == expected_sets
-        and main_xi == _expected_main_xi(configs)
-        and main_theta == _expected_main_theta(configs)
+        and universal_xi == _expected_universal_xi(configs)
+        and universal_theta == _expected_universal_theta(configs)
     )
 
 
@@ -169,7 +168,8 @@ def load_or_materialize_ei_benchmark_outputs(
 
 
 def main() -> None:
-    outputs = load_or_materialize_ei_benchmark_outputs(force=True)
+    force = os.environ.get("UNIBM_FORCE_BENCHMARK", "").strip() in {"1", "true", "TRUE", "yes"}
+    outputs = load_or_materialize_ei_benchmark_outputs(force=force)
     with pd.option_context("display.max_columns", None, "display.width", 160):
         print(outputs.summary)
 

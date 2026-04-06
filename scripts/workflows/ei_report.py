@@ -43,7 +43,13 @@ import pandas as pd
 from unibm.extremal_index import EI_CI_LEVEL
 
 if _STANDALONE_SCRIPT:
-    from workflows.benchmark_design import FAMILY_LABELS, ordered_families, sort_by_family_order
+    from workflows.benchmark_design import (
+        FAMILY_LABELS,
+        UNIVERSAL_BENCHMARK_SET,
+        family_label,
+        ordered_families,
+        sort_by_family_order,
+    )
     from workflows.ei_benchmark_eval import (
         EI_EXTERNAL_METHODS,
         EI_FGLS_METHODS,
@@ -62,7 +68,13 @@ if _STANDALONE_SCRIPT:
         render_latex_table,
     )
 else:
-    from .benchmark_design import FAMILY_LABELS, ordered_families, sort_by_family_order
+    from .benchmark_design import (
+        FAMILY_LABELS,
+        UNIVERSAL_BENCHMARK_SET,
+        family_label,
+        ordered_families,
+        sort_by_family_order,
+    )
     from .ei_benchmark_eval import (
         EI_EXTERNAL_METHODS,
         EI_FGLS_METHODS,
@@ -86,11 +98,19 @@ else:
 # ---------------------------------------------------------------------------
 
 
+def _ei_marker_facecolor(method: str) -> str:
+    return EI_METHOD_COLORS[method]
+
+
+def _ei_marker_edgecolor(method: str) -> str:
+    return EI_METHOD_COLORS[method]
+
+
 def _story_table(
     summary: pd.DataFrame,
     *,
     methods: Iterable[str],
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> pd.DataFrame:
     """Collapse a method list into the manuscript-friendly EI story-table layout."""
     methods = [method for method in methods if method in summary["method"].unique()]
@@ -131,7 +151,11 @@ def _story_table(
     return sort_by_family_order(table.loc[:, ordered_columns], sort_columns=["xi_true"])
 
 
-def ei_core_story_table(summary: pd.DataFrame, *, benchmark_set: str = "main") -> pd.DataFrame:
+def ei_core_story_table(
+    summary: pd.DataFrame,
+    *,
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+) -> pd.DataFrame:
     """Return the core internal pooled-BM EI comparison table."""
     return _story_table(summary, methods=EI_INTERNAL_METHODS, benchmark_set=benchmark_set)
 
@@ -140,7 +164,7 @@ def ei_targets_story_table(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> pd.DataFrame:
     """Return the mixed pooled-vs-native EI comparison table."""
     combined = pd.concat([internal_summary, external_summary], ignore_index=True)
@@ -152,7 +176,7 @@ def ei_interval_story_table(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
-    benchmark_set: str = "main",
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> pd.DataFrame:
     """Summarize interval sharpness and coverage across the EI grid."""
     combined = pd.concat([internal_summary, external_summary], ignore_index=True)
@@ -200,6 +224,45 @@ def ei_story_latex(
 # Panel plot helpers
 # ---------------------------------------------------------------------------
 
+_EI_METRIC_Y_UPPER_STEPS = {
+    "ape": (1.05, 1.25, 1.5, 2.0, 3.0, 5.0),
+    "interval_score": (2.0, 3.0, 5.0, 10.0, 20.0, 25.0, 30.0, 40.0, 50.0),
+}
+
+
+def _round_up_metric_upper(metric: str, value: float) -> float:
+    """Round one metric upper bound to a stable display scale."""
+    steps = _EI_METRIC_Y_UPPER_STEPS.get(metric)
+    if steps is None or not np.isfinite(value):
+        return float(value)
+    padded = max(float(value) * 1.02, steps[0])
+    for step in steps:
+        if padded <= step:
+            return float(step)
+    return float(steps[-1])
+
+
+def _panel_metric_ylim(
+    frame: pd.DataFrame,
+    *,
+    metric: str,
+    methods: Iterable[str],
+) -> tuple[float, float] | None:
+    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
+    method_list = [method for method in methods if method in frame["method"].unique()]
+    if not method_list:
+        return None
+    metric_cols = {
+        "ape": ("ape_median", "ape_q25", "ape_q75"),
+        "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+    }
+    _, _, upper_col = metric_cols[metric]
+    values = frame.loc[frame["method"].isin(method_list), upper_col].to_numpy(dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
+
 
 def _plot_panels(
     summary: pd.DataFrame,
@@ -238,11 +301,14 @@ def _plot_panels(
         "ape": ("ape_median", "ape_q25", "ape_q75"),
         "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
     }
+    internal_methods = [method for method in methods if method in EI_INTERNAL_METHODS]
+    ylim_methods = internal_methods if internal_methods else list(methods)
     for family_idx, family in enumerate(families):
         family_frame = subset[subset["family"] == family]
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = metric_cols[metric]
+            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
             for col_idx, xi in enumerate(xi_values):
                 ax = axes[row_idx, col_idx]
                 xi_frame = family_frame[family_frame["xi_true"] == xi]
@@ -275,6 +341,9 @@ def _plot_panels(
                         color=color,
                         linestyle=EI_METHOD_LINESTYLES[method],
                         marker=EI_METHOD_MARKERS[method],
+                        markerfacecolor=_ei_marker_facecolor(method),
+                        markeredgecolor=_ei_marker_edgecolor(method),
+                        markeredgewidth=0.7,
                         ms=4.2,
                         lw=1.2,
                         alpha=0.95,
@@ -283,6 +352,8 @@ def _plot_panels(
                 ax.set_xscale("log")
                 ax.xaxis.set_minor_formatter(plt.NullFormatter())
                 ax.set_xlim(theta_lo, theta_hi)
+                if ylim is not None:
+                    ax.set_ylim(*ylim)
                 ax.set_xticks(theta_ticks)
                 ax.set_xticklabels(
                     [f"{theta:.2f}" for theta in theta_ticks],
@@ -300,7 +371,7 @@ def _plot_panels(
                         if metric == "ape"
                         else "Winkler interval score"
                     )
-                    ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\n{ylabel}", fontsize=8)
+                    ax.set_ylabel(f"{family_label(family)}\n{ylabel}", fontsize=8)
                 if row_idx == nrows - 1:
                     ax.set_xlabel("true $\\theta$")
     n_legend_cols = min(4, max(1, len(methods)))
@@ -315,6 +386,8 @@ def _plot_panels(
             marker=EI_METHOD_MARKERS[method],
             markersize=5.5,
             lw=1.4,
+            markerfacecolor=_ei_marker_facecolor(method),
+            markeredgecolor=_ei_marker_edgecolor(method),
             label=EI_METHOD_LABELS[method],
         )
         for method in methods
@@ -421,6 +494,8 @@ def plot_ei_interval_sharpness_scatter(
                     s=36,
                     color=EI_METHOD_COLORS[method],
                     marker=EI_METHOD_MARKERS[method],
+                    facecolors=_ei_marker_facecolor(method),
+                    edgecolors=_ei_marker_edgecolor(method),
                     linewidths=0.8,
                     zorder=3,
                 )
@@ -430,7 +505,7 @@ def plot_ei_interval_sharpness_scatter(
             if row_idx == 0:
                 ax.set_title(f"$\\xi$ = {xi:.2f}")
             if col_idx == 0:
-                ax.set_ylabel(f"{FAMILY_LABELS.get(family, family)}\nmedian coverage")
+                ax.set_ylabel(f"{family_label(family)}\nmedian coverage")
             if row_idx == len(families) - 1:
                 ax.set_xlabel("median 95% interval width")
     handles = [
@@ -441,6 +516,8 @@ def plot_ei_interval_sharpness_scatter(
             linestyle="None",
             marker=EI_METHOD_MARKERS[method],
             markersize=6,
+            markerfacecolor=_ei_marker_facecolor(method),
+            markeredgecolor=_ei_marker_edgecolor(method),
             label=EI_METHOD_LABELS[method],
         )
         for method in methods
@@ -468,10 +545,10 @@ def plot_ei_interval_sharpness_scatter(
 
 
 def _main_ei_benchmark_n_obs(summary: pd.DataFrame) -> int:
-    main_rows = summary.loc[summary["benchmark_set"] == "main", "n_obs"].dropna()
-    if main_rows.empty:
-        raise ValueError("EI benchmark summary does not contain any main-benchmark rows.")
-    return int(round(float(main_rows.median())))
+    rows = summary.loc[summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET, "n_obs"].dropna()
+    if rows.empty:
+        raise ValueError("EI benchmark summary does not contain any universal-benchmark rows.")
+    return int(round(float(rows.median())))
 
 
 def write_ei_benchmark_manuscript_artifacts(
@@ -485,10 +562,10 @@ def write_ei_benchmark_manuscript_artifacts(
     n_obs = _main_ei_benchmark_n_obs(benchmark_summary)
     (table_dir / "benchmark_ei_core_main.tex").write_text(
         ei_story_latex(
-            ei_core_story_table(benchmark_summary, benchmark_set="main"),
+            ei_core_story_table(benchmark_summary, benchmark_set=UNIVERSAL_BENCHMARK_SET),
             caption=(
-                f"EI core benchmark across the theta grid 0.35 to 1.00 at fixed xi in "
-                f"{{0.50, 1.0, 5.0, 10.0}} with n_obs={n_obs}. "
+                f"EI core benchmark on the Universal grid across the theta grid 0.10 to 1.00 "
+                f"at fixed xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}} with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
             ),
@@ -498,11 +575,13 @@ def write_ei_benchmark_manuscript_artifacts(
     (table_dir / "benchmark_ei_targets_main.tex").write_text(
         ei_story_latex(
             ei_targets_story_table(
-                benchmark_summary, external_benchmark_summary, benchmark_set="main"
+                benchmark_summary,
+                external_benchmark_summary,
+                benchmark_set=UNIVERSAL_BENCHMARK_SET,
             ),
             caption=(
-                f"EI target benchmark across the theta grid 0.35 to 1.00 at fixed xi in "
-                f"{{0.50, 1.0, 5.0, 10.0}} with n_obs={n_obs}. "
+                f"EI target benchmark on the Universal grid across the theta grid 0.10 to 1.00 "
+                f"at fixed xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}} with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
             ),
@@ -512,7 +591,7 @@ def write_ei_benchmark_manuscript_artifacts(
     interval_table = ei_interval_story_table(
         benchmark_summary,
         external_benchmark_summary,
-        benchmark_set="main",
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
     ).copy()
     interval_table["median_interval_width"] = interval_table["median_interval_width"].map(
         lambda x: f"{x:.3f}"
@@ -525,8 +604,9 @@ def write_ei_benchmark_manuscript_artifacts(
         render_latex_table(
             interval_table,
             caption=(
-                f"EI interval sharpness-versus-calibration summary across the theta grid "
-                f"0.35 to 1.00 at fixed xi in {{0.50, 1.0, 5.0, 10.0}} with n_obs={n_obs}. "
+                f"EI interval sharpness-versus-calibration summary on the Universal theta grid "
+                f"0.10 to 1.00 at fixed xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}} "
+                f"with n_obs={n_obs}. "
                 "Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
             ),
@@ -535,10 +615,12 @@ def write_ei_benchmark_manuscript_artifacts(
     )
     (table_dir / "benchmark_ei_overview_main.tex").write_text(
         render_latex_table(
-            benchmark_summary.loc[benchmark_summary["benchmark_set"] == "main"].copy(),
+            benchmark_summary.loc[
+                benchmark_summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET
+            ].copy(),
             caption=(
-                f"Appendix full EI benchmark overview across the theta grid 0.35 to 1.00 "
-                f"at fixed xi in {{0.50, 1.0, 5.0, 10.0}} with n_obs={n_obs}."
+                f"Appendix full EI benchmark overview on the Universal theta grid 0.10 to 1.00 "
+                f"at fixed xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}} with n_obs={n_obs}."
             ),
             label="tab:benchmark-ei-overview-main",
         )
