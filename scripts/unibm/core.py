@@ -157,23 +157,37 @@ def _fit_linear_model(
         ridge = max(abs(float(scale)) * 1e-8, 1e-12)
         regularized = covariance + np.eye(covariance.shape[0]) * ridge
         inv_cov = np.linalg.pinv(regularized)
-        beta = np.linalg.pinv(X.T @ inv_cov @ X) @ (X.T @ inv_cov @ y)
-        cov_beta = np.linalg.pinv(X.T @ inv_cov @ X)
+        normal_matrix = X.T @ inv_cov @ X
+        beta = np.linalg.pinv(normal_matrix) @ (X.T @ inv_cov @ y)
+        cov_beta = np.linalg.pinv(normal_matrix)
         fitted = X @ beta
+        resid = y - fitted
+        objective = float(resid @ inv_cov @ resid)
     else:
+        normal_matrix = X.T @ X
         beta, *_ = np.linalg.lstsq(X, y, rcond=None)
         fitted = X @ beta
         resid = y - fitted
-        xtx_inv = np.linalg.pinv(X.T @ X)
+        xtx_inv = np.linalg.pinv(normal_matrix)
         meat = X.T @ np.diag(resid**2) @ X
         cov_beta = xtx_inv @ meat @ xtx_inv
-    return {
+        objective = float(resid @ resid)
+    try:
+        condition_number = float(np.linalg.cond(normal_matrix))
+    except np.linalg.LinAlgError:
+        condition_number = float("inf")
+    result = {
         "intercept": float(beta[0]),
         "slope": float(beta[1]),
         "fitted": fitted,
         "cov_beta": cov_beta,
         "standard_error": float(np.sqrt(max(cov_beta[1, 1], 0.0))),
+        "objective": objective,
+        "condition_number": condition_number,
+        "n_obs": int(x.size),
+        "n_params": int(X.shape[1]),
     }
+    return result
 
 
 def _aligned_bootstrap_covariance(
@@ -333,12 +347,14 @@ def _fit_scaling_model(
             random_state=random_state,
         )
     covariance = _aligned_bootstrap_covariance(bootstrap, curve, plateau)
+
     model = _fit_linear_model(
         plateau.x,
         plateau.y,
         covariance=covariance,
         covariance_shrinkage=covariance_shrinkage,
     )
+
     slope = model["slope"]
     standard_error = model["standard_error"]
     return ScalingFit(
@@ -459,7 +475,8 @@ def predict_block_quantile(fit: ScalingFit, block_size: float) -> float:
         )
     if block_size <= 0:
         raise ValueError("Block size must be positive.")
-    return float(np.exp(fit.intercept + fit.slope * np.log(block_size)))
+    log_b = np.log(block_size)
+    return float(np.exp(fit.intercept + fit.slope * log_b))
 
 
 def estimate_return_level(

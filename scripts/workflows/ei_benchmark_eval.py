@@ -24,6 +24,8 @@ from unibm.extremal_index import (
 )
 
 from .benchmark_design import (
+    _atomic_savez,
+    _try_load_npz,
     BENCHMARK_CACHE_VERSION,
     default_ei_simulation_configs,
     load_or_draw_raw_bootstrap_samples,
@@ -102,7 +104,13 @@ EI_METHOD_COLORS = {
 EI_METHOD_LINESTYLES = {
     method: ("-" if "sliding" in method else "--") for method in EI_ALL_METHODS
 }
-EI_METHOD_LINESTYLES.update({"ferro_segers": "--", "k_gaps": "--", "bb_sliding_native": "-"})
+EI_METHOD_LINESTYLES.update(
+    {
+        "ferro_segers": "--",
+        "k_gaps": "--",
+        "bb_sliding_native": "-",
+    }
+)
 EI_METHOD_MARKERS = {
     "northrop_disjoint_ols": "o",
     "northrop_disjoint_fgls": "s",
@@ -117,7 +125,7 @@ EI_METHOD_MARKERS = {
     "northrop_sliding_native": "v",
     "bb_sliding_native": "<",
 }
-EI_BOOTSTRAP_REPS = 32
+EI_BOOTSTRAP_REPS = 120
 EI_BM_PATH_KEYS = (
     ("northrop", False),
     ("northrop", True),
@@ -130,62 +138,95 @@ def _ei_bootstrap_cache_file(
     cache_dir: Path,
     *,
     cache_key: str,
-    base_path: str,
-    sliding: bool,
     reps: int,
 ) -> Path:
-    """Return the cache path for one pooled BM EI covariance bundle."""
-    scheme = "sliding" if sliding else "disjoint"
+    """Return the cache path for one series-wide pooled BM EI covariance bundle."""
     return (
         cache_dir
         / "ei_internal_bootstrap"
-        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__{base_path}__{scheme}__reps{reps}.npz"
+        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__reps{reps}.npz"
     )
 
 
-def _load_cached_ei_bootstrap(
+def _ei_bundle_prefix(base_path: str, sliding: bool) -> str:
+    """Encode one EI path/scheme pair into a stable cache-key prefix."""
+    return f"{base_path}__{'sliding' if sliding else 'disjoint'}"
+
+
+def _load_cached_ei_bootstrap_bundle(
     *,
     cache_dir: Path | None,
     cache_key: str,
-    base_path: str,
-    sliding: bool,
-    selected_levels: np.ndarray,
+    selected_levels_by_key: dict[tuple[str, bool], np.ndarray],
     reps: int,
-) -> dict[str, np.ndarray | None] | None:
-    """Load one pooled BM EI covariance bundle if the selected levels still match."""
-    selected_levels = np.asarray(selected_levels, dtype=int)
+) -> dict[tuple[str, bool], dict[str, np.ndarray | None]] | None:
+    """Load one series-wide EI covariance bundle if the selected windows still match."""
     if cache_dir is None:
         return None
     cache_file = _ei_bootstrap_cache_file(
         cache_dir,
         cache_key=cache_key,
-        base_path=base_path,
-        sliding=sliding,
         reps=reps,
     )
     if not cache_file.exists():
         return None
-    with np.load(cache_file) as data:
-        boot_levels = np.asarray(data["block_sizes"], dtype=int)
-        covariance = np.asarray(data["covariance"], dtype=float)
-        if covariance.size == 0:
-            covariance = None
-        if np.array_equal(boot_levels, selected_levels):
-            return {
+    loaded = _try_load_npz(cache_file)
+    if loaded is None:
+        return None
+    with loaded as data:
+        results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
+        for key, selected_levels in selected_levels_by_key.items():
+            selected_levels = np.asarray(selected_levels, dtype=int)
+            prefix = _ei_bundle_prefix(*key)
+            block_sizes_key = f"{prefix}__block_sizes"
+            if block_sizes_key not in data.files:
+                return None
+            boot_levels = np.asarray(data[block_sizes_key], dtype=int)
+            if not np.array_equal(boot_levels, selected_levels):
+                return None
+            covariance = np.asarray(data[f"{prefix}__covariance"], dtype=float)
+            if covariance.size == 0:
+                covariance = None
+            results[key] = {
                 "block_sizes": boot_levels,
-                "samples": np.asarray(data["samples"], dtype=float),
+                "samples": np.asarray(data[f"{prefix}__samples"], dtype=float),
                 "covariance": covariance,
             }
-    return None
+        return results
+
+
+def _save_cached_ei_bootstrap_bundle(
+    *,
+    cache_dir: Path | None,
+    cache_key: str,
+    reps: int,
+    bundles: dict[tuple[str, bool], dict[str, np.ndarray | None]],
+) -> None:
+    """Persist all pooled BM EI covariance bundles for one series in one file."""
+    if cache_dir is None:
+        return
+    arrays: dict[str, Any] = {}
+    for key, result in bundles.items():
+        prefix = _ei_bundle_prefix(*key)
+        arrays[f"{prefix}__block_sizes"] = np.asarray(result["block_sizes"], dtype=int)
+        arrays[f"{prefix}__samples"] = np.asarray(result["samples"], dtype=float)
+        covariance = result.get("covariance")
+        arrays[f"{prefix}__covariance"] = (
+            np.asarray(covariance, dtype=float)
+            if covariance is not None
+            else np.empty((0, 0), dtype=float)
+        )
+    cache_file = _ei_bootstrap_cache_file(
+        cache_dir,
+        cache_key=cache_key,
+        reps=reps,
+    )
+    _atomic_savez(cache_file, compressed=False, **arrays)
 
 
 def _materialize_ei_bootstrap(
     transformed_draws: np.ndarray,
     *,
-    cache_dir: Path | None,
-    cache_key: str,
-    base_path: str,
-    sliding: bool,
     selected_levels: np.ndarray,
     reps: int,
 ) -> dict[str, np.ndarray | None]:
@@ -198,25 +239,6 @@ def _materialize_ei_bootstrap(
     covariance = None
     if z_valid.shape[0] >= 2:
         covariance = np.atleast_2d(np.cov(z_valid, rowvar=False))
-    if cache_dir is not None:
-        cache_file = _ei_bootstrap_cache_file(
-            cache_dir,
-            cache_key=cache_key,
-            base_path=base_path,
-            sliding=sliding,
-            reps=reps,
-        )
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            cache_file,
-            block_sizes=selected_levels,
-            samples=z_valid,
-            covariance=(
-                np.asarray(covariance, dtype=float)
-                if covariance is not None
-                else np.empty((0, 0), dtype=float)
-            ),
-        )
     return {
         "block_sizes": selected_levels,
         "samples": z_valid,
@@ -243,24 +265,14 @@ def _load_or_compute_ei_bootstrap_bundle(
     selected_levels_by_key = {
         key: extract_stable_path_window(bundle.paths[key])[0] for key in EI_BM_PATH_KEYS
     }
-    results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
-    missing_keys: list[tuple[str, bool]] = []
-    for key, selected_levels in selected_levels_by_key.items():
-        base_path, sliding = key
-        cached = _load_cached_ei_bootstrap(
-            cache_dir=cache_dir,
-            cache_key=cache_key,
-            base_path=base_path,
-            sliding=sliding,
-            selected_levels=selected_levels,
-            reps=reps,
-        )
-        if cached is not None:
-            results[key] = cached
-        else:
-            missing_keys.append(key)
-    if not missing_keys:
-        return results
+    cached = _load_cached_ei_bootstrap_bundle(
+        cache_dir=cache_dir,
+        cache_key=cache_key,
+        selected_levels_by_key=selected_levels_by_key,
+        reps=reps,
+    )
+    if cached is not None:
+        return cached
     raw_bootstrap_samples = load_or_draw_raw_bootstrap_samples(
         vec,
         cache_dir=cache_dir,
@@ -269,20 +281,23 @@ def _load_or_compute_ei_bootstrap_bundle(
         random_state=random_state,
     )
     full_draws = bootstrap_bm_ei_path_draws(raw_bootstrap_samples, block_sizes=bundle.block_sizes)
-    for key in missing_keys:
+    results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
+    for key in EI_BM_PATH_KEYS:
         base_path, sliding = key
         selected_levels = selected_levels_by_key[key]
         full_levels = np.asarray(bundle.block_sizes, dtype=int)
         idx = [int(np.flatnonzero(full_levels == level)[0]) for level in selected_levels]
         results[key] = _materialize_ei_bootstrap(
             full_draws[key][:, idx],
-            cache_dir=cache_dir,
-            cache_key=cache_key,
-            base_path=base_path,
-            sliding=sliding,
             selected_levels=selected_levels,
             reps=reps,
         )
+    _save_cached_ei_bootstrap_bundle(
+        cache_dir=cache_dir,
+        cache_key=cache_key,
+        reps=reps,
+        bundles=results,
+    )
     return results
 
 

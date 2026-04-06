@@ -274,19 +274,19 @@ def _output_paths(out_dir: Path, *, n_obs: int) -> dict[str, Path]:
     }
 
 
-def _expected_main_xi(configs: list[SimulationConfig]) -> list[float]:
-    """Return the canonical sorted xi grid for the main benchmark set."""
-    return sorted({cfg.xi_true for cfg in configs if cfg.benchmark_set == "main"})
+def _expected_universal_xi(configs: list[SimulationConfig]) -> list[float]:
+    """Return the canonical sorted xi grid for the universal benchmark set."""
+    return sorted({cfg.xi_true for cfg in configs})
 
 
-def _expected_main_n_obs(configs: list[SimulationConfig]) -> list[int]:
-    """Return the canonical n_obs values for the main benchmark set."""
-    return sorted({cfg.n_obs for cfg in configs if cfg.benchmark_set == "main"})
+def _expected_universal_n_obs(configs: list[SimulationConfig]) -> list[int]:
+    """Return the canonical n_obs values for the universal benchmark set."""
+    return sorted({cfg.n_obs for cfg in configs})
 
 
-def _expected_main_theta(configs: list[SimulationConfig]) -> list[float]:
-    """Return the canonical theta grid for the main benchmark set."""
-    return sorted({cfg.theta_true for cfg in configs if cfg.benchmark_set == "main"})
+def _expected_universal_theta(configs: list[SimulationConfig]) -> list[float]:
+    """Return the canonical theta grid for the universal benchmark set."""
+    return sorted({cfg.theta_true for cfg in configs})
 
 
 def _summary_matches_contract(
@@ -301,19 +301,17 @@ def _summary_matches_contract(
     benchmark_sets = (
         set(summary["benchmark_set"].dropna().unique()) if "benchmark_set" in summary else set()
     )
-    main_xi = sorted(summary.loc[summary["benchmark_set"] == "main", "xi_true"].dropna().unique())
-    main_theta = sorted(
-        summary.loc[summary["benchmark_set"] == "main", "theta_true"].dropna().unique()
-    )
-    main_n_obs = sorted(summary.loc[summary["benchmark_set"] == "main", "n_obs"].dropna().unique())
+    universal_xi = sorted(summary["xi_true"].dropna().unique())
+    universal_theta = sorted(summary["theta_true"].dropna().unique())
+    universal_n_obs = sorted(summary["n_obs"].dropna().unique())
     expected_sets = {cfg.benchmark_set for cfg in configs}
     return (
         required_columns.issubset(summary.columns)
         and method_names == expected_methods
         and benchmark_sets == expected_sets
-        and main_xi == _expected_main_xi(configs)
-        and main_theta == _expected_main_theta(configs)
-        and main_n_obs == _expected_main_n_obs(configs)
+        and universal_xi == _expected_universal_xi(configs)
+        and universal_theta == _expected_universal_theta(configs)
+        and universal_n_obs == _expected_universal_n_obs(configs)
     )
 
 
@@ -394,7 +392,8 @@ def load_or_materialize_evi_benchmark_outputs(
 
 
 def main() -> None:
-    outputs = load_or_materialize_evi_benchmark_outputs(force=True)
+    force = os.environ.get("UNIBM_FORCE_BENCHMARK", "").strip() in {"1", "true", "TRUE", "yes"}
+    outputs = load_or_materialize_evi_benchmark_outputs(force=force)
     with pd.option_context("display.max_columns", None, "display.width", 140):
         print(outputs.summary)
 

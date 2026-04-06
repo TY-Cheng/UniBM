@@ -10,10 +10,14 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+import re
+import tempfile
 from typing import Any, Iterable
+from zipfile import BadZipFile
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import brentq
 
 from unibm.bootstrap import (
     circular_block_summary_bootstrap_multi_target,
@@ -31,12 +35,75 @@ from unibm.models import BlockSummaryCurve, PlateauWindow, ScalingFit
 # The full 12-method EVI grid is expensive, but the paper-scale benchmark should
 # still use enough resampling to stabilize the internal FGLS covariance
 # estimates and any optional bootstrap-based sensitivity runs.
-FGLS_BOOTSTRAP_REPS = 32
+FGLS_BOOTSTRAP_REPS = 120
 COMMON_BOOTSTRAP_REPS = 32
-BENCHMARK_CACHE_VERSION = "2026-04-03-benchmark-cache-v11"
-LEGACY_BENCHMARK_CACHE_VERSION = "2026-04-03-benchmark-cache-v11"
+BENCHMARK_CACHE_VERSION = "2026-04-06-benchmark-cache-v14-projected-grid-bundled-cache"
+LEGACY_BENCHMARK_CACHE_VERSIONS = (
+    "2026-04-06-benchmark-cache-v13-universal-q",
+    "2026-04-03-benchmark-cache-v11",
+)
+LEGACY_SCENARIO_CACHE_VERSIONS = ("2026-04-03-benchmark-cache-v11",)
 DEFAULT_BENCHMARK_WORKERS = 4
 BENCHMARK_MASTER_SEED = 20260401
+UNIVERSAL_BENCHMARK_SET = "universal"
+UNIVERSAL_XI_VALUES = (0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0)
+UNIVERSAL_THETA_VALUES = (0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0)
+EVI_DEFAULT_THETA_VALUES = (0.01, 0.10, 0.50, 1.0)
+EI_DEFAULT_XI_VALUES = (0.01, 0.50, 1.0, 5.0)
+UNIVERSAL_FAMILIES = (
+    "frechet_max_ar",
+    "moving_maxima_q9",
+    "pareto_additive_ar1",
+)
+EVI_DEFAULT_FAMILIES = (
+    "frechet_max_ar",
+    "moving_maxima_q99",
+    "pareto_additive_ar1",
+)
+EI_DEFAULT_FAMILIES = UNIVERSAL_FAMILIES
+MOVING_MAXIMA_FAMILY_PATTERN = re.compile(r"^moving_maxima_q(?P<q>[1-9]\d*)$")
+
+
+def _try_load_npz(cache_file: Path) -> Any | None:
+    """Open an ``.npz`` cache file, dropping it if it is corrupted."""
+    try:
+        return np.load(cache_file)
+    except (BadZipFile, EOFError, OSError, ValueError):
+        try:
+            cache_file.unlink()
+        except FileNotFoundError:
+            pass
+        return None
+
+
+def _atomic_savez(cache_file: Path, *, compressed: bool = True, **arrays: Any) -> None:
+    """Atomically persist an ``.npz`` cache bundle."""
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=cache_file.parent,
+        prefix=f"{cache_file.stem}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        with tmp_path.open("wb") as handle:
+            if compressed:
+                np.savez_compressed(handle, **arrays)
+            else:
+                np.savez(handle, **arrays)
+        os.replace(tmp_path, cache_file)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _atomic_savez_compressed(cache_file: Path, **arrays: Any) -> None:
+    """Atomically persist a compressed ``.npz`` cache bundle."""
+    _atomic_savez(cache_file, compressed=True, **arrays)
 
 
 @dataclass(frozen=True)
@@ -88,16 +155,18 @@ REGRESSION_MARKERS = {
 FAMILY_LABELS = {
     "frechet_max_ar": "Frechet max-AR",
     "moving_maxima_q2": "Moving Maxima (q=2)",
+    "moving_maxima_q9": "Moving Maxima (q=9)",
+    "moving_maxima_q99": "Moving Maxima (q=99)",
     "pareto_additive_ar1": "Pareto additive AR1",
 }
 FAMILY_ORDER = (
     "frechet_max_ar",
-    "moving_maxima_q2",
+    "moving_maxima_q9",
+    "moving_maxima_q99",
     "pareto_additive_ar1",
 )
 BENCHMARK_SET_LABELS = {
-    "main": "Main range",
-    "stress": "Stress test",
+    UNIVERSAL_BENCHMARK_SET: "Universal grid",
 }
 CORE_METHODS = (
     "disjoint_mean_ols",
@@ -143,6 +212,22 @@ def ordered_families(values: Iterable[str]) -> list[str]:
     ordered = [family for family in FAMILY_ORDER if family in seen]
     extras = sorted(seen.difference(FAMILY_ORDER))
     return ordered + extras
+
+
+def parse_moving_maxima_q(family: str) -> int | None:
+    """Return the moving-maxima order encoded in a family id, if present."""
+    match = MOVING_MAXIMA_FAMILY_PATTERN.fullmatch(str(family))
+    if match is None:
+        return None
+    return int(match.group("q"))
+
+
+def family_label(family: str) -> str:
+    """Render a family id into a stable manuscript-friendly label."""
+    q = parse_moving_maxima_q(family)
+    if q is not None:
+        return f"Moving Maxima (q={q})"
+    return FAMILY_LABELS.get(family, family)
 
 
 def sort_by_family_order(
@@ -235,23 +320,37 @@ def map_theta_to_phi_ar(theta: float, xi: float) -> float:
     return float((1.0 - theta) ** xi)
 
 
-def map_theta_to_phi_mm2(theta: float, xi: float) -> float:
-    """Map theta to phi for moving maxima process with q=2."""
-    if not (1.0 / 3.0 <= theta <= 1.0):
-        # We cap it at bounds for floating point limits instead of erroring in sweeping contexts
-        theta = max(1.0 / 3.0, min(theta, 1.0))
+def _moving_maxima_denominator(x: float, q: int) -> float:
+    """Return 1 + x + ... + x^q on the unit interval."""
+    if np.isclose(x, 1.0):
+        return float(q + 1)
+    exponents = np.arange(q + 1, dtype=float)
+    return float(np.sum(np.power(float(x), exponents)))
+
+
+def map_theta_to_phi_moving_maxima(theta: float, xi: float, q: int) -> float:
+    """Map theta to phi for a moving-maxima process of order q."""
+    theta_min = 1.0 / float(q + 1)
+    theta = float(np.clip(theta, theta_min, 1.0))
     if np.isclose(theta, 1.0):
         return 0.0
-    u = (-1.0 + np.sqrt(4.0 / theta - 3.0)) / 2.0
-    return float(u**xi)
+    if np.isclose(theta, theta_min):
+        return 1.0
+
+    def root_func(x: float) -> float:
+        return (1.0 / _moving_maxima_denominator(x, q)) - theta
+
+    x_hat = float(brentq(root_func, 0.0, 1.0, xtol=1e-12, rtol=1e-10))
+    return float(x_hat**xi)
 
 
 def map_theta_to_phi(family: str, theta: float, xi: float) -> float:
     """Map true extremal index theta to construction parameter phi."""
     if family in ("frechet_max_ar", "pareto_additive_ar1"):
         return map_theta_to_phi_ar(theta, xi)
-    if family == "moving_maxima_q2":
-        return map_theta_to_phi_mm2(theta, xi)
+    q = parse_moving_maxima_q(family)
+    if q is not None:
+        return map_theta_to_phi_moving_maxima(theta, xi, q)
     raise ValueError(f"Unknown family for phi inversion: {family}")
 
 
@@ -259,9 +358,10 @@ def theta_from_phi(family: str, phi: float, xi: float) -> float:
     """Map construction parameter phi back to the closed-form theta truth."""
     if family in ("frechet_max_ar", "pareto_additive_ar1"):
         return float(1.0 - phi ** (1.0 / xi))
-    if family == "moving_maxima_q2":
-        x = phi ** (1.0 / xi)
-        return float(1.0 / (1.0 + x + x**2))
+    q = parse_moving_maxima_q(family)
+    if q is not None:
+        x = float(phi ** (1.0 / xi))
+        return float(1.0 / _moving_maxima_denominator(x, q))
     raise ValueError(f"Unknown family for theta mapping: {family}")
 
 
@@ -395,105 +495,108 @@ def simulate_series(cfg: SimulationConfig, rng: np.random.Generator) -> np.ndarr
         return simulate_pareto_additive_ar1_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng)
     if cfg.family == "frechet_max_ar":
         return simulate_frechet_max_ar_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng)
-    if cfg.family == "moving_maxima_q2":
-        return simulate_moving_maxima_q2_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng)
+    q = parse_moving_maxima_q(cfg.family)
+    if q is not None:
+        return simulate_moving_maxima_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng, q=q)
     raise ValueError(f"Unknown family: {cfg.family}")
 
 
 def default_evi_simulation_configs(
     *,
-    theta_values: Iterable[float] = (1.00, 0.70, 0.50, 0.35),
-    xi_values_main: Iterable[float] = (0.10, 0.20, 0.50, 1.0, 2.0, 3.0, 5.0, 10.0),
-    xi_values_stress: Iterable[float] = (),
+    xi_values: Iterable[float] = UNIVERSAL_XI_VALUES,
+    theta_values: Iterable[float] = EVI_DEFAULT_THETA_VALUES,
+    families: Iterable[str] = EVI_DEFAULT_FAMILIES,
     n_obs: int = 365,
-    reps: int | None = None,
-    reps_main: int = 32,
-    reps_stress: int = 8,
+    reps: int = 32,
     quantile: float = 0.5,
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> list[SimulationConfig]:
-    """Build the default EVI grid (fixed theta, sweep xi)."""
-    if reps is not None:
-        reps_main = int(reps)
-        reps_stress = int(reps)
+    """Build the default EVI benchmark grid.
+
+    The EVI workflow keeps the full xi range but only a representative slice of
+    theta values so manuscript plots stay readable and routine reruns remain
+    tractable.
+    """
     configs: list[SimulationConfig] = []
-    settings = [
-        ("main", xi_values_main, reps_main),
-        ("stress", xi_values_stress, reps_stress),
-    ]
-    for benchmark_set, xi_values, reps in settings:
-        for family in FAMILY_ORDER:
-            for theta in theta_values:
-                for xi in xi_values:
-                    phi = map_theta_to_phi(family, float(theta), float(xi))
-                    configs.append(
-                        SimulationConfig(
-                            benchmark_set=benchmark_set,
-                            family=family,
-                            xi_true=float(xi),
-                            theta_true=float(theta),
-                            phi=float(phi),
-                            n_obs=n_obs,
-                            reps=reps,
-                            quantile=quantile,
-                        )
+    family_values = tuple(str(family) for family in families)
+    for family in family_values:
+        for theta in theta_values:
+            for xi in xi_values:
+                phi = map_theta_to_phi(family, float(theta), float(xi))
+                configs.append(
+                    SimulationConfig(
+                        benchmark_set=str(benchmark_set),
+                        family=family,
+                        xi_true=float(xi),
+                        theta_true=float(theta),
+                        phi=float(phi),
+                        n_obs=n_obs,
+                        reps=int(reps),
+                        quantile=quantile,
                     )
+                )
     return configs
 
 
 def default_ei_simulation_configs(
     *,
-    xi_values: Iterable[float] = (0.50, 1.0, 5.0, 10.0),
-    theta_values_main: Iterable[float] = (1.00, 0.85, 0.70, 0.55, 0.45, 0.35),
-    theta_values_stress: Iterable[float] = (),
+    xi_values: Iterable[float] = EI_DEFAULT_XI_VALUES,
+    theta_values: Iterable[float] = UNIVERSAL_THETA_VALUES,
+    families: Iterable[str] = EI_DEFAULT_FAMILIES,
     n_obs: int = 365,
-    reps: int | None = None,
-    reps_main: int = 32,
-    reps_stress: int = 8,
+    reps: int = 32,
     quantile: float = 0.5,
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> list[SimulationConfig]:
-    """Build the default EI grid (fixed xi, sweep theta)."""
-    if reps is not None:
-        reps_main = int(reps)
-        reps_stress = int(reps)
+    """Build the default EI benchmark grid.
+
+    The EI workflow keeps the full theta range but only a representative slice
+    of xi values so the benchmark still covers weak to very heavy tails without
+    exploding the scenario count.
+    """
     configs: list[SimulationConfig] = []
-    settings = [
-        ("main", theta_values_main, reps_main),
-        ("stress", theta_values_stress, reps_stress),
-    ]
-    for benchmark_set, theta_values, reps in settings:
-        for family in FAMILY_ORDER:
-            for xi in xi_values:
-                for theta in theta_values:
-                    phi = map_theta_to_phi(family, float(theta), float(xi))
-                    configs.append(
-                        SimulationConfig(
-                            benchmark_set=benchmark_set,
-                            family=family,
-                            xi_true=float(xi),
-                            theta_true=float(theta),
-                            phi=float(phi),
-                            n_obs=n_obs,
-                            reps=reps,
-                            quantile=quantile,
-                        )
+    family_values = tuple(str(family) for family in families)
+    for family in family_values:
+        for xi in xi_values:
+            for theta in theta_values:
+                phi = map_theta_to_phi(family, float(theta), float(xi))
+                configs.append(
+                    SimulationConfig(
+                        benchmark_set=str(benchmark_set),
+                        family=family,
+                        xi_true=float(xi),
+                        theta_true=float(theta),
+                        phi=float(phi),
+                        n_obs=n_obs,
+                        reps=int(reps),
+                        quantile=quantile,
                     )
+                )
     return configs
 
 
 def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:
     """Backward-compatible alias for the default EVI benchmark grid."""
-    if "xi_values" in kwargs and "xi_values_main" not in kwargs:
-        kwargs["xi_values_main"] = kwargs.pop("xi_values")
+    legacy_map = {
+        "xi_values_main": "xi_values",
+        "theta_values_main": "theta_values",
+    }
+    for old_key, new_key in legacy_map.items():
+        if old_key in kwargs and new_key not in kwargs:
+            kwargs[new_key] = kwargs.pop(old_key)
     unsupported_legacy = sorted(
         set(kwargs).intersection(
             {
-                "families",
+                "xi_values_stress",
+                "theta_values_stress",
                 "phi_values",
                 "phi_values_main",
                 "phi_values_stress",
                 "tau_values",
                 "tau_values_main",
                 "tau_values_stress",
+                "reps_main",
+                "reps_stress",
             }
         )
     )
@@ -501,10 +604,9 @@ def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:
         joined = ", ".join(unsupported_legacy)
         raise TypeError(
             "default_simulation_configs no longer accepts "
-            f"{joined}. The benchmark now uses (xi_true, theta_true) as the "
-            "truth grid with a fixed family set. Use "
-            "default_evi_simulation_configs(theta_values=..., xi_values_main=...) "
-            "or default_ei_simulation_configs(xi_values=..., theta_values_main=...)."
+            f"{joined}. The benchmark now uses one universal (xi_true, theta_true) grid. "
+            "Use default_evi_simulation_configs(xi_values=..., theta_values=...) or "
+            "default_ei_simulation_configs(xi_values=..., theta_values=...)."
         )
     return default_evi_simulation_configs(**kwargs)
 
@@ -514,12 +616,14 @@ def _series_cache_file(
     cfg: SimulationConfig,
     *,
     random_state: int,
-    legacy: bool = False,
+    version: str | None = None,
 ) -> Path:
     """Return the on-disk cache path for one scenario's simulated series bank."""
-    scenario_key = cfg.legacy_scenario if legacy else cfg.scenario
-    version = LEGACY_BENCHMARK_CACHE_VERSION if legacy else BENCHMARK_CACHE_VERSION
-    return cache_dir / "series" / f"{version}__{scenario_key}__seed{random_state}.npz"
+    scenario_key = cfg.scenario
+    resolved_version = BENCHMARK_CACHE_VERSION if version is None else str(version)
+    if resolved_version in LEGACY_SCENARIO_CACHE_VERSIONS:
+        scenario_key = cfg.legacy_scenario
+    return cache_dir / "series" / f"{resolved_version}__{scenario_key}__seed{random_state}.npz"
 
 
 def _raw_bootstrap_cache_file(
@@ -527,6 +631,7 @@ def _raw_bootstrap_cache_file(
     *,
     cache_key: str,
     bootstrap_reps: int,
+    version: str | None = None,
 ) -> Path:
     """Return the raw-series bootstrap bank cache path for external estimators.
 
@@ -534,10 +639,9 @@ def _raw_bootstrap_cache_file(
     external-estimator sensitivity runs. Internal UniBM methods report their
     native Wald/FGLS intervals and therefore do not consume this cache.
     """
+    resolved_version = BENCHMARK_CACHE_VERSION if version is None else str(version)
     return (
-        cache_dir
-        / "raw_bootstrap"
-        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__reps{bootstrap_reps}.npz"
+        cache_dir / "raw_bootstrap" / f"{resolved_version}__{cache_key}__reps{bootstrap_reps}.npz"
     )
 
 
@@ -554,21 +658,20 @@ def load_or_simulate_series_bank(
     """
     if cache_dir is not None:
         cache_file = _series_cache_file(cache_dir, cfg, random_state=random_state)
-        legacy_cache_file = _series_cache_file(
-            cache_dir,
-            cfg,
-            random_state=random_state,
-            legacy=True,
-        )
-
-        for p in (cache_file, legacy_cache_file):
+        legacy_cache_files = [
+            _series_cache_file(cache_dir, cfg, random_state=random_state, version=version)
+            for version in LEGACY_BENCHMARK_CACHE_VERSIONS
+        ]
+        for p in (cache_file, *legacy_cache_files):
             if p.exists():
-                with np.load(p) as data:
+                loaded = _try_load_npz(p)
+                if loaded is None:
+                    continue
+                with loaded as data:
                     series_bank = np.asarray(data["series"], dtype=float)
                 if series_bank.shape == (cfg.reps, cfg.n_obs):
-                    if p == legacy_cache_file and not cache_file.exists():
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        np.savez_compressed(cache_file, series=series_bank)
+                    if p != cache_file and not cache_file.exists():
+                        _atomic_savez_compressed(cache_file, series=series_bank)
                     return series_bank
 
     rng = np.random.default_rng(random_state)
@@ -577,8 +680,7 @@ def load_or_simulate_series_bank(
         series_bank[rep] = simulate_series(cfg, rng)
     if cache_dir is not None:
         cache_file = _series_cache_file(cache_dir, cfg, random_state=random_state)
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache_file, series=series_bank)
+        _atomic_savez_compressed(cache_file, series=series_bank)
     return series_bank
 
 
@@ -604,11 +706,31 @@ def load_or_draw_raw_bootstrap_samples(
             cache_key=cache_key,
             bootstrap_reps=bootstrap_reps,
         )
-        if cache_file.exists():
-            with np.load(cache_file) as data:
-                samples = np.asarray(data["samples"], dtype=float)
-            if samples.shape == (bootstrap_reps, values.size):
-                return samples
+        legacy_cache_files = [
+            _raw_bootstrap_cache_file(
+                cache_dir,
+                cache_key=cache_key,
+                bootstrap_reps=bootstrap_reps,
+                version=version,
+            )
+            for version in LEGACY_BENCHMARK_CACHE_VERSIONS
+        ]
+        for p in (cache_file, *legacy_cache_files):
+            if p.exists():
+                loaded = _try_load_npz(p)
+                if loaded is None:
+                    continue
+                with loaded as data:
+                    samples = np.asarray(data["samples"], dtype=float)
+                    block_size = np.asarray(data.get("block_size", np.nan))
+                if samples.shape == (bootstrap_reps, values.size):
+                    if p != cache_file and not cache_file.exists():
+                        _atomic_savez_compressed(
+                            cache_file,
+                            samples=samples,
+                            block_size=block_size,
+                        )
+                    return samples
     bootstrap_bank = draw_circular_block_bootstrap_samples(
         values,
         reps=bootstrap_reps,
@@ -616,8 +738,11 @@ def load_or_draw_raw_bootstrap_samples(
     )
     samples = bootstrap_bank.samples
     if cache_dir is not None:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache_file, samples=samples, block_size=bootstrap_bank.block_size)
+        _atomic_savez_compressed(
+            cache_file,
+            samples=samples,
+            block_size=bootstrap_bank.block_size,
+        )
     return samples
 
 
@@ -651,54 +776,65 @@ def _internal_bootstrap_cache_file(
     cache_dir: Path,
     *,
     cache_key: str,
-    sliding: bool,
     quantile: float,
     reps: int,
 ) -> Path:
-    """Return the on-disk cache path for one scheme's shared FGLS bootstrap."""
-    scheme = "sliding" if sliding else "disjoint"
+    """Return the on-disk cache path for one series-wide EVI bootstrap bundle."""
     return (
         cache_dir
         / "internal_bootstrap"
-        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__{scheme}__q{quantile:.4f}__reps{reps}.npz"
+        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__q{quantile:.4f}__reps{reps}.npz"
     )
 
 
 def _save_bootstrap_results_bundle(
     cache_file: Path,
-    bootstrap_results: dict[str, dict[str, Any]],
+    bundle: dict[str, dict[str, dict[str, Any]]],
 ) -> None:
-    """Persist one scheme's multi-target bootstrap results to disk."""
-    arrays: dict[str, Any] = {"targets": np.asarray(list(bootstrap_results), dtype="U32")}
-    for target, result in bootstrap_results.items():
-        arrays[f"{target}__block_sizes"] = np.asarray(result["block_sizes"], dtype=int)
-        arrays[f"{target}__samples"] = np.asarray(result["samples"], dtype=float)
-        covariance = result.get("covariance")
-        arrays[f"{target}__has_covariance"] = np.asarray(covariance is not None, dtype=bool)
-        arrays[f"{target}__covariance"] = (
-            np.asarray(covariance, dtype=float)
-            if covariance is not None
-            else np.empty((0, 0), dtype=float)
-        )
+    """Persist one series-wide EVI bootstrap bundle to disk."""
+    arrays: dict[str, Any] = {"schemes": np.asarray(list(bundle), dtype="U16")}
+    for scheme, bootstrap_results in bundle.items():
+        arrays[f"{scheme}__targets"] = np.asarray(list(bootstrap_results), dtype="U32")
+        for target, result in bootstrap_results.items():
+            prefix = f"{scheme}__{target}"
+            arrays[f"{prefix}__block_sizes"] = np.asarray(result["block_sizes"], dtype=int)
+            arrays[f"{prefix}__samples"] = np.asarray(result["samples"], dtype=float)
+            covariance = result.get("covariance")
+            arrays[f"{prefix}__has_covariance"] = np.asarray(covariance is not None, dtype=bool)
+            arrays[f"{prefix}__covariance"] = (
+                np.asarray(covariance, dtype=float)
+                if covariance is not None
+                else np.empty((0, 0), dtype=float)
+            )
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(cache_file, **arrays)
+    _atomic_savez(cache_file, compressed=False, **arrays)
 
 
-def _load_bootstrap_results_bundle(cache_file: Path) -> dict[str, dict[str, Any]]:
-    """Reload one scheme's cached multi-target bootstrap results from disk."""
-    with np.load(cache_file) as data:
-        targets = [str(target) for target in np.asarray(data["targets"])]
-        results: dict[str, dict[str, Any]] = {}
-        for target in targets:
-            has_covariance = bool(np.asarray(data.get(f"{target}__has_covariance", True)).item())
-            covariance = np.asarray(data[f"{target}__covariance"], dtype=float)
-            results[target] = {
-                "block_sizes": np.asarray(data[f"{target}__block_sizes"], dtype=int),
-                "samples": np.asarray(data[f"{target}__samples"], dtype=float),
-                "covariance": covariance if has_covariance and covariance.size else None,
-                "target": target,
-            }
-    return results
+def _load_bootstrap_results_bundle(cache_file: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    """Reload one series-wide cached EVI bootstrap bundle from disk."""
+    loaded = _try_load_npz(cache_file)
+    if loaded is None:
+        raise FileNotFoundError(cache_file)
+    with loaded as data:
+        schemes = [str(scheme) for scheme in np.asarray(data["schemes"])]
+        bundle: dict[str, dict[str, dict[str, Any]]] = {}
+        for scheme in schemes:
+            targets = [str(target) for target in np.asarray(data[f"{scheme}__targets"])]
+            scheme_results: dict[str, dict[str, Any]] = {}
+            for target in targets:
+                prefix = f"{scheme}__{target}"
+                has_covariance = bool(
+                    np.asarray(data.get(f"{prefix}__has_covariance", True)).item()
+                )
+                covariance = np.asarray(data[f"{prefix}__covariance"], dtype=float)
+                scheme_results[target] = {
+                    "block_sizes": np.asarray(data[f"{prefix}__block_sizes"], dtype=int),
+                    "samples": np.asarray(data[f"{prefix}__samples"], dtype=float),
+                    "covariance": covariance if has_covariance and covariance.size else None,
+                    "target": target,
+                }
+            bundle[scheme] = scheme_results
+    return bundle
 
 
 def _internal_target_name(summary_target: str) -> str:
@@ -771,12 +907,16 @@ def _scheme_bootstrap_results(
         cache_file = _internal_bootstrap_cache_file(
             cache_dir,
             cache_key=cache_key,
-            sliding=sliding,
             quantile=quantile,
             reps=FGLS_BOOTSTRAP_REPS,
         )
+        scheme_name = "sliding" if sliding else "disjoint"
         if cache_file.exists():
-            cached = _load_bootstrap_results_bundle(cache_file)
+            try:
+                cached_bundle = _load_bootstrap_results_bundle(cache_file)
+            except FileNotFoundError:
+                cached_bundle = {}
+            cached = cached_bundle.get(scheme_name, {})
             if set(cached) == set(fgls_targets):
                 return cached
     bootstrap_results = circular_block_summary_bootstrap_multi_target(
@@ -789,7 +929,14 @@ def _scheme_bootstrap_results(
         random_state=random_state,
     )
     if cache_dir is not None and cache_key is not None:
-        _save_bootstrap_results_bundle(cache_file, bootstrap_results)
+        existing_bundle = {}
+        if cache_file.exists():
+            try:
+                existing_bundle = _load_bootstrap_results_bundle(cache_file)
+            except FileNotFoundError:
+                existing_bundle = {}
+        existing_bundle["sliding" if sliding else "disjoint"] = bootstrap_results
+        _save_bootstrap_results_bundle(cache_file, existing_bundle)
     return bootstrap_results
 
 
