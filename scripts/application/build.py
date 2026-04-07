@@ -4,24 +4,32 @@
 from __future__ import annotations
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
+    from pathlib import Path
 
-    ensure_scripts_on_path_from_entry(__file__)
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
-from workflows.application_fit import (
+from application.fit import (
     build_application_bundle,
     build_application_bundles,
 )
-from workflows.application_inputs import (
+from application.inputs import (
     build_application_inputs,
     ensure_ghcn_raw_data,
     ensure_nfip_raw_data,
     ensure_usgs_raw_data,
     load_usgs_frozen_sites,
 )
-from workflows.application_outputs import (
+from application.outputs import (
     application_ei_method_rows,
     application_method_rows,
+    plot_application_composite,
     plot_application_ei,
     plot_application_overview,
     plot_application_return_levels,
@@ -31,15 +39,16 @@ from workflows.application_outputs import (
     application_summary_record,
     application_summary_table,
     build_application_outputs,
+    seasonal_monthly_pit_unit_frechet,
     write_application_figures,
 )
-from workflows.application_specs import (
+from application.specs import (
     APPLICATIONS,
     ApplicationBundle,
     ApplicationPreparedInputs,
     ApplicationSpec,
 )
-from workflows.workflow_runtime import status
+from shared.runtime import status
 
 
 __all__ = [
@@ -59,12 +68,14 @@ __all__ = [
     "ensure_nfip_raw_data",
     "ensure_usgs_raw_data",
     "load_usgs_frozen_sites",
+    "plot_application_composite",
     "plot_application_ei",
     "plot_application_overview",
     "plot_application_return_levels",
     "plot_application_scaling",
     "plot_application_target_stability",
     "plot_application_time_series",
+    "seasonal_monthly_pit_unit_frechet",
     "write_application_figures",
 ]
 

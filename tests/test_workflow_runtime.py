@@ -1,11 +1,19 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 from contextlib import redirect_stdout
 import io
+import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from scripts.workflows.workflow_runtime import resolve_bool_env, resolve_int_env, status
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from shared.runtime import resolve_bool_env, resolve_int_env, status
 
 
 class WorkflowRuntimeTests(unittest.TestCase):

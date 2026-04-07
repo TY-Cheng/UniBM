@@ -11,7 +11,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from workflows import application
+import application.build as application
 
 
 class ApplicationFacadeTests(unittest.TestCase):
@@ -25,6 +25,8 @@ class ApplicationFacadeTests(unittest.TestCase):
             "build_application_bundles",
             "build_application_outputs",
             "load_usgs_frozen_sites",
+            "plot_application_composite",
+            "seasonal_monthly_pit_unit_frechet",
         }
         self.assertTrue(expected.issubset(set(application.__all__)))
         for name in expected:

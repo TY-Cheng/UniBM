@@ -23,7 +23,7 @@ from unibm.extremal_index import (
     prepare_ei_bundle,
 )
 
-from .benchmark_design import (
+from benchmark.design import (
     _atomic_savez,
     _try_load_npz,
     BENCHMARK_CACHE_VERSION,
@@ -34,7 +34,7 @@ from .benchmark_design import (
     resolve_benchmark_workers,
     scenario_random_state,
 )
-from .benchmark_common import (
+from benchmark.common import (
     IQR_LOWER,
     IQR_UPPER,
     interval_score,
@@ -42,7 +42,7 @@ from .benchmark_common import (
     quantile_agg,
     wilson_interval,
 )
-from .workflow_runtime import status
+from shared.runtime import status
 
 EI_INTERNAL_METHODS = [
     "northrop_disjoint_ols",

@@ -23,12 +23,15 @@ import sys
 from typing import Iterable
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
 
-    ensure_scripts_on_path_from_entry(__file__)
-    _STANDALONE_SCRIPT = True
-else:
-    _STANDALONE_SCRIPT = False
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from unibm._runtime import prepare_matplotlib_env
 
@@ -44,56 +47,30 @@ import pandas as pd
 
 from unibm.extremal_index import EI_CI_LEVEL
 
-if _STANDALONE_SCRIPT:
-    from workflows.benchmark_design import (
-        UNIVERSAL_BENCHMARK_SET,
-        family_label,
-        ordered_families,
-        sort_by_family_order,
-    )
-    from workflows.ei_benchmark_eval import (
-        EI_EXTERNAL_METHODS,
-        EI_FGLS_METHODS,
-        EI_INTERNAL_METHODS,
-        EI_METHOD_COLORS,
-        EI_METHOD_LABELS,
-        EI_METHOD_LINESTYLES,
-        EI_METHOD_MARKERS,
-        EI_TARGET_INTERNAL_METHODS,
-    )
-    from workflows.benchmark_common import (
-        IQR_LOWER,
-        IQR_UPPER,
-        format_median_iqr,
-        quantile_agg,
-        render_latex_table,
-    )
-    from workflows.workflow_runtime import status
-else:
-    from .benchmark_design import (
-        UNIVERSAL_BENCHMARK_SET,
-        family_label,
-        ordered_families,
-        sort_by_family_order,
-    )
-    from .ei_benchmark_eval import (
-        EI_EXTERNAL_METHODS,
-        EI_FGLS_METHODS,
-        EI_INTERNAL_METHODS,
-        EI_METHOD_COLORS,
-        EI_METHOD_LABELS,
-        EI_METHOD_LINESTYLES,
-        EI_METHOD_MARKERS,
-        EI_TARGET_INTERNAL_METHODS,
-    )
-    from .benchmark_common import (
-        IQR_LOWER,
-        IQR_UPPER,
-        format_median_iqr,
-        quantile_agg,
-        render_latex_table,
-    )
-    from .workflow_runtime import status
+from benchmark.design import (
+    UNIVERSAL_BENCHMARK_SET,
+    family_label,
+    ordered_families,
+    sort_by_family_order,
+)
+from benchmark.ei_eval import (
+    EI_EXTERNAL_METHODS,
+    EI_FGLS_METHODS,
+    EI_INTERNAL_METHODS,
+    EI_METHOD_COLORS,
+    EI_METHOD_LABELS,
+    EI_METHOD_LINESTYLES,
+    EI_METHOD_MARKERS,
+    EI_TARGET_INTERNAL_METHODS,
+)
+from benchmark.common import (
+    IQR_LOWER,
+    IQR_UPPER,
+    format_median_iqr,
+    quantile_agg,
+    render_latex_table,
+)
+from shared.runtime import status
 
 # ---------------------------------------------------------------------------
 # Story-table helpers
@@ -656,10 +633,7 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
     """Materialize EI benchmark manuscript figures and LaTeX tables."""
     from config import resolve_repo_dirs
 
-    if _STANDALONE_SCRIPT:
-        from workflows.ei_benchmark import load_or_materialize_ei_benchmark_outputs
-    else:
-        from .ei_benchmark import load_or_materialize_ei_benchmark_outputs
+    from benchmark.ei_benchmark import load_or_materialize_ei_benchmark_outputs
 
     dirs = resolve_repo_dirs(root)
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]

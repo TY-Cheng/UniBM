@@ -1,4 +1,5 @@
 """Freeze the manuscript USGS streamflow sites from a curated candidate pool."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -9,9 +10,15 @@ import numpy as np
 import pandas as pd
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
 
-    ensure_scripts_on_path_from_entry(__file__)
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
 from data_prep.usgs import (
@@ -19,9 +26,9 @@ from data_prep.usgs import (
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
-from workflows.application_metadata import ensure_application_metadata
-from workflows.application_screening import screen_extreme_series
-from workflows.workflow_runtime import resolve_bool_env, status
+from application.metadata import ensure_application_metadata
+from application.screening import screen_extreme_series
+from shared.runtime import resolve_bool_env, status
 
 
 def _load_candidate_sites(path: Path) -> dict[str, list[dict[str, str]]]:

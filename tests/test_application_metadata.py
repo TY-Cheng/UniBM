@@ -1,12 +1,19 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import pandas as pd
 
-from scripts.workflows.application_metadata import ensure_application_metadata
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from application.metadata import ensure_application_metadata
 
 
 class ApplicationMetadataTests(unittest.TestCase):

@@ -4,6 +4,7 @@ This module owns the raw benchmark computation and CSV materialization. The
 manuscript workflow reads those cached CSVs and is solely responsible for
 manuscript-facing figures and LaTeX tables.
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -17,14 +18,20 @@ from typing import Any
 import pandas as pd
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
 
-    ensure_scripts_on_path_from_entry(__file__)
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
 from unibm.models import ScalingFit
 
-from workflows.benchmark_design import (
+from benchmark.design import (
     BENCHMARK_MASTER_SEED,
     BENCHMARK_SET_LABELS,
     BLOCK_LINESTYLES,
@@ -47,18 +54,18 @@ from workflows.benchmark_design import (
     scenario_random_state,
     sort_by_method_order,
 )
-from workflows.benchmark_common import (
+from benchmark.common import (
     interval_score,
     interval_width,
 )
-from workflows.evi_report import (
+from benchmark.evi_report import (
     benchmark_summary,
 )
-from workflows.evi_benchmark_external import (
+from benchmark.evi_external import (
     EXTERNAL_ESTIMATORS,
     run_external_benchmark,
 )
-from workflows.workflow_runtime import status
+from shared.runtime import status
 
 
 BENCHMARK_ALPHA = 0.05

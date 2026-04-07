@@ -1,11 +1,19 @@
 """Profile guarded sliding-window helpers against the pre-refactor baselines."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
+    from pathlib import Path
 
-    ensure_scripts_on_path_from_entry(__file__)
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from dataclasses import dataclass
 from time import perf_counter
@@ -18,7 +26,7 @@ from config import resolve_repo_dirs
 from unibm.bootstrap import _sliding_block_maxima
 from unibm.core import block_maxima
 from unibm.extremal_index import _rolling_window_minima
-from workflows.workflow_runtime import status
+from shared.runtime import status
 
 
 PROFILE_REPEATS = 3

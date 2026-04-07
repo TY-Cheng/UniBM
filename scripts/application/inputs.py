@@ -23,9 +23,9 @@ from data_prep.usgs import (
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
-from .application_metadata import ensure_application_metadata
-from .application_specs import APPLICATIONS, ApplicationPreparedInputs
-from .workflow_runtime import resolve_bool_env, status
+from application.metadata import ensure_application_metadata
+from application.specs import APPLICATIONS, ApplicationPreparedInputs
+from shared.runtime import resolve_bool_env, status
 
 
 def _load_json(path: Path) -> dict[str, object]:

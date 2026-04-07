@@ -14,7 +14,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from data_prep.ghcn import PreparedSeries
-from workflows.application import (
+from application.build import (
     ApplicationPreparedInputs,
     ApplicationSpec,
     build_application_bundle,
@@ -141,6 +141,36 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
         self.assertGreater(int((bundle.prepared.ei.series == 0.0).sum()), 0)
         self.assertTrue(np.isfinite(bundle.ei_primary.theta_hat))
         self.assertTrue(np.isfinite(bundle.ei_comparator.theta_hat))
+
+    def test_evi_only_application_bundle_skips_formal_ei_fits(self) -> None:
+        rs = np.random.default_rng(31)
+        index = pd.date_range("1995-01-01", periods=365 * 15, freq="D")
+        values = pd.Series(
+            rs.gamma(shape=2.0, scale=3.5, size=index.size), index=index, dtype=float
+        )
+
+        prepared = _make_prepared(values, name="evi_only", provider="ghcn", role="shared")
+        inputs = ApplicationPreparedInputs(display=prepared, evi=prepared, ei=prepared)
+        spec = ApplicationSpec(
+            key="evi_only",
+            provider="ghcn",
+            label="EVI-only",
+            figure_stem="evi_only",
+            raw_key="none",
+            ylabel="value",
+            time_series_title="EVI-only",
+            scaling_title="EVI-only scaling",
+            scaling_ylabel="log median block maximum",
+            formal_ei=False,
+        )
+
+        bundle = build_application_bundle(spec, inputs)
+
+        self.assertTrue(np.isfinite(bundle.evi_fit.slope))
+        self.assertIsNone(bundle.ei_bundle)
+        self.assertIsNone(bundle.ei_bb_sliding_fgls)
+        with self.assertRaises(ValueError):
+            _ = bundle.ei_primary
 
 
 if __name__ == "__main__":

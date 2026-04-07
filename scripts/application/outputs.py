@@ -19,24 +19,26 @@ from config import resolve_repo_dirs
 import numpy as np
 import pandas as pd
 
-from .application_fit import build_application_bundles_from_inputs
-from .application_inputs import (
+from application.fit import build_application_bundles_from_inputs, fit_application_ei_estimates
+from application.inputs import (
     build_application_inputs,
     ensure_ghcn_raw_data,
     ensure_nfip_raw_data,
     ensure_usgs_raw_data,
     load_usgs_frozen_sites,
 )
-from .application_metadata import ensure_application_metadata
-from .application_screening import screen_extreme_series, screen_extremal_index_series
-from .application_specs import (
+from application.metadata import ensure_application_metadata
+from application.screening import screen_extreme_series, screen_extremal_index_series
+from application.specs import (
+    APPLICATION_EI_METHOD_IDS,
+    APPLICATION_EVI_METHOD_IDS,
     APPLICATION_RANDOM_STATE,
     RETURN_LEVEL_HORIZONS,
     ApplicationBundle,
 )
-from .workflow_runtime import status
-from .benchmark_common import render_latex_table
-from .benchmark_design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
+from shared.runtime import status
+from benchmark.common import render_latex_table
+from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
 from unibm.core import estimate_return_level
 from unibm.plotting import plot_scaling_fit
 
@@ -48,6 +50,86 @@ def _application_observations_per_year(bundle: ApplicationBundle) -> float:
     series = bundle.prepared.evi.series
     n_years = max((series.index.max() - series.index.min()).days / 365.25, 1.0)
     return float(series.size / n_years)
+
+
+def _bundle_has_formal_ei(bundle: ApplicationBundle) -> bool:
+    """Return whether the application participates in the formal EI workflow."""
+    return bool(bundle.spec.formal_ei and bundle.ei_bb_sliding_fgls is not None)
+
+
+def _bundle_ei_estimates(bundle: ApplicationBundle) -> dict[str, object]:
+    """Return the main application EI estimates keyed by method id."""
+    return bundle.ei_method_map
+
+
+def _stable_window_text(estimate) -> str:
+    """Format one EI stable window for compact tables."""
+    if estimate.stable_window is None:
+        return "NA"
+    return f"{int(estimate.stable_window.lo)}-{int(estimate.stable_window.hi)}"
+
+
+def seasonal_monthly_pit_unit_frechet(series: pd.Series) -> pd.Series:
+    """Map a daily series to a seasonal-adjusted unit-Frechet scale by month.
+
+    The transform is deterministic and preserves the original daily index.
+    Within each calendar month, values are mapped to scaled empirical ranks
+    `u = rank / (n + 1)` and then transformed by the unit-Frechet inverse CDF
+    `x = -1 / log(u)`.
+    """
+    if not isinstance(series.index, pd.DatetimeIndex):
+        raise TypeError("Seasonal EI sensitivity requires a DatetimeIndex.")
+    values = pd.to_numeric(series, errors="coerce")
+    transformed = pd.Series(np.nan, index=series.index, dtype=float, name=series.name)
+    for month in range(1, 13):
+        month_mask = values.index.month == month
+        month_values = values.loc[month_mask]
+        finite_mask = np.isfinite(month_values.to_numpy(dtype=float))
+        if not np.any(finite_mask):
+            continue
+        finite_values = month_values.iloc[np.flatnonzero(finite_mask)]
+        ranks = finite_values.rank(method="average").to_numpy(dtype=float)
+        u = np.clip(ranks / (finite_values.size + 1.0), 1e-12, 1.0 - 1e-12)
+        transformed.loc[finite_values.index] = 1.0 / (-np.log(u))
+    return transformed
+
+
+def _seasonal_adjusted_ei_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
+    """Build seasonal-adjusted EI sensitivity rows for one application."""
+    if not _bundle_has_formal_ei(bundle):
+        return []
+    transformed = seasonal_monthly_pit_unit_frechet(bundle.prepared.ei.series)
+    _, estimates = fit_application_ei_estimates(
+        transformed,
+        allow_zeros=False,
+        label=f"{bundle.spec.label} seasonal-adjusted EI sensitivity",
+        status_prefix="application",
+    )
+    rows: list[dict[str, object]] = []
+    for method in APPLICATION_EI_METHOD_IDS:
+        estimate = estimates[method]
+        rows.append(
+            {
+                "application": bundle.spec.key,
+                "provider": bundle.spec.provider,
+                "transform": "monthly_pit_unit_frechet",
+                "method": method,
+                "theta_hat": float(estimate.theta_hat),
+                "theta_lo": float(estimate.confidence_interval[0]),
+                "theta_hi": float(estimate.confidence_interval[1]),
+                "standard_error": float(estimate.standard_error),
+                "stable_level_lo": (
+                    np.nan if estimate.stable_window is None else float(estimate.stable_window.lo)
+                ),
+                "stable_level_hi": (
+                    np.nan if estimate.stable_window is None else float(estimate.stable_window.hi)
+                ),
+                "mean_cluster_size": float(1.0 / estimate.theta_hat),
+                "ci_method": estimate.ci_method,
+                "ci_variant": estimate.ci_variant,
+            }
+        )
+    return rows
 
 
 def _format_interval(center: float, lo: float, hi: float) -> str:
@@ -77,11 +159,16 @@ def _role_series_rows(
 ) -> list[dict[str, object]]:
     """Write and register the role-specific series behind one application."""
     rows: list[dict[str, object]] = []
-    series_map = {
+    series_map: dict[str, object] = {
         "display": bundle.prepared.display,
         "evi": bundle.prepared.evi,
-        "ei": bundle.prepared.ei,
     }
+    if bundle.spec.formal_ei:
+        series_map["ei"] = bundle.prepared.ei
+    else:
+        stale_ei_path = derived_dir / "applications" / f"{bundle.spec.key}__ei.csv.gz"
+        if stale_ei_path.exists():
+            stale_ei_path.unlink()
     for role, prepared in series_map.items():
         file_path = derived_dir / "applications" / f"{bundle.spec.key}__{role}.csv.gz"
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +201,7 @@ def _application_return_level_rows(bundle: ApplicationBundle) -> list[dict[str, 
         observations_per_year=observations_per_year,
     )
     adjusted = None
-    if bundle.spec.provider != "fema":
+    if bundle.spec.provider != "fema" and _bundle_has_formal_ei(bundle):
         adjusted = estimate_return_level(
             bundle.evi_fit,
             RETURN_LEVEL_HORIZONS,
@@ -134,7 +221,11 @@ def _application_return_level_rows(bundle: ApplicationBundle) -> list[dict[str, 
                 "return_level_ei_adjusted": (
                     float("nan") if adjusted is None else float(adjusted[idx])
                 ),
-                "theta_hat": float(bundle.ei_primary.theta_hat),
+                "theta_hat": (
+                    float("nan")
+                    if not _bundle_has_formal_ei(bundle)
+                    else float(bundle.ei_primary.theta_hat)
+                ),
             }
         )
     return rows
@@ -142,6 +233,10 @@ def _application_return_level_rows(bundle: ApplicationBundle) -> list[dict[str, 
 
 def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
     """Summarize the primary EVI/EI application outputs for CSV/JSON export."""
+    bb = bundle.ei_bb_sliding_fgls
+    northrop = bundle.ei_northrop_sliding_fgls
+    k_gaps = bundle.ei_k_gaps
+    ferro = bundle.ei_ferro_segers
     return {
         "application": bundle.spec.key,
         "label": bundle.spec.label,
@@ -149,7 +244,7 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
         "secondary_case": bundle.spec.secondary_case,
         "n_display_obs": int(bundle.prepared.display.series.size),
         "n_evi_obs": int(bundle.prepared.evi.series.size),
-        "n_ei_obs": int(bundle.prepared.ei.series.size),
+        "n_ei_obs": (int(bundle.prepared.ei.series.size) if bundle.spec.formal_ei else np.nan),
         "start": str(bundle.prepared.display.series.index.min().date()),
         "end": str(bundle.prepared.display.series.index.max().date()),
         "xi_hat": float(bundle.evi_fit.slope),
@@ -157,22 +252,44 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
         "xi_hi": float(bundle.evi_fit.confidence_interval[1]),
         "plateau_lo": int(bundle.evi_fit.plateau_bounds[0]),
         "plateau_hi": int(bundle.evi_fit.plateau_bounds[1]),
-        "theta_hat_bb_sliding_fgls": float(bundle.ei_primary.theta_hat),
-        "theta_lo_bb_sliding_fgls": float(bundle.ei_primary.confidence_interval[0]),
-        "theta_hi_bb_sliding_fgls": float(bundle.ei_primary.confidence_interval[1]),
-        "theta_hat_k_gaps": float(bundle.ei_comparator.theta_hat),
-        "theta_lo_k_gaps": float(bundle.ei_comparator.confidence_interval[0]),
-        "theta_hi_k_gaps": float(bundle.ei_comparator.confidence_interval[1]),
-        "mean_cluster_size": float(1.0 / bundle.ei_primary.theta_hat),
+        "theta_hat_bb_sliding_fgls": np.nan if bb is None else float(bb.theta_hat),
+        "theta_lo_bb_sliding_fgls": (np.nan if bb is None else float(bb.confidence_interval[0])),
+        "theta_hi_bb_sliding_fgls": (np.nan if bb is None else float(bb.confidence_interval[1])),
+        "theta_hat_northrop_sliding_fgls": (
+            np.nan if northrop is None else float(northrop.theta_hat)
+        ),
+        "theta_lo_northrop_sliding_fgls": (
+            np.nan if northrop is None else float(northrop.confidence_interval[0])
+        ),
+        "theta_hi_northrop_sliding_fgls": (
+            np.nan if northrop is None else float(northrop.confidence_interval[1])
+        ),
+        "theta_hat_k_gaps": np.nan if k_gaps is None else float(k_gaps.theta_hat),
+        "theta_lo_k_gaps": (np.nan if k_gaps is None else float(k_gaps.confidence_interval[0])),
+        "theta_hi_k_gaps": (np.nan if k_gaps is None else float(k_gaps.confidence_interval[1])),
+        "theta_hat_ferro_segers": (np.nan if ferro is None else float(ferro.theta_hat)),
+        "theta_lo_ferro_segers": (
+            np.nan if ferro is None else float(ferro.confidence_interval[0])
+        ),
+        "theta_hi_ferro_segers": (
+            np.nan if ferro is None else float(ferro.confidence_interval[1])
+        ),
+        "mean_cluster_size": (np.nan if bb is None else float(1.0 / bb.theta_hat)),
         "ei_stable_level_lo": (
-            np.nan
-            if bundle.ei_primary.stable_window is None
-            else float(bundle.ei_primary.stable_window.lo)
+            np.nan if bb is None or bb.stable_window is None else float(bb.stable_window.lo)
         ),
         "ei_stable_level_hi": (
+            np.nan if bb is None or bb.stable_window is None else float(bb.stable_window.hi)
+        ),
+        "ei_northrop_stable_level_lo": (
             np.nan
-            if bundle.ei_primary.stable_window is None
-            else float(bundle.ei_primary.stable_window.hi)
+            if northrop is None or northrop.stable_window is None
+            else float(northrop.stable_window.lo)
+        ),
+        "ei_northrop_stable_level_hi": (
+            np.nan
+            if northrop is None or northrop.stable_window is None
+            else float(northrop.stable_window.hi)
         ),
         "return_level_basis": bundle.spec.return_level_basis,
         "observations_per_year": _application_observations_per_year(bundle),
@@ -193,18 +310,32 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     float(bundle.evi_fit.confidence_interval[1]),
                 ),
                 "$\\theta$ (BB-FGLS)": _format_interval(
-                    float(bundle.ei_primary.theta_hat),
-                    float(bundle.ei_primary.confidence_interval[0]),
-                    float(bundle.ei_primary.confidence_interval[1]),
+                    float("nan")
+                    if bundle.ei_bb_sliding_fgls is None
+                    else float(bundle.ei_bb_sliding_fgls.theta_hat),
+                    float("nan")
+                    if bundle.ei_bb_sliding_fgls is None
+                    else float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
+                    float("nan")
+                    if bundle.ei_bb_sliding_fgls is None
+                    else float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "$\\theta$ (K-gaps)": _format_interval(
-                    float(bundle.ei_comparator.theta_hat),
-                    float(bundle.ei_comparator.confidence_interval[0]),
-                    float(bundle.ei_comparator.confidence_interval[1]),
+                "$\\theta$ (Northrop-FGLS)": _format_interval(
+                    float("nan")
+                    if bundle.ei_northrop_sliding_fgls is None
+                    else float(bundle.ei_northrop_sliding_fgls.theta_hat),
+                    float("nan")
+                    if bundle.ei_northrop_sliding_fgls is None
+                    else float(bundle.ei_northrop_sliding_fgls.confidence_interval[0]),
+                    float("nan")
+                    if bundle.ei_northrop_sliding_fgls is None
+                    else float(bundle.ei_northrop_sliding_fgls.confidence_interval[1]),
                 ),
                 "Mean cluster size": (
-                    f"{(1.0 / bundle.ei_primary.theta_hat):.2f}"
-                    if np.isfinite(bundle.ei_primary.theta_hat) and bundle.ei_primary.theta_hat > 0
+                    f"{(1.0 / bundle.ei_bb_sliding_fgls.theta_hat):.2f}"
+                    if bundle.ei_bb_sliding_fgls is not None
+                    and np.isfinite(bundle.ei_bb_sliding_fgls.theta_hat)
+                    and bundle.ei_bb_sliding_fgls.theta_hat > 0
                     else "NA"
                 ),
             }
@@ -245,29 +376,32 @@ def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     """Build a manuscript-facing EI comparison table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
-        stable_window = (
-            "NA"
-            if bundle.ei_primary.stable_window is None
-            else f"{int(bundle.ei_primary.stable_window.lo)}-{int(bundle.ei_primary.stable_window.hi)}"
-        )
+        if not _bundle_has_formal_ei(bundle):
+            continue
         rows.append(
             {
                 "Application": bundle.spec.label,
                 "$\\theta$ (BB-FGLS)": _format_interval(
-                    float(bundle.ei_primary.theta_hat),
-                    float(bundle.ei_primary.confidence_interval[0]),
-                    float(bundle.ei_primary.confidence_interval[1]),
+                    float(bundle.ei_bb_sliding_fgls.theta_hat),
+                    float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
+                    float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "Stable window": stable_window,
+                "BB stable window": _stable_window_text(bundle.ei_bb_sliding_fgls),
+                "$\\theta$ (Northrop-FGLS)": _format_interval(
+                    float(bundle.ei_northrop_sliding_fgls.theta_hat),
+                    float(bundle.ei_northrop_sliding_fgls.confidence_interval[0]),
+                    float(bundle.ei_northrop_sliding_fgls.confidence_interval[1]),
+                ),
+                "Northrop stable window": _stable_window_text(bundle.ei_northrop_sliding_fgls),
                 "$\\theta$ (K-gaps)": _format_interval(
-                    float(bundle.ei_comparator.theta_hat),
-                    float(bundle.ei_comparator.confidence_interval[0]),
-                    float(bundle.ei_comparator.confidence_interval[1]),
+                    float(bundle.ei_k_gaps.theta_hat),
+                    float(bundle.ei_k_gaps.confidence_interval[0]),
+                    float(bundle.ei_k_gaps.confidence_interval[1]),
                 ),
-                "Mean cluster size": (
-                    f"{(1.0 / bundle.ei_primary.theta_hat):.2f}"
-                    if np.isfinite(bundle.ei_primary.theta_hat) and bundle.ei_primary.theta_hat > 0
-                    else "NA"
+                "$\\theta$ (Ferro-Segers)": _format_interval(
+                    float(bundle.ei_ferro_segers.theta_hat),
+                    float(bundle.ei_ferro_segers.confidence_interval[0]),
+                    float(bundle.ei_ferro_segers.confidence_interval[1]),
                 ),
             }
         )
@@ -275,13 +409,14 @@ def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
 
 
 def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
-    """Create the EVI method-comparison table used in the notebook/appendix."""
+    """Create the default application-side EVI summary rows."""
     rows: list[dict[str, object]] = []
     observations_per_year = _application_observations_per_year(bundle)
     fits = fit_methods_for_series(
         bundle.prepared.evi.series.values,
         quantile=bundle.spec.quantile,
         random_state=APPLICATION_RANDOM_STATE,
+        method_ids=APPLICATION_EVI_METHOD_IDS,
         reuse_fits={"sliding_median_fgls": bundle.evi_fit},
     )
     for method, fit in fits.items():
@@ -318,42 +453,32 @@ def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]
 
 def application_ei_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
     """Create the primary formal-EI comparison table for one application."""
-    primary = bundle.ei_primary
-    comparator = bundle.ei_comparator
-    return [
-        {
-            "application": bundle.spec.key,
-            "provider": bundle.spec.provider,
-            "method": "bb_sliding_fgls",
-            "theta_hat": float(primary.theta_hat),
-            "theta_lo": float(primary.confidence_interval[0]),
-            "theta_hi": float(primary.confidence_interval[1]),
-            "standard_error": float(primary.standard_error),
-            "stable_level_lo": (
-                np.nan if primary.stable_window is None else float(primary.stable_window.lo)
-            ),
-            "stable_level_hi": (
-                np.nan if primary.stable_window is None else float(primary.stable_window.hi)
-            ),
-            "mean_cluster_size": float(1.0 / primary.theta_hat),
-            "ci_method": primary.ci_method,
-            "ci_variant": primary.ci_variant,
-        },
-        {
-            "application": bundle.spec.key,
-            "provider": bundle.spec.provider,
-            "method": "k_gaps",
-            "theta_hat": float(comparator.theta_hat),
-            "theta_lo": float(comparator.confidence_interval[0]),
-            "theta_hi": float(comparator.confidence_interval[1]),
-            "standard_error": float(comparator.standard_error),
-            "stable_level_lo": np.nan,
-            "stable_level_hi": np.nan,
-            "mean_cluster_size": float(1.0 / comparator.theta_hat),
-            "ci_method": comparator.ci_method,
-            "ci_variant": comparator.ci_variant,
-        },
-    ]
+    if not _bundle_has_formal_ei(bundle):
+        return []
+    rows: list[dict[str, object]] = []
+    for method in APPLICATION_EI_METHOD_IDS:
+        estimate = bundle.ei_method_map[method]
+        rows.append(
+            {
+                "application": bundle.spec.key,
+                "provider": bundle.spec.provider,
+                "method": method,
+                "theta_hat": float(estimate.theta_hat),
+                "theta_lo": float(estimate.confidence_interval[0]),
+                "theta_hi": float(estimate.confidence_interval[1]),
+                "standard_error": float(estimate.standard_error),
+                "stable_level_lo": (
+                    np.nan if estimate.stable_window is None else float(estimate.stable_window.lo)
+                ),
+                "stable_level_hi": (
+                    np.nan if estimate.stable_window is None else float(estimate.stable_window.hi)
+                ),
+                "mean_cluster_size": float(1.0 / estimate.theta_hat),
+                "ci_method": estimate.ci_method,
+                "ci_variant": estimate.ci_variant,
+            }
+        )
+    return rows
 
 
 def _plot_daily_and_annual(
@@ -397,31 +522,26 @@ def _plot_daily_and_annual(
         plt.close(fig)
 
 
-def _plot_target_stability(
-    bundle: ApplicationBundle,
-    *,
-    title: str,
-    file_path: Path | None = None,
-    save: bool = False,
-    close: bool | None = None,
-) -> None:
-    """Compare median/mean/mode block summaries on the fitted block-size grid."""
-    import matplotlib.pyplot as plt
-
+def _target_stability_frame(bundle: ApplicationBundle) -> pd.DataFrame:
+    """Return target-stability summaries on the fitted block-size grid."""
     from unibm.diagnostics import target_stability_summary
 
-    summary = target_stability_summary(
+    return target_stability_summary(
         bundle.prepared.evi.series.values,
         block_sizes=bundle.evi_fit.block_sizes,
         sliding=True,
         quantile=bundle.spec.quantile,
     )
+
+
+def _draw_target_stability_ax(ax, bundle: ApplicationBundle, *, title: str) -> None:
+    """Draw the target-stability panel on a provided axis."""
+    summary = _target_stability_frame(bundle)
     quantile_column = (
         "median"
         if np.isclose(bundle.spec.quantile, 0.5)
         else f"quantile_tau_{bundle.spec.quantile:.2f}"
     )
-    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
     ax.plot(
         summary["block_size"],
         summary[quantile_column],
@@ -439,80 +559,172 @@ def _plot_target_stability(
     ax.set_ylabel("block-maxima summary")
     ax.set_title(title)
     ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    if save and file_path is not None:
-        _save_figure_pair(fig, file_path)
-    if _should_close_figure(close):
-        plt.close(fig)
+    ax.legend(fontsize=8)
 
 
-def _plot_ei_fit(
-    bundle: ApplicationBundle,
-    *,
-    file_path: Path | None = None,
-    save: bool = False,
-    close: bool | None = None,
-) -> None:
-    """Plot the BB sliding EI path with pooled and K-gaps estimates overlaid."""
-    import matplotlib.pyplot as plt
-
-    path = bundle.ei_bundle.paths[("bb", True)]
-    finite_mask = np.isfinite(path.theta_path)
-    levels = path.block_sizes[finite_mask].astype(float)
-    theta_path = path.theta_path[finite_mask].astype(float)
-    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
+def _draw_display_series_ax(ax, bundle: ApplicationBundle) -> None:
+    """Draw the raw display series as a secondary context panel."""
+    prepared = bundle.prepared.display
     ax.plot(
-        np.log(levels),
-        theta_path,
-        color="tab:red",
-        marker="D",
-        ms=3.5,
-        lw=1.2,
-        label="BB sliding path",
+        prepared.series.index,
+        prepared.series.values,
+        color="tab:blue",
+        lw=0.55,
+        alpha=0.85,
     )
-    if bundle.ei_primary.stable_window is not None:
-        lo = float(bundle.ei_primary.stable_window.lo)
-        hi = float(bundle.ei_primary.stable_window.hi)
-        ax.axvspan(np.log(lo), np.log(hi), color="tab:red", alpha=0.12, label="stable window")
-    ax.axhline(
-        bundle.ei_primary.theta_hat,
+    ax.set_xlabel("date")
+    ax.set_ylabel(bundle.spec.ylabel)
+    ax.set_title(f"{bundle.spec.label} daily series")
+    ax.grid(alpha=0.3)
+
+
+def _draw_scaling_ax(ax, bundle: ApplicationBundle) -> None:
+    """Draw the headline median-sliding-FGLS scaling fit on a provided axis."""
+    fit = bundle.evi_fit
+    x = np.asarray(fit.log_block_sizes, dtype=float)
+    y = np.asarray(fit.log_values, dtype=float)
+    plateau_mask = np.asarray(fit.plateau_mask, dtype=bool)
+    ax.scatter(x=x, y=y, s=12, alpha=0.7, color="tab:blue", label="log block summary")
+    ax.scatter(
+        x=x[plateau_mask],
+        y=y[plateau_mask],
+        s=18,
+        alpha=0.9,
         color="tab:red",
+        label="selected plateau",
+    )
+    fitted = fit.intercept + fit.slope * x[plateau_mask]
+    ax.plot(
+        x[plateau_mask],
+        fitted,
+        color="black",
+        linestyle="--",
+        lw=1.1,
+        label=f"slope = {fit.slope:.3f}",
+    )
+    ax.axvline(np.log(fit.plateau_bounds[0]), color="grey", linestyle=":", lw=1)
+    ax.axvline(np.log(fit.plateau_bounds[1]), color="grey", linestyle=":", lw=1)
+    ax.set_xlabel("log(block size)")
+    ax.set_ylabel(bundle.spec.scaling_ylabel)
+    ax.set_title(bundle.spec.scaling_title)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8)
+
+
+def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
+    """Draw the four-method EI comparison panel on a provided axis."""
+    if not _bundle_has_formal_ei(bundle):
+        raise ValueError(f"{bundle.spec.label} does not participate in formal EI analysis.")
+    assert bundle.ei_bundle is not None
+    assert bundle.ei_bb_sliding_fgls is not None
+    assert bundle.ei_northrop_sliding_fgls is not None
+    assert bundle.ei_k_gaps is not None
+    assert bundle.ei_ferro_segers is not None
+    bb_path = bundle.ei_bundle.paths[("bb", True)]
+    northrop_path = bundle.ei_bundle.paths[("northrop", True)]
+    bb_color = "#b22222"
+    northrop_color = "#1565c0"
+
+    def _finite_path(path):
+        mask = np.isfinite(path.theta_path)
+        return np.log(path.block_sizes[mask].astype(float)), path.theta_path[mask].astype(float)
+
+    bb_x, bb_theta = _finite_path(bb_path)
+    northrop_x, northrop_theta = _finite_path(northrop_path)
+    ax.plot(bb_x, bb_theta, color=bb_color, marker="D", ms=3.0, lw=1.1, label="BB sliding path")
+    ax.plot(
+        northrop_x,
+        northrop_theta,
+        color=northrop_color,
+        marker="o",
+        ms=2.8,
+        lw=1.0,
+        alpha=0.85,
+        label="Northrop sliding path",
+    )
+    bb_window = bundle.ei_bb_sliding_fgls.stable_window
+    northrop_window = bundle.ei_northrop_sliding_fgls.stable_window
+    if (
+        bb_window is not None
+        and northrop_window is not None
+        and (
+            float(bb_window.lo) == float(northrop_window.lo)
+            and float(bb_window.hi) == float(northrop_window.hi)
+        )
+    ):
+        ax.axvspan(
+            np.log(float(bb_window.lo)),
+            np.log(float(bb_window.hi)),
+            facecolor=bb_color,
+            edgecolor=bb_color,
+            alpha=0.05,
+            hatch="///",
+            label="BB stable window",
+        )
+        ax.axvspan(
+            np.log(float(northrop_window.lo)),
+            np.log(float(northrop_window.hi)),
+            facecolor=northrop_color,
+            edgecolor=northrop_color,
+            alpha=0.03,
+            hatch="\\\\",
+            label="Northrop stable window",
+        )
+    else:
+        if bb_window is not None:
+            ax.axvspan(
+                np.log(float(bb_window.lo)),
+                np.log(float(bb_window.hi)),
+                color=bb_color,
+                alpha=0.08,
+                label="BB stable window",
+            )
+        if northrop_window is not None:
+            ax.axvspan(
+                np.log(float(northrop_window.lo)),
+                np.log(float(northrop_window.hi)),
+                color=northrop_color,
+                alpha=0.05,
+                label="Northrop stable window",
+            )
+    ax.axhline(
+        bundle.ei_bb_sliding_fgls.theta_hat,
+        color=bb_color,
         lw=1.2,
         linestyle="-",
         label="BB-sliding-FGLS",
     )
     ax.axhline(
-        bundle.ei_comparator.theta_hat,
+        bundle.ei_northrop_sliding_fgls.theta_hat,
+        color=northrop_color,
+        lw=1.2,
+        linestyle="-.",
+        label="Northrop-sliding-FGLS",
+    )
+    ax.axhline(
+        bundle.ei_k_gaps.theta_hat,
         color="tab:green",
         lw=1.2,
         linestyle="--",
         label="K-gaps",
     )
+    ax.axhline(
+        bundle.ei_ferro_segers.theta_hat,
+        color="tab:purple",
+        lw=1.2,
+        linestyle=":",
+        label="Ferro-Segers",
+    )
     ax.set_xlabel("log(block size)")
     ax.set_ylabel("extremal index")
-    ax.set_title(f"{bundle.spec.label} extremal-index path")
+    ax.set_title(f"{bundle.spec.label} extremal-index comparison")
     ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    if save and file_path is not None:
-        _save_figure_pair(fig, file_path)
-    if _should_close_figure(close):
-        plt.close(fig)
+    ax.legend(fontsize=8, ncols=2)
 
 
-def _plot_return_levels(
-    bundle: ApplicationBundle,
-    *,
-    file_path: Path | None = None,
-    save: bool = False,
-    close: bool | None = None,
-) -> None:
-    """Plot return levels for one application."""
-    import matplotlib.pyplot as plt
-
+def _draw_return_levels_ax(ax, bundle: ApplicationBundle) -> None:
+    """Draw the application return-level comparison on a provided axis."""
     rows = pd.DataFrame(_application_return_level_rows(bundle))
-    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
     ax.plot(
         rows["horizon_years"],
         rows["return_level"],
@@ -537,7 +749,90 @@ def _plot_return_levels(
     ax.set_ylabel(bundle.spec.ylabel)
     ax.set_title(f"{bundle.spec.label} return levels")
     ax.grid(alpha=0.3)
-    ax.legend()
+    ax.legend(fontsize=8)
+
+
+def _plot_target_stability(
+    bundle: ApplicationBundle,
+    *,
+    title: str,
+    file_path: Path | None = None,
+    save: bool = False,
+    close: bool | None = None,
+) -> None:
+    """Compare median/mean/mode block summaries on the fitted block-size grid."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
+    _draw_target_stability_ax(ax, bundle, title=title)
+    fig.tight_layout()
+    if save and file_path is not None:
+        _save_figure_pair(fig, file_path)
+    if _should_close_figure(close):
+        plt.close(fig)
+
+
+def _plot_ei_fit(
+    bundle: ApplicationBundle,
+    *,
+    file_path: Path | None = None,
+    save: bool = False,
+    close: bool | None = None,
+) -> None:
+    """Plot the application EI comparison path with four methods overlaid."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
+    _draw_ei_ax(ax, bundle)
+    fig.tight_layout()
+    if save and file_path is not None:
+        _save_figure_pair(fig, file_path)
+    if _should_close_figure(close):
+        plt.close(fig)
+
+
+def _plot_return_levels(
+    bundle: ApplicationBundle,
+    *,
+    file_path: Path | None = None,
+    save: bool = False,
+    close: bool | None = None,
+) -> None:
+    """Plot return levels for one application."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
+    _draw_return_levels_ax(ax, bundle)
+    fig.tight_layout()
+    if save and file_path is not None:
+        _save_figure_pair(fig, file_path)
+    if _should_close_figure(close):
+        plt.close(fig)
+
+
+def _plot_composite_application_diagnostics(
+    bundle: ApplicationBundle,
+    *,
+    file_path: Path | None = None,
+    save: bool = False,
+    close: bool | None = None,
+) -> None:
+    """Plot the 2x2 composite application diagnostic figure."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(11.2, 8.2), dpi=600)
+    _draw_target_stability_ax(
+        axes[0, 0],
+        bundle,
+        title=bundle.spec.target_stability_title or f"{bundle.spec.label} target stability",
+    )
+    _draw_scaling_ax(axes[0, 1], bundle)
+    if _bundle_has_formal_ei(bundle):
+        _draw_ei_ax(axes[1, 0], bundle)
+    else:
+        _draw_display_series_ax(axes[1, 0], bundle)
+    _draw_return_levels_ax(axes[1, 1], bundle)
+    fig.suptitle(f"{bundle.spec.label}: application diagnostics", y=0.995)
     fig.tight_layout()
     if save and file_path is not None:
         _save_figure_pair(fig, file_path)
@@ -561,16 +856,37 @@ def _plot_application_overview(
     xi = np.asarray([bundle.evi_fit.slope for bundle in bundles], dtype=float)
     xi_lo = np.asarray([bundle.evi_fit.confidence_interval[0] for bundle in bundles], dtype=float)
     xi_hi = np.asarray([bundle.evi_fit.confidence_interval[1] for bundle in bundles], dtype=float)
-    theta = np.asarray([bundle.ei_primary.theta_hat for bundle in bundles], dtype=float)
+    theta = np.asarray(
+        [
+            np.nan if not _bundle_has_formal_ei(bundle) else bundle.ei_primary.theta_hat
+            for bundle in bundles
+        ],
+        dtype=float,
+    )
     theta_lo = np.asarray(
-        [bundle.ei_primary.confidence_interval[0] for bundle in bundles],
+        [
+            np.nan
+            if not _bundle_has_formal_ei(bundle)
+            else bundle.ei_primary.confidence_interval[0]
+            for bundle in bundles
+        ],
         dtype=float,
     )
     theta_hi = np.asarray(
-        [bundle.ei_primary.confidence_interval[1] for bundle in bundles],
+        [
+            np.nan
+            if not _bundle_has_formal_ei(bundle)
+            else bundle.ei_primary.confidence_interval[1]
+            for bundle in bundles
+        ],
         dtype=float,
     )
-    cluster = 1.0 / theta
+    cluster = np.divide(
+        1.0,
+        theta,
+        out=np.full_like(theta, np.nan),
+        where=np.isfinite(theta) & (theta > 0.0),
+    )
     axes[0].errorbar(
         xi,
         y,
@@ -579,15 +895,25 @@ def _plot_application_overview(
         color="tab:blue",
         capsize=2,
     )
-    axes[1].errorbar(
-        theta,
-        y,
-        xerr=np.vstack([theta - theta_lo, theta_hi - theta]),
-        fmt="o",
-        color="tab:red",
-        capsize=2,
-    )
-    axes[2].scatter(cluster, y, color="tab:purple", s=18)
+    theta_mask = np.isfinite(theta) & np.isfinite(theta_lo) & np.isfinite(theta_hi)
+    if np.any(theta_mask):
+        theta_y = y[theta_mask]
+        axes[1].errorbar(
+            theta[theta_mask],
+            theta_y,
+            xerr=np.vstack(
+                [
+                    theta[theta_mask] - theta_lo[theta_mask],
+                    theta_hi[theta_mask] - theta[theta_mask],
+                ]
+            ),
+            fmt="o",
+            color="tab:red",
+            capsize=2,
+        )
+    cluster_mask = np.isfinite(cluster)
+    if np.any(cluster_mask):
+        axes[2].scatter(cluster[cluster_mask], y[cluster_mask], color="tab:purple", s=18)
     axes[0].set_xlabel("xi")
     axes[1].set_xlabel("theta")
     axes[2].set_xlabel("1 / theta")
@@ -596,7 +922,7 @@ def _plot_application_overview(
     axes[0].invert_yaxis()
     for ax in axes:
         ax.grid(alpha=0.3)
-    fig.suptitle("Application overview: tail severity and clustering")
+    fig.suptitle("Application overview: tail severity and formal clustering")
     fig.tight_layout()
     if save and file_path is not None:
         _save_figure_pair(fig, file_path)
@@ -638,7 +964,7 @@ def plot_application_target_stability(
     close: bool | None = None,
 ) -> None:
     """Plot the application target-stability comparison inline when available."""
-    if bundle.spec.target_stability_title is None or bundle.spec.provider == "fema":
+    if bundle.spec.target_stability_title is None:
         return
     _plot_target_stability(
         bundle,
@@ -653,6 +979,8 @@ def plot_application_ei(
     close: bool | None = None,
 ) -> None:
     """Plot the application EI path inline."""
+    if not _bundle_has_formal_ei(bundle):
+        raise ValueError(f"{bundle.spec.label} does not participate in formal EI analysis.")
     _plot_ei_fit(bundle, close=close)
 
 
@@ -663,6 +991,15 @@ def plot_application_return_levels(
 ) -> None:
     """Plot the application return-level curves inline."""
     _plot_return_levels(bundle, close=close)
+
+
+def plot_application_composite(
+    bundle: ApplicationBundle,
+    *,
+    close: bool | None = None,
+) -> None:
+    """Plot the composite application diagnostic figure inline."""
+    _plot_composite_application_diagnostics(bundle, close=close)
 
 
 def plot_application_overview(
@@ -690,21 +1027,30 @@ def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
         title=bundle.spec.scaling_title,
         ylabel=bundle.spec.scaling_ylabel,
     )
-    if bundle.spec.target_stability_title is not None and bundle.spec.provider != "fema":
+    if bundle.spec.target_stability_title is not None:
         _plot_target_stability(
             bundle,
             title=bundle.spec.target_stability_title,
             file_path=fig_dir / f"application_target_{bundle.spec.figure_stem}.pdf",
             save=True,
         )
-    _plot_ei_fit(
-        bundle,
-        file_path=fig_dir / f"application_ei_{bundle.spec.figure_stem}.pdf",
-        save=True,
-    )
+    ei_path = fig_dir / f"application_ei_{bundle.spec.figure_stem}.pdf"
+    if _bundle_has_formal_ei(bundle):
+        _plot_ei_fit(
+            bundle,
+            file_path=ei_path,
+            save=True,
+        )
+    elif ei_path.exists():
+        ei_path.unlink()
     _plot_return_levels(
         bundle,
         file_path=fig_dir / f"application_rl_{bundle.spec.figure_stem}.pdf",
+        save=True,
+    )
+    _plot_composite_application_diagnostics(
+        bundle,
+        file_path=fig_dir / f"application_composite_{bundle.spec.figure_stem}.pdf",
         save=True,
     )
 
@@ -719,7 +1065,6 @@ def _provider_metadata_rows(
     for role, prepared in {
         "display": bundle.prepared.display,
         "evi": bundle.prepared.evi,
-        "ei": bundle.prepared.ei,
     }.items():
         rows.append(
             {
@@ -728,6 +1073,16 @@ def _provider_metadata_rows(
                 "role": role,
                 "raw_file": None if raw_path is None else str(raw_path),
                 **prepared.metadata,
+            }
+        )
+    if bundle.spec.formal_ei:
+        rows.append(
+            {
+                "application": bundle.spec.key,
+                "provider": bundle.spec.provider,
+                "role": "ei",
+                "raw_file": None if raw_path is None else str(raw_path),
+                **bundle.prepared.ei.metadata,
             }
         )
     return rows
@@ -793,6 +1148,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     return_level_rows: list[dict[str, object]] = []
     method_rows: list[dict[str, object]] = []
     ei_method_rows: list[dict[str, object]] = []
+    seasonal_ei_method_rows: list[dict[str, object]] = []
     provider_metadata: dict[str, list[dict[str, object]]] = {"ghcn": [], "usgs": [], "fema": []}
 
     for bundle in bundles:
@@ -806,16 +1162,19 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         ).to_record()
         evi_review["analysis_type"] = "evi"
         screening_rows.append(evi_review)
-        ei_review = screen_extremal_index_series(
-            bundle.prepared.ei.series,
-            name=bundle.spec.key,
-            allow_zeros=bundle.spec.ei_allow_zeros,
-        ).to_record()
-        screening_rows.append(ei_review)
+        if bundle.spec.formal_ei:
+            ei_review = screen_extremal_index_series(
+                bundle.prepared.ei.series,
+                name=bundle.spec.key,
+                allow_zeros=bundle.spec.ei_allow_zeros,
+            ).to_record()
+            screening_rows.append(ei_review)
         summary_rows.append(application_summary_record(bundle))
         return_level_rows.extend(_application_return_level_rows(bundle))
         method_rows.extend(application_method_rows(bundle))
-        ei_method_rows.extend(application_ei_method_rows(bundle))
+        if bundle.spec.formal_ei:
+            ei_method_rows.extend(application_ei_method_rows(bundle))
+            seasonal_ei_method_rows.extend(_seasonal_adjusted_ei_method_rows(bundle))
         status("application", f"writing figures for {bundle.spec.label}")
         write_application_figures(bundle, fig_dir)
 
@@ -847,6 +1206,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         out_dir / "application_ei_methods.csv",
         index=False,
     )
+    pd.DataFrame(seasonal_ei_method_rows).sort_values(["application", "method"]).to_csv(
+        out_dir / "application_ei_seasonal_methods.csv",
+        index=False,
+    )
     for provider, rows in provider_metadata.items():
         with (metadata_app_dir / f"{provider}_sources.json").open("w") as fh:
             json.dump(rows, fh, indent=2)
@@ -863,9 +1226,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             application_summary_table(bundles),
             caption=(
                 "Application-side UniBM summary across the six manuscript case studies. "
-                "Cells report the primary sliding-median-FGLS estimate of $\\xi$, the primary "
-                "BB-sliding-FGLS estimate of $\\theta$, the K-gaps comparator, and the implied "
-                "mean cluster size $1/\\theta$."
+                "Cells report the headline sliding-median-FGLS estimate of $\\xi$. "
+                "Formal EI summaries are only reported for the streamflow and NFIP claim-wave "
+                "applications, where the headline BB-sliding-FGLS estimate of $\\theta$, the "
+                "Northrop-sliding-FGLS pooled-BM comparator, and the implied mean cluster size "
+                "$1/\\theta$ are substantively interpreted."
             ),
             label="tab:application-summary-main",
         )
@@ -876,9 +1241,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             application_return_level_table(bundles),
             caption=(
                 "Application-side UniBM return-level summary across the manuscript case studies. "
-                "Non-FEMA rows report baseline and EI-adjusted return levels at 1, 10, and 50 years. "
-                "NFIP rows are reported on the claim-active-day basis, so EI-adjusted calendar-day levels "
-                "are intentionally omitted in this first application package."
+                "Streamflow rows report baseline and formal-EI-adjusted return levels at 1, 10, and "
+                "50 years. Houston and Phoenix are retained as EVI-only environmental applications, so "
+                "their EI-adjusted columns are intentionally blank. NFIP rows are reported on the "
+                "claim-active-day basis, so EI-adjusted calendar-day levels are intentionally omitted."
             ),
             label="tab:application-return-levels-main",
         )
@@ -888,9 +1254,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_ei_table(bundles),
             caption=(
-                "Application-side extremal-index summary across the manuscript case studies. "
-                "Cells report the primary BB-sliding-FGLS estimate of $\\theta$, its selected stable "
-                "window, the K-gaps comparator, and the implied mean cluster size $1/\\theta$."
+                "Application-side extremal-index summary for the formal EI applications only. "
+                "Cells report the BB-sliding-FGLS and Northrop-sliding-FGLS pooled-BM estimates "
+                "together with the K-gaps and Ferro-Segers threshold comparators for the "
+                "streamflow and NFIP claim-wave case studies. Stable windows are shown for the "
+                "two pooled-BM paths."
             ),
             label="tab:application-ei-main",
         )
@@ -902,6 +1270,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_return_levels": out_dir / "application_return_levels.csv",
         "application_methods": out_dir / "application_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
+        "application_ei_seasonal_methods": out_dir / "application_ei_seasonal_methods.csv",
         "application_usgs_site_screening": out_dir / "application_usgs_site_screening.csv",
         "application_summary_main": table_dir / "application_summary_main.tex",
         "application_return_levels_main": table_dir / "application_return_levels_main.tex",
@@ -917,11 +1286,13 @@ __all__ = [
     "application_summary_record",
     "application_summary_table",
     "build_application_outputs",
+    "plot_application_composite",
     "plot_application_ei",
     "plot_application_overview",
     "plot_application_return_levels",
     "plot_application_scaling",
     "plot_application_target_stability",
     "plot_application_time_series",
+    "seasonal_monthly_pit_unit_frechet",
     "write_application_figures",
 ]

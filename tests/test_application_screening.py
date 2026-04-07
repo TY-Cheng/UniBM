@@ -1,13 +1,21 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import numpy as np
 import pandas as pd
 
-from scripts.workflows.application_screening import screen_extreme_series
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from application.screening import screen_extreme_series
 
 
 class ApplicationScreeningTests(unittest.TestCase):

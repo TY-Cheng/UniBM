@@ -945,6 +945,7 @@ def fit_methods_for_series(
     *,
     quantile: float,
     random_state: int,
+    method_ids: Iterable[str] | None = None,
     reuse_fits: dict[str, ScalingFit] | None = None,
     cache_dir: Path | None = None,
     cache_key: str | None = None,
@@ -965,18 +966,35 @@ def fit_methods_for_series(
     feasible: each raw bootstrap resample re-fits the FGLS point estimator
     using the original sample's covariance backbone rather than nesting
     another bootstrap inside every resample.
+
+    Parameters
+    ----------
+    method_ids
+        Optional subset of method identifiers to fit. When provided, the
+        shared scheme-level bootstrap only materializes the targets required by
+        that subset.
     """
     reuse_fits = {} if reuse_fits is None else dict(reuse_fits)
     fgls_bootstrap_overrides = (
         {} if fgls_bootstrap_overrides is None else dict(fgls_bootstrap_overrides)
     )
+    selected_specs = list(METHOD_SPECS)
+    if method_ids is not None:
+        selected_specs = []
+        for method_id in method_ids:
+            try:
+                selected_specs.append(METHOD_LOOKUP[str(method_id)])
+            except KeyError as exc:
+                raise ValueError(f"Unknown benchmark method id: {method_id!r}") from exc
+        if not selected_specs:
+            return {}
     values = np.asarray(vec, dtype=float).reshape(-1)
     values = values[np.isfinite(values)]
     block_sizes = generate_block_sizes(n_obs=values.size)
     fits: dict[str, ScalingFit] = dict(reuse_fits)
     grouped_specs = {
-        True: [spec for spec in METHOD_SPECS if spec.sliding],
-        False: [spec for spec in METHOD_SPECS if not spec.sliding],
+        True: [spec for spec in selected_specs if spec.sliding],
+        False: [spec for spec in selected_specs if not spec.sliding],
     }
     for sliding, specs in grouped_specs.items():
         scheme_bootstrap_results: dict[str, dict[str, Any]] = {}
@@ -1043,4 +1061,6 @@ def fit_methods_for_series(
                     plateau=shared_plateau,
                     bootstrap_result=bootstrap_result,
                 )
-    return fits
+    return {
+        spec.method_id: fits[spec.method_id] for spec in selected_specs if spec.method_id in fits
+    }

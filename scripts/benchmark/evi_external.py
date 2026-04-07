@@ -39,7 +39,7 @@ from unibm.external import (
     estimate_pickands_evi,
 )
 
-from .benchmark_design import (
+from benchmark.design import (
     _atomic_savez,
     _try_load_npz,
     BENCHMARK_CACHE_VERSION,
@@ -58,7 +58,7 @@ from .benchmark_design import (
     scenario_random_state,
     sort_by_family_order,
 )
-from .benchmark_common import (
+from benchmark.common import (
     bootstrap_percentile_interval,
     format_median_iqr,
     IQR_LOWER,

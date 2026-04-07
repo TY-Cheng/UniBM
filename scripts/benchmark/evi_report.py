@@ -21,12 +21,15 @@ from typing import Iterable
 import sys
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
 
-    ensure_scripts_on_path_from_entry(__file__)
-    _STANDALONE_SCRIPT = True
-else:
-    _STANDALONE_SCRIPT = False
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from unibm._runtime import prepare_matplotlib_env
 
@@ -40,60 +43,32 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-if _STANDALONE_SCRIPT:
-    from workflows.benchmark_common import (
-        IQR_LOWER,
-        IQR_UPPER,
-        format_median_iqr,
-        quantile_agg,
-        render_latex_table,
-        wilson_interval,
-    )
-    from workflows.benchmark_design import (
-        BENCHMARK_SET_LABELS,
-        BLOCK_LINESTYLES,
-        CORE_METHODS,
-        UNIVERSAL_BENCHMARK_SET,
-        family_label,
-        ordered_families,
-        METHOD_LABELS,
-        METHOD_LOOKUP,
-        METHOD_ORDER,
-        METRIC_LABELS,
-        REGRESSION_MARKERS,
-        TARGET_COLORS,
-        method_style,
-        sort_by_family_order,
-        sort_by_method_order,
-    )
-    from workflows.workflow_runtime import status
-else:
-    from .benchmark_common import (
-        IQR_LOWER,
-        IQR_UPPER,
-        format_median_iqr,
-        quantile_agg,
-        render_latex_table,
-        wilson_interval,
-    )
-    from .benchmark_design import (
-        BENCHMARK_SET_LABELS,
-        BLOCK_LINESTYLES,
-        CORE_METHODS,
-        UNIVERSAL_BENCHMARK_SET,
-        family_label,
-        ordered_families,
-        METHOD_LABELS,
-        METHOD_LOOKUP,
-        METHOD_ORDER,
-        METRIC_LABELS,
-        REGRESSION_MARKERS,
-        TARGET_COLORS,
-        method_style,
-        sort_by_family_order,
-        sort_by_method_order,
-    )
-    from .workflow_runtime import status
+from benchmark.common import (
+    IQR_LOWER,
+    IQR_UPPER,
+    format_median_iqr,
+    quantile_agg,
+    render_latex_table,
+    wilson_interval,
+)
+from benchmark.design import (
+    BENCHMARK_SET_LABELS,
+    BLOCK_LINESTYLES,
+    CORE_METHODS,
+    UNIVERSAL_BENCHMARK_SET,
+    family_label,
+    ordered_families,
+    METHOD_LABELS,
+    METHOD_LOOKUP,
+    METHOD_ORDER,
+    METRIC_LABELS,
+    REGRESSION_MARKERS,
+    TARGET_COLORS,
+    method_style,
+    sort_by_family_order,
+    sort_by_method_order,
+)
+from shared.runtime import status
 
 # ---------------------------------------------------------------------------
 # Aggregation helpers
@@ -616,22 +591,13 @@ def write_evi_benchmark_manuscript_artifacts(
     table_dir: Path,
 ) -> None:
     """Write EVI benchmark manuscript tables and figures from cached CSV summaries."""
-    # Deferred import avoids a circular dependency and keeps this module usable
-    # both as `python -m workflows.evi_report` and as a direct script.
-    if _STANDALONE_SCRIPT:
-        from workflows.evi_benchmark_external import (
-            interval_sharpness_story_latex,
-            plot_interval_sharpness_scatter,
-            plot_target_plus_external_panels,
-            target_plus_external_story_latex,
-        )
-    else:
-        from .evi_benchmark_external import (
-            interval_sharpness_story_latex,
-            plot_interval_sharpness_scatter,
-            plot_target_plus_external_panels,
-            target_plus_external_story_latex,
-        )
+    # Deferred import avoids a circular dependency between report and mixed-baseline helpers.
+    from benchmark.evi_external import (
+        interval_sharpness_story_latex,
+        plot_interval_sharpness_scatter,
+        plot_target_plus_external_panels,
+        target_plus_external_story_latex,
+    )
 
     n_obs = _main_evi_benchmark_n_obs(benchmark_summary_df)
     (table_dir / "benchmark_core_main.tex").write_text(
@@ -733,10 +699,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
     """Materialize EVI benchmark manuscript figures and LaTeX tables."""
     from config import resolve_repo_dirs
 
-    if _STANDALONE_SCRIPT:
-        from workflows.evi_benchmark import load_or_materialize_evi_benchmark_outputs
-    else:
-        from .evi_benchmark import load_or_materialize_evi_benchmark_outputs
+    from benchmark.evi_benchmark import load_or_materialize_evi_benchmark_outputs
 
     dirs = resolve_repo_dirs(root)
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]

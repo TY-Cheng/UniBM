@@ -14,6 +14,13 @@ from unibm.models import ScalingFit
 APPLICATION_RANDOM_STATE = 7
 APPLICATION_EI_BOOTSTRAP_REPS = 120
 RETURN_LEVEL_HORIZONS = np.asarray([1.0, 10.0, 25.0, 50.0], dtype=float)
+APPLICATION_EVI_METHOD_IDS = ("sliding_median_fgls",)
+APPLICATION_EI_METHOD_IDS = (
+    "bb_sliding_fgls",
+    "northrop_sliding_fgls",
+    "k_gaps",
+    "ferro_segers",
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +52,7 @@ class ApplicationSpec:
     return_level_yscale: str = "linear"
     target_stability_title: str | None = None
     secondary_case: bool = False
+    formal_ei: bool = True
     ei_allow_zeros: bool = False
 
 
@@ -55,9 +63,41 @@ class ApplicationBundle:
     spec: ApplicationSpec
     prepared: ApplicationPreparedInputs
     evi_fit: ScalingFit
-    ei_bundle: EiPreparedBundle
-    ei_primary: ExtremalIndexEstimate
-    ei_comparator: ExtremalIndexEstimate
+    ei_bundle: EiPreparedBundle | None
+    ei_bb_sliding_fgls: ExtremalIndexEstimate | None
+    ei_northrop_sliding_fgls: ExtremalIndexEstimate | None
+    ei_k_gaps: ExtremalIndexEstimate | None
+    ei_ferro_segers: ExtremalIndexEstimate | None
+
+    @property
+    def ei_primary(self) -> ExtremalIndexEstimate:
+        """Return the headline BB-sliding-FGLS estimate."""
+        if self.ei_bb_sliding_fgls is None:
+            raise ValueError(f"{self.spec.label} does not participate in formal EI analysis.")
+        return self.ei_bb_sliding_fgls
+
+    @property
+    def ei_comparator(self) -> ExtremalIndexEstimate:
+        """Return the legacy K-gaps comparator for compatibility."""
+        if self.ei_k_gaps is None:
+            raise ValueError(f"{self.spec.label} does not participate in formal EI analysis.")
+        return self.ei_k_gaps
+
+    @property
+    def ei_method_map(self) -> dict[str, ExtremalIndexEstimate]:
+        """Return the application-side EI comparison set keyed by method id."""
+        if not self.spec.formal_ei:
+            return {}
+        assert self.ei_bb_sliding_fgls is not None
+        assert self.ei_northrop_sliding_fgls is not None
+        assert self.ei_k_gaps is not None
+        assert self.ei_ferro_segers is not None
+        return {
+            "bb_sliding_fgls": self.ei_bb_sliding_fgls,
+            "northrop_sliding_fgls": self.ei_northrop_sliding_fgls,
+            "k_gaps": self.ei_k_gaps,
+            "ferro_segers": self.ei_ferro_segers,
+        }
 
 
 APPLICATIONS = (
@@ -73,7 +113,7 @@ APPLICATIONS = (
         scaling_ylabel="log median block maximum",
         observations_per_year=183.0,
         target_stability_title="Houston target stability across block sizes",
-        ei_allow_zeros=True,
+        formal_ei=False,
     ),
     ApplicationSpec(
         key="phoenix_hot_dry_severity",
@@ -88,6 +128,7 @@ APPLICATIONS = (
         observations_per_year=214.0,
         secondary_case=True,
         target_stability_title="Phoenix target stability across block sizes",
+        formal_ei=False,
     ),
     ApplicationSpec(
         key="tx_streamflow",
@@ -130,6 +171,7 @@ APPLICATIONS = (
         return_level_basis="claim_active_day",
         return_level_label="claim-active-day return period (years)",
         return_level_yscale="log",
+        target_stability_title="Texas NFIP target stability across block sizes",
         ei_allow_zeros=True,
     ),
     ApplicationSpec(
@@ -145,6 +187,7 @@ APPLICATIONS = (
         return_level_basis="claim_active_day",
         return_level_label="claim-active-day return period (years)",
         return_level_yscale="log",
+        target_stability_title="Florida NFIP target stability across block sizes",
         ei_allow_zeros=True,
     ),
 )
@@ -157,6 +200,8 @@ def spec_by_key() -> dict[str, ApplicationSpec]:
 
 __all__ = [
     "APPLICATION_EI_BOOTSTRAP_REPS",
+    "APPLICATION_EI_METHOD_IDS",
+    "APPLICATION_EVI_METHOD_IDS",
     "APPLICATION_RANDOM_STATE",
     "APPLICATIONS",
     "ApplicationBundle",

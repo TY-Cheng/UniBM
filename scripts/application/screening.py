@@ -10,7 +10,7 @@ import pandas as pd
 
 from unibm.core import block_maxima, estimate_evi_quantile
 from unibm.extremal_index import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
-from .workflow_runtime import resolve_int_env
+from shared.runtime import resolve_int_env
 
 
 DEFAULT_SCREENING_BOOTSTRAP_REPS = 40

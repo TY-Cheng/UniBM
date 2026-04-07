@@ -1,17 +1,19 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import sys
 import unittest
 from pathlib import Path
 
-from scripts.workflows.import_bootstrap import (
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from shared.import_bootstrap import (
     bootstrap_notebook_scripts_dir,
     ensure_scripts_on_path_from_entry,
 )
-
-
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = ROOT / "scripts"
 
 
 class ImportBootstrapTests(unittest.TestCase):
@@ -20,9 +22,7 @@ class ImportBootstrapTests(unittest.TestCase):
         try:
             if str(SCRIPTS_DIR) in sys.path:
                 sys.path.remove(str(SCRIPTS_DIR))
-            resolved = ensure_scripts_on_path_from_entry(
-                SCRIPTS_DIR / "workflows" / "application.py"
-            )
+            resolved = ensure_scripts_on_path_from_entry(SCRIPTS_DIR / "application" / "build.py")
             self.assertEqual(resolved, SCRIPTS_DIR.resolve())
             self.assertEqual(sys.path[0], str(SCRIPTS_DIR.resolve()))
         finally:

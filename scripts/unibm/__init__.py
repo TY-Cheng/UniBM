@@ -1,7 +1,8 @@
 """Public UniBM methods API.
 
 This package exposes the reusable statistical layer only. Repo-local benchmark,
-screening, and manuscript orchestration code lives under `scripts/workflows`.
+screening, and manuscript orchestration code lives under `scripts/benchmark`,
+`scripts/application`, `scripts/shared`, and `scripts/vignette`.
 """
 
 from .bootstrap import (

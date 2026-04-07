@@ -1,4 +1,5 @@
 """Synthetic EI benchmark raw-computation entrypoint."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -9,18 +10,24 @@ from pathlib import Path
 import pandas as pd
 
 if __package__ in {None, ""}:
-    from import_bootstrap import ensure_scripts_on_path_from_entry
+    import importlib.util
 
-    ensure_scripts_on_path_from_entry(__file__)
+    _helper_path = Path(__file__).resolve().parents[1] / "shared" / "import_bootstrap.py"
+    _spec = importlib.util.spec_from_file_location("_shared_import_bootstrap", _helper_path)
+    if _spec is None or _spec.loader is None:  # pragma: no cover - import bootstrap failure
+        raise ImportError(f"Could not load import bootstrap helper from {_helper_path}.")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    _module.ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
-from workflows.benchmark_design import (
+from benchmark.design import (
     BENCHMARK_MASTER_SEED,
     SimulationConfig,
     default_ei_simulation_configs,
 )
-from workflows.ei_benchmark_eval import EI_EXTERNAL_METHODS, EI_INTERNAL_METHODS, run_ei_benchmark
-from workflows.workflow_runtime import status
+from benchmark.ei_eval import EI_EXTERNAL_METHODS, EI_INTERNAL_METHODS, run_ei_benchmark
+from shared.runtime import status
 
 EI_BENCHMARK_RANDOM_STATE = BENCHMARK_MASTER_SEED
 
