@@ -12,13 +12,14 @@ from dataclasses import dataclass
 import multiprocessing as mp
 import os
 from pathlib import Path
-import sys
 from typing import Any
 
 import pandas as pd
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from import_bootstrap import ensure_scripts_on_path_from_entry
+
+    ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
 from unibm.models import ScalingFit
@@ -57,6 +58,7 @@ from workflows.evi_benchmark_external import (
     EXTERNAL_ESTIMATORS,
     run_external_benchmark,
 )
+from workflows.workflow_runtime import status
 
 
 BENCHMARK_ALPHA = 0.05
@@ -219,6 +221,11 @@ def run_evi_benchmark(
     if configs is None:
         configs = default_evi_simulation_configs()
     workers = resolve_benchmark_workers(len(configs), max_workers=max_workers)
+    status(
+        "evi_benchmark",
+        f"evaluating {len(configs)} internal scenarios with {workers} worker process"
+        f"{'' if workers == 1 else 'es'}",
+    )
     tasks = [
         (cfg, scenario_random_state(cfg, master_seed=random_state), cache_dir) for cfg in configs
     ]
@@ -240,6 +247,7 @@ def run_evi_benchmark(
             frames = [_evaluate_config_worker(task) for task in tasks]
     frames = [frame for frame in frames if not frame.empty]
     detail = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    status("evi_benchmark", "aggregating internal benchmark summaries")
     summary = benchmark_summary(detail)
     return detail, summary
 
@@ -335,6 +343,10 @@ def load_or_materialize_evi_benchmark_outputs(
     resolved_n_obs = _resolve_benchmark_n_obs() if n_obs is None else int(n_obs)
     configs = default_evi_simulation_configs(n_obs=resolved_n_obs)
     paths = _output_paths(out_dir, n_obs=resolved_n_obs)
+    status(
+        "evi_benchmark",
+        f"resolving benchmark outputs for n_obs={resolved_n_obs} (force={force})",
+    )
     if (
         not force
         and paths["detail"].exists()
@@ -355,6 +367,7 @@ def load_or_materialize_evi_benchmark_outputs(
             expected_methods=set(EXTERNAL_ESTIMATORS),
             configs=configs,
         ):
+            status("evi_benchmark", "reusing cached internal and external benchmark CSVs")
             return EviBenchmarkOutputs(
                 detail_path=paths["detail"],
                 summary_path=paths["summary"],
@@ -364,14 +377,17 @@ def load_or_materialize_evi_benchmark_outputs(
                 external_summary=external_summary,
             )
 
+    status("evi_benchmark", "running internal EVI benchmark grid")
     detail, summary = run_evi_benchmark(
         random_state=BENCHMARK_RANDOM_STATE,
         configs=configs,
         cache_dir=cache_dir,
         max_workers=max_workers,
     )
+    status("evi_benchmark", "writing internal EVI benchmark CSVs")
     detail.to_csv(paths["detail"], index=False)
     summary.to_csv(paths["summary"], index=False)
+    status("evi_benchmark", "running external EVI benchmark comparators")
     external_detail, external_summary = run_external_benchmark(
         random_state=BENCHMARK_RANDOM_STATE,
         configs=configs,
@@ -379,6 +395,7 @@ def load_or_materialize_evi_benchmark_outputs(
         cache_dir=cache_dir,
         max_workers=max_workers,
     )
+    status("evi_benchmark", "writing external EVI benchmark CSVs")
     external_detail.to_csv(paths["external_detail"], index=False)
     external_summary.to_csv(paths["external_summary"], index=False)
     return EviBenchmarkOutputs(
@@ -394,8 +411,10 @@ def load_or_materialize_evi_benchmark_outputs(
 def main() -> None:
     force = os.environ.get("UNIBM_FORCE_BENCHMARK", "").strip() in {"1", "true", "TRUE", "yes"}
     outputs = load_or_materialize_evi_benchmark_outputs(force=force)
-    with pd.option_context("display.max_columns", None, "display.width", 140):
-        print(outputs.summary)
+    status("evi_benchmark", f"detail: {outputs.detail_path}")
+    status("evi_benchmark", f"summary: {outputs.summary_path}")
+    status("evi_benchmark", f"external_detail: {outputs.external_detail_path}")
+    status("evi_benchmark", f"external_summary: {outputs.external_summary_path}")
 
 
 __all__ = [

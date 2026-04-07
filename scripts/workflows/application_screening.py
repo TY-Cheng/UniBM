@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import os
 from typing import Iterable
 
 import numpy as np
@@ -11,6 +10,7 @@ import pandas as pd
 
 from unibm.core import block_maxima, estimate_evi_quantile
 from unibm.extremal_index import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
+from .workflow_runtime import resolve_int_env
 
 
 DEFAULT_SCREENING_BOOTSTRAP_REPS = 40
@@ -96,14 +96,11 @@ def screen_extreme_series(
         raise ValueError("A DatetimeIndex is required for dataset screening.")
     n_years = (series.index.max() - series.index.min()).days / 365.25
     if bootstrap_reps is None:
-        env_value = os.environ.get("UNIBM_SCREENING_BOOTSTRAP_REPS")
-        if env_value is not None:
-            try:
-                bootstrap_reps = max(int(env_value), 0)
-            except ValueError:
-                bootstrap_reps = DEFAULT_SCREENING_BOOTSTRAP_REPS
-        else:
-            bootstrap_reps = DEFAULT_SCREENING_BOOTSTRAP_REPS
+        bootstrap_reps = resolve_int_env(
+            "UNIBM_SCREENING_BOOTSTRAP_REPS",
+            default=DEFAULT_SCREENING_BOOTSTRAP_REPS,
+            minimum=0,
+        )
     fit = estimate_evi_quantile(
         series.values,
         quantile=quantile,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -140,6 +142,64 @@ def _load_nfip_chunk_if_valid(path: Path) -> pd.DataFrame | None:
     return frame
 
 
+def _write_csv_gz_atomic(frame: pd.DataFrame, output_path: Path) -> None:
+    """Atomically write one compressed CSV."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=output_path.parent,
+        prefix=f"{output_path.stem}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        frame.to_csv(tmp_path, index=False, compression="gzip")
+        os.replace(tmp_path, output_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def nfip_claims_needs_refresh(
+    path: Path | str,
+    *,
+    state_code: str,
+    min_size_bytes: int = 32,
+    sample_rows: int = 128,
+) -> bool:
+    """Return whether one cached NFIP state extract looks unusable.
+
+    The check is intentionally cheap because the state-level combined extract can
+    be large. If the top-level file looks broken, the downloader can rebuild it
+    from cached yearly chunks without starting from scratch.
+    """
+    path = Path(path)
+    if not path.exists():
+        return True
+    try:
+        if path.stat().st_size < int(min_size_bytes):
+            return True
+    except OSError:
+        return True
+    try:
+        frame = pd.read_csv(path, parse_dates=["dateOfLoss"], nrows=int(sample_rows))
+    except Exception:
+        return True
+    required = {"state", "dateOfLoss", "amountPaidOnBuildingClaim"}
+    if frame.empty or not required.issubset(frame.columns):
+        return True
+    states = set(frame["state"].astype(str).str.upper())
+    if not states or states != {str(state_code).upper()}:
+        return True
+    amounts = pd.to_numeric(frame["amountPaidOnBuildingClaim"], errors="coerce")
+    if not np.isfinite(amounts).any():
+        return True
+    return False
+
+
 def download_nfip_claims_state(
     state_code: str,
     output_path: Path | str,
@@ -147,6 +207,7 @@ def download_nfip_claims_state(
     start_date: str = "1978-01-01",
     end_date: str = DEFAULT_NFIP_END_DATE,
     page_size: int = OPENFEMA_PAGE_SIZE,
+    force_refresh: bool = False,
 ) -> Path:
     """Download one state-level NFIP claims extract as a compact CSV.GZ file."""
     state_code = str(state_code).upper()
@@ -158,14 +219,17 @@ def download_nfip_claims_state(
     yearly_frames: list[pd.DataFrame] = []
     for year, year_start, year_end in _year_bounds(start_date, end_date):
         chunk_path = _nfip_chunk_path(output_path, state_code=state_code, year=year)
-        cached = _load_nfip_chunk_if_valid(chunk_path) if chunk_path.exists() else None
+        cached = (
+            _load_nfip_chunk_if_valid(chunk_path)
+            if chunk_path.exists() and not force_refresh
+            else None
+        )
         if cached is not None:
             print(f"[fema] {state_code} {year}: reusing cached yearly chunk", flush=True)
             yearly_frames.append(cached)
             continue
         print(
-            f"[fema] {state_code} {year}: downloading yearly chunk "
-            f"({year_start} to {year_end})",
+            f"[fema] {state_code} {year}: downloading yearly chunk ({year_start} to {year_end})",
             flush=True,
         )
         frame = _download_nfip_claims_window(
@@ -174,14 +238,14 @@ def download_nfip_claims_state(
             end_date=year_end,
             page_size=page_size,
         )
-        frame.to_csv(chunk_path, index=False, compression="gzip")
+        _write_csv_gz_atomic(frame, chunk_path)
         print(f"[fema] {state_code} {year}: wrote {len(frame)} rows to {chunk_path}", flush=True)
         yearly_frames.append(frame)
     frame = pd.concat(yearly_frames, ignore_index=True)
     if frame.empty:
         raise ValueError(f"No OpenFEMA NFIP claims were returned for state={state_code!r}.")
     frame = frame.sort_values("dateOfLoss").reset_index(drop=True)
-    frame.to_csv(output_path, index=False, compression="gzip")
+    _write_csv_gz_atomic(frame, output_path)
     print(f"[fema] wrote {len(frame)} rows to {output_path}", flush=True)
     return output_path
 
@@ -302,6 +366,7 @@ __all__ = [
     "OPENFEMA_NFIP_CLAIMS_ENDPOINT",
     "download_nfip_claims_state",
     "load_cpi_2025_base",
+    "nfip_claims_needs_refresh",
     "prepare_nfip_claim_series",
     "read_nfip_claims_csv",
 ]

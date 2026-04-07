@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import sys
 
 import pandas as pd
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from import_bootstrap import ensure_scripts_on_path_from_entry
+
+    ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
 from workflows.benchmark_design import (
@@ -19,6 +20,7 @@ from workflows.benchmark_design import (
     default_ei_simulation_configs,
 )
 from workflows.ei_benchmark_eval import EI_EXTERNAL_METHODS, EI_INTERNAL_METHODS, run_ei_benchmark
+from workflows.workflow_runtime import status
 
 EI_BENCHMARK_RANDOM_STATE = BENCHMARK_MASTER_SEED
 
@@ -120,6 +122,10 @@ def load_or_materialize_ei_benchmark_outputs(
     resolved_n_obs = _resolve_benchmark_n_obs() if n_obs is None else int(n_obs)
     configs = default_ei_simulation_configs(n_obs=resolved_n_obs)
     paths = _output_paths(out_dir, n_obs=resolved_n_obs)
+    status(
+        "ei_benchmark",
+        f"resolving benchmark outputs for n_obs={resolved_n_obs} (force={force})",
+    )
     if (
         not force
         and paths["detail"].exists()
@@ -138,6 +144,7 @@ def load_or_materialize_ei_benchmark_outputs(
             expected_methods=set(EI_EXTERNAL_METHODS),
             configs=configs,
         ):
+            status("ei_benchmark", "reusing cached internal and external benchmark CSVs")
             return EiBenchmarkOutputs(
                 detail_path=paths["detail"],
                 summary_path=paths["summary"],
@@ -147,12 +154,14 @@ def load_or_materialize_ei_benchmark_outputs(
                 external_summary=external_summary,
             )
 
+    status("ei_benchmark", "running pooled-BM and external EI benchmark grid")
     detail, summary, external_detail, external_summary = run_ei_benchmark(
         random_state=EI_BENCHMARK_RANDOM_STATE,
         configs=configs,
         cache_dir=cache_dir,
         max_workers=max_workers,
     )
+    status("ei_benchmark", "writing EI benchmark CSVs")
     detail.to_csv(paths["detail"], index=False)
     summary.to_csv(paths["summary"], index=False)
     external_detail.to_csv(paths["external_detail"], index=False)
@@ -170,8 +179,10 @@ def load_or_materialize_ei_benchmark_outputs(
 def main() -> None:
     force = os.environ.get("UNIBM_FORCE_BENCHMARK", "").strip() in {"1", "true", "TRUE", "yes"}
     outputs = load_or_materialize_ei_benchmark_outputs(force=force)
-    with pd.option_context("display.max_columns", None, "display.width", 160):
-        print(outputs.summary)
+    status("ei_benchmark", f"detail: {outputs.detail_path}")
+    status("ei_benchmark", f"summary: {outputs.summary_path}")
+    status("ei_benchmark", f"external_detail: {outputs.external_detail_path}")
+    status("ei_benchmark", f"external_summary: {outputs.external_summary_path}")
 
 
 if __name__ == "__main__":

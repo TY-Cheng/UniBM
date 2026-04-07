@@ -44,7 +44,6 @@ from .benchmark_design import (
     _try_load_npz,
     BENCHMARK_CACHE_VERSION,
     COMMON_BOOTSTRAP_REPS,
-    FAMILY_LABELS,
     ordered_families,
     METHOD_LABELS,
     SimulationConfig,

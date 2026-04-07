@@ -194,7 +194,39 @@ def estimate_extremal_index_reciprocal(
     kernel: KernelName = "gaussian",
     bandwidth: BandwidthSpec = "scott",
 ) -> ExtremalIndexReciprocalFit:
-    """Estimate reciprocal extremal index diagnostics over a grid of block sizes."""
+    """Estimate reciprocal-EI diagnostics over a block-size grid.
+
+    Parameters
+    ----------
+    series
+        One-dimensional time-indexed series. The function keeps finite
+        non-negative values, applies a ``log1p`` transform, and then builds
+        rolling-minimum diagnostics over a block-size grid.
+    num_step, min_block_size, max_block_size
+        Controls for the candidate block-size grid used by the diagnostic path.
+        If omitted, the grid is chosen adaptively from the sample size.
+    geom
+        If ``True``, use a geometric block-size grid. If ``False``, use an
+        arithmetic grid. If omitted, the function chooses geometrically for
+        larger series.
+    cdf_method
+        Marginal CDF estimator used to transform the series before the EI
+        diagnostics. Supported values are ``"kernel"`` and ``"empirical"``.
+    kernel, bandwidth
+        Kernel-CDF options used only when ``cdf_method="kernel"``.
+
+    Returns
+    -------
+    unibm.models.ExtremalIndexReciprocalFit
+        Diagnostic path object containing Northrop and BB reciprocal-EI curves,
+        their empirical standard deviations, and the selected block sizes.
+
+    Notes
+    -----
+    This function is exploratory: it returns diagnostic reciprocal-EI curves
+    rather than the formal benchmark/application EI estimators. For the formal
+    threshold or pooled block-maxima EI estimators, see :mod:`unibm.extremal_index`.
+    """
     raw = np.asarray(series.values, dtype=float)
     warn_on_negative_values(raw, context="estimate_extremal_index_reciprocal", stacklevel=3)
     valid_mask = np.isfinite(raw) & (raw >= 0)

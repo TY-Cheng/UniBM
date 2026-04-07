@@ -9,32 +9,15 @@ reviewable in plain Python rather than raw notebook JSON.
 from __future__ import annotations
 
 import json
-import textwrap
 
-from config import resolve_repo_dirs
-
-
-def _cell_lines(text: str) -> list[str]:
-    content = textwrap.dedent(text).strip()
-    return [line + "\n" for line in content.splitlines()]
-
-
-def md_cell(text: str) -> dict:
-    return {
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": _cell_lines(text),
-    }
-
-
-def code_cell(text: str) -> dict:
-    return {
-        "cell_type": "code",
-        "execution_count": None,
-        "metadata": {},
-        "outputs": [],
-        "source": _cell_lines(text),
-    }
+try:  # pragma: no cover - exercised through script execution
+    from config import resolve_repo_dirs
+    from vignette_cells import code_cell, md_cell
+    from vignette_sections import group_application_section, single_application_section
+except ImportError:  # pragma: no cover - exercised through module import
+    from .config import resolve_repo_dirs
+    from .vignette_cells import code_cell, md_cell
+    from .vignette_sections import group_application_section, single_application_section
 
 
 def build_notebook() -> dict:
@@ -64,50 +47,70 @@ def build_notebook() -> dict:
         ),
         code_cell(
             """
+            # ruff: noqa: E402
             from pathlib import Path
+            import importlib.util
             import json
-            import sys
 
-            _CWD = Path.cwd().resolve()
-            for _candidate in (_CWD, _CWD.parent):
-                _scripts_dir = _candidate / "scripts"
-                if (_scripts_dir / "config.py").exists():
-                    sys.path.insert(0, str(_scripts_dir))
-                    break
-            else:
-                raise FileNotFoundError("Could not locate scripts/config.py from the current notebook session.")
+            def _load_import_bootstrap(start: Path):
+                for _candidate in (start, *start.parents):
+                    _helper_path = _candidate / "scripts" / "workflows" / "import_bootstrap.py"
+                    if _helper_path.exists():
+                        _spec = importlib.util.spec_from_file_location(
+                            "_workflow_import_bootstrap",
+                            _helper_path,
+                        )
+                        if _spec is None or _spec.loader is None:
+                            raise ImportError(f"Could not load import bootstrap helper from {_helper_path}")
+                        _module = importlib.util.module_from_spec(_spec)
+                        _spec.loader.exec_module(_module)
+                        return _module
+                raise FileNotFoundError(
+                    "Could not locate scripts/workflows/import_bootstrap.py from the current notebook session."
+                )
+
+            _bootstrap = _load_import_bootstrap(Path.cwd().resolve())
+            _scripts_dir = _bootstrap.bootstrap_notebook_scripts_dir(Path.cwd().resolve())
 
             from unibm._runtime import prepare_matplotlib_env
 
             prepare_matplotlib_env("unibm-notebook")
             import matplotlib.pyplot as plt
-            import numpy as np
             import pandas as pd
             from config import resolve_repo_dirs
-            from IPython.display import IFrame, display
-            from workflows.benchmark_design import CORE_METHODS
-            from workflows.evi_benchmark_external import (
-                interval_sharpness_story_latex,
-                interval_sharpness_story_table,
-                plot_interval_sharpness_scatter,
-                plot_target_plus_external_panels,
-                target_plus_external_story_latex,
-                target_plus_external_story_table,
-            )
-            from workflows.ei_report import (
+            from IPython.display import Markdown, display
+            from data_prep.fema import OPENFEMA_NFIP_CLAIMS_ENDPOINT
+            from data_prep.usgs import USGS_DV_ENDPOINT
+            from workflows.notebook_api import (
+                CORE_METHODS,
+                UNIVERSAL_BENCHMARK_SET,
+                benchmark_story_latex,
+                benchmark_story_table,
+                benchmark_table,
+                build_application_bundles,
+                build_application_outputs,
+                build_ei_benchmark_manuscript_outputs,
+                build_evi_benchmark_manuscript_outputs,
                 ei_core_story_table,
                 ei_interval_story_table,
                 ei_story_latex,
                 ei_targets_story_table,
+                interval_sharpness_story_latex,
+                interval_sharpness_story_table,
+                plot_application_ei,
+                plot_application_overview,
+                plot_application_return_levels,
+                plot_application_scaling,
+                plot_application_target_stability,
+                plot_application_time_series,
+                plot_benchmark_panels,
                 plot_ei_core_panels,
                 plot_ei_interval_sharpness_scatter,
                 plot_ei_targets_panels,
-            )
-            from workflows.evi_report import (
-                benchmark_story_latex,
-                benchmark_story_table,
-                benchmark_table,
-                plot_benchmark_panels,
+                plot_interval_sharpness_scatter,
+                plot_target_plus_external_panels,
+                target_plus_external_story_latex,
+                target_plus_external_story_table,
             )
 
             DIRS = resolve_repo_dirs()
@@ -115,6 +118,8 @@ def build_notebook() -> dict:
             OUT = DIRS["DIR_OUT_APPLICATIONS"]
             BENCH = DIRS["DIR_OUT_BENCHMARK"]
             FIG_DIR = DIRS["DIR_MANUSCRIPT_FIGURE"]
+            TABLE_DIR = DIRS["DIR_MANUSCRIPT_TABLE"]
+            BENCHMARK_SET = UNIVERSAL_BENCHMARK_SET
             """
         ),
         code_cell(
@@ -128,6 +133,9 @@ def build_notebook() -> dict:
                 OUT / "application_methods.csv",
                 OUT / "application_ei_methods.csv",
                 OUT / "application_usgs_site_screening.csv",
+                TABLE_DIR / "application_summary_main.tex",
+                TABLE_DIR / "application_return_levels_main.tex",
+                TABLE_DIR / "application_ei_main.tex",
                 BENCH / "summary.csv",
                 BENCH / "external_summary.csv",
                 BENCH / "ei_summary.csv",
@@ -143,10 +151,6 @@ def build_notebook() -> dict:
             missing_outputs = [path for path in REQUIRED_OUTPUTS if not path.exists()]
 
             if REBUILD_OUTPUTS:
-                from workflows.application import build_application_outputs
-                from workflows.evi_report import build_evi_benchmark_manuscript_outputs
-                from workflows.ei_report import build_ei_benchmark_manuscript_outputs
-
                 print("Rebuilding application outputs...")
                 _ = build_application_outputs(ROOT)
                 print("Rebuilding benchmark manuscript figures/tables from current benchmark CSVs...")
@@ -163,14 +167,12 @@ def build_notebook() -> dict:
         ),
         code_cell(
             """
-            from data_prep.ghcn import prepare_hot_dry_series, prepare_precipitation_series
-            from workflows.application_screening import screen_extreme_series
-            from unibm import (
-                estimate_extremal_index_reciprocal,
-                estimate_evi_quantile,
-                estimate_return_level,
-                plot_scaling_fit,
-            )
+            application_summary = pd.read_csv(OUT / "application_summary.csv")
+            application_return_levels = pd.read_csv(OUT / "application_return_levels.csv")
+            application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
+            application_methods = pd.read_csv(OUT / "application_methods.csv")
+            application_screening = pd.read_csv(OUT / "application_screening.csv")
+            application_series_registry = pd.read_csv(OUT / "application_series_registry.csv")
             """
         ),
         md_cell(
@@ -238,13 +240,11 @@ def build_notebook() -> dict:
             ```
 
             The benchmark is now organized around the truth pair `(xi, theta)`, with `phi` retained only as a derived construction parameter for the simulation families.
-            The EVI suite fixes `theta in {1.00, 0.70, 0.50, 0.35}` and sweeps
-            `xi in {0.10, 0.20, 0.50, 1.0, 2.0, 3.0, 5.0, 10.0}`.
+            The notebook reads the currently materialized benchmark CSVs and reports the active universal grid directly from those files, so the vignette stays in sync if the benchmark design changes.
             The raw synthetic families are:
             `frechet_max_ar`,
-            `moving_maxima_q2`,
+            `moving_maxima_q99`,
             and `pareto_additive_ar1`.
-            The shared lower endpoint `theta = 0.35` is chosen because the moving-maxima family with `q = 2` cannot go below `1/3`.
             Each family has a closed-form map from `(xi, theta)` back to its construction parameter `phi`, so the benchmark can compare methods on the same truth grid even though the underlying dependence mechanisms differ.
             Each synthetic series in the main benchmark has length `n_obs = 365`, so the benchmark is explicitly framed as a short-record regime rather than a long-record asymptotic exercise.
             A longer `n_obs = 1000` run can still be generated separately as an appendix sensitivity without changing the main manuscript-facing cache.
@@ -272,11 +272,30 @@ def build_notebook() -> dict:
             ei_benchmark = pd.read_csv(BENCH / "ei_summary.csv")
             ei_external_benchmark = pd.read_csv(BENCH / "ei_external_summary.csv")
 
-            core_table = benchmark_story_table(benchmark, methods=CORE_METHODS, benchmark_set="main")
+            def _grid_summary(frame, primary, secondary):
+                primary_values = ", ".join(str(value) for value in sorted(frame[primary].dropna().unique()))
+                secondary_values = ", ".join(str(value) for value in sorted(frame[secondary].dropna().unique()))
+                return primary_values, secondary_values
+
+            evi_xi_grid, evi_theta_grid = _grid_summary(benchmark, "xi_true", "theta_true")
+            ei_xi_grid, ei_theta_grid = _grid_summary(ei_benchmark, "xi_true", "theta_true")
+
+            print(f"EVI benchmark_set = {BENCHMARK_SET}")
+            print(f"EVI xi grid = {evi_xi_grid}")
+            print(f"EVI theta grid = {evi_theta_grid}")
+            print(f"EI benchmark_set = {BENCHMARK_SET}")
+            print(f"EI xi grid = {ei_xi_grid}")
+            print(f"EI theta grid = {ei_theta_grid}")
+
+            core_table = benchmark_story_table(
+                benchmark,
+                methods=CORE_METHODS,
+                benchmark_set=BENCHMARK_SET,
+            )
             target_table = target_plus_external_story_table(
                 benchmark,
                 external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
             )
 
             display(core_table)
@@ -284,8 +303,8 @@ def build_notebook() -> dict:
                 benchmark_story_latex(
                     benchmark,
                     methods=CORE_METHODS,
-                    benchmark_set="main",
-                    caption="Core EVI benchmark comparison across the xi grid 0.10 to 10.00 at fixed theta in {1.00, 0.70, 0.50, 0.35}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+                    benchmark_set=BENCHMARK_SET,
+                    caption=f"Core EVI benchmark comparison across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
                     label="tab:vignette-benchmark-core",
                 )
             )
@@ -295,15 +314,15 @@ def build_notebook() -> dict:
                 target_plus_external_story_latex(
                     benchmark,
                     external_benchmark,
-                    benchmark_set="main",
-                    caption="Target-comparison EVI benchmark across the xi grid 0.10 to 10.00 at fixed theta in {1.00, 0.70, 0.50, 0.35}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+                    benchmark_set=BENCHMARK_SET,
+                    caption=f"Target-comparison EVI benchmark across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
                     label="tab:vignette-benchmark-targets",
                 )
             )
 
             plot_benchmark_panels(
                 benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
                 methods=CORE_METHODS,
                 title="Necessary components: from disjoint OLS baselines to sliding-median FGLS",
                 legend_mode="explicit",
@@ -314,7 +333,7 @@ def build_notebook() -> dict:
             plot_target_plus_external_panels(
                 benchmark,
                 external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
                 title="Target comparison under sliding-block FGLS",
             )
             plt.show()
@@ -329,8 +348,7 @@ def build_notebook() -> dict:
         ),
         code_cell(
             """
-            display(IFrame(str(FIG_DIR / "benchmark_overview.pdf"), width="100%", height=1180))
-            display(benchmark_table(benchmark, benchmark_set="main"))
+            display(benchmark_table(benchmark, benchmark_set=BENCHMARK_SET))
             """
         ),
         md_cell(
@@ -347,15 +365,15 @@ def build_notebook() -> dict:
             sharpness_table = interval_sharpness_story_table(
                 benchmark,
                 external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
             )
             display(sharpness_table)
             print(
                 interval_sharpness_story_latex(
                     benchmark,
                     external_benchmark,
-                    benchmark_set="main",
-                    caption="Appendix EVI interval sharpness-versus-calibration summary across the xi grid 0.10 to 10.00 at fixed theta in {1.00, 0.70, 0.50, 0.35}. All interval metrics use 95% CI (alpha = 0.05).",
+                    benchmark_set=BENCHMARK_SET,
+                    caption=f"Appendix EVI interval sharpness-versus-calibration summary across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. All interval metrics use 95% CI (alpha = 0.05).",
                     label="tab:vignette-benchmark-interval",
                 )
             )
@@ -363,11 +381,10 @@ def build_notebook() -> dict:
             plot_interval_sharpness_scatter(
                 benchmark,
                 external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
                 title="Appendix: 95% interval sharpness versus calibration",
             )
             plt.show()
-            display(IFrame(str(FIG_DIR / "benchmark_interval_sharpness.pdf"), width="100%", height=520))
             """
         ),
         md_cell(
@@ -375,8 +392,8 @@ def build_notebook() -> dict:
             ## 1B. Native EI Benchmark
 
             The new EI suite mirrors the EVI benchmark structurally, but it swaps the target of comparison:
-            `xi` is fixed at representative values `0.50, 1.0, 5.0, 10.0`, while
-            `theta` is swept over `1.00, 0.85, 0.70, 0.55, 0.45, 0.35`.
+            `xi` is fixed over the currently materialized EI grid read from the cached benchmark CSVs, while
+            `theta` is swept over the corresponding EI dependence grid from the same cache.
             The internal UniBM EI estimators are pooled block-maxima methods built from Northrop or BB reciprocal-EI paths:
             disjoint or sliding blocks,
             OLS or FGLS pooling on `log(1 / theta_hat(b))`,
@@ -395,23 +412,22 @@ def build_notebook() -> dict:
         ),
         code_cell(
             """
-            ei_core_table = ei_core_story_table(ei_benchmark, benchmark_set="main")
+            ei_core_table = ei_core_story_table(ei_benchmark, benchmark_set=BENCHMARK_SET)
             ei_target_table = ei_targets_story_table(
                 ei_benchmark,
                 ei_external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
             )
             ei_interval_table = ei_interval_story_table(
                 ei_benchmark,
                 ei_external_benchmark,
-                benchmark_set="main",
+                benchmark_set=BENCHMARK_SET,
             )
-
             display(ei_core_table)
             print(
                 ei_story_latex(
                     ei_core_table,
-                    caption="EI core benchmark across the theta grid 0.35 to 1.00 at fixed xi in {0.50, 1.0, 5.0, 10.0}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+                    caption=f"EI core benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
                     label="tab:vignette-benchmark-ei-core",
                 )
             )
@@ -420,7 +436,7 @@ def build_notebook() -> dict:
             print(
                 ei_story_latex(
                     ei_target_table,
-                    caption="EI target benchmark across the theta grid 0.35 to 1.00 at fixed xi in {0.50, 1.0, 5.0, 10.0}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+                    caption=f"EI target benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median APE (IQR) / median Winkler interval score (IQR). All interval metrics use 95% CI (alpha = 0.05).",
                     label="tab:vignette-benchmark-ei-targets",
                 )
             )
@@ -446,10 +462,6 @@ def build_notebook() -> dict:
                 ei_external_benchmark,
             )
             plt.show()
-
-            display(IFrame(str(FIG_DIR / "benchmark_ei_summary.pdf"), width="100%", height=580))
-            display(IFrame(str(FIG_DIR / "benchmark_ei_targets.pdf"), width="100%", height=580))
-            display(IFrame(str(FIG_DIR / "benchmark_ei_interval_sharpness.pdf"), width="100%", height=580))
             """
         ),
         md_cell(
@@ -462,8 +474,10 @@ def build_notebook() -> dict:
         code_cell(
             """
             screening = pd.read_csv(OUT / "application_screening.csv")
+            series_registry = pd.read_csv(OUT / "application_series_registry.csv")
             application_summary = pd.read_csv(OUT / "application_summary.csv")
             display(screening)
+            display(series_registry[["application", "provider", "role", "series_name", "series_basis"]])
             display(application_summary)
 
             with open(ROOT / "data" / "metadata" / "sources.json") as fh:
@@ -473,166 +487,300 @@ def build_notebook() -> dict:
         ),
         md_cell(
             """
+            ### What Each Application Actually Does
+
+            The application workflow is intentionally not “one raw series, one estimator” for every case.
+
+            - **Houston precipitation** uses the same wet-season daily precipitation series for display, EVI, and EI, so both tail severity and clustering are interpreted on the daily rainfall calendar.
+            - **Texas and Florida streamflow** use the same full-year daily discharge series for display, EVI, and EI, so return levels and extremal-index summaries refer to the same hydrologic process.
+            - **Texas and Florida NFIP claims** deliberately split the series by task:
+              the display and EI series are zero-filled daily state payout totals on the calendar-day axis,
+              while the EVI series keeps only positive-payout days so tail extrapolation is done on the claim-active-day scale.
+            - **Phoenix hot-dry severity** is a derived compound-hazard index, retained as a secondary case rather than the main validation dataset.
+
+            This split matters because the application chapter now combines three layers of environmental risk:
+            physical hazard occurrence,
+            hydrologic response,
+            and downstream socio-economic impact.
+            """
+        ),
+        md_cell(
+            """
+            ### Data Provenance and Source Records
+
+            The application chapter is built from three public data systems:
+
+            - **NOAA GHCN-Daily** station files for Houston precipitation and Phoenix temperature/precipitation inputs.
+            - **USGS NWIS daily discharge** for the frozen Texas and Florida streamflow gauges.
+            - **OpenFEMA NFIP Redacted Claims v2** for Texas and Florida building-claim payouts.
+
+            The table below exposes the exact station ids, gauge ids, state filters, and source URLs used by the workflow so the case studies can be checked independently.
+            """
+        ),
+        code_cell(
+            """
+            with open(ROOT / "data" / "metadata" / "sources.json") as fh:
+                ghcn_sources = json.load(fh)
+            with open(ROOT / "data" / "metadata" / "application" / "usgs_frozen_sites.json") as fh:
+                usgs_frozen_sites = json.load(fh)
+
+            provenance_rows = [
+                {
+                    "application": "houston_hobby_precipitation",
+                    "provider": "NOAA GHCN-Daily",
+                    "source_reference": f"{ghcn_sources['houston_hobby_precipitation']['station_id']} ({ghcn_sources['houston_hobby_precipitation']['station_name']})",
+                    "source_url": ghcn_sources["houston_hobby_precipitation"]["source_url"],
+                    "notes": "Wet-season daily precipitation (Jun-Nov).",
+                },
+                {
+                    "application": "phoenix_hot_dry_severity",
+                    "provider": "NOAA GHCN-Daily",
+                    "source_reference": f"{ghcn_sources['phoenix_hot_dry_severity']['station_id']} ({ghcn_sources['phoenix_hot_dry_severity']['station_name']})",
+                    "source_url": ghcn_sources["phoenix_hot_dry_severity"]["source_url"],
+                    "notes": "Warm-season temperature and precipitation inputs used to build the 30-day hot-dry severity index.",
+                },
+                {
+                    "application": "tx_streamflow",
+                    "provider": "USGS NWIS daily discharge",
+                    "source_reference": f"{usgs_frozen_sites['TX']['site_no']} ({usgs_frozen_sites['TX']['station_name']})",
+                    "source_url": f"https://waterdata.usgs.gov/monitoring-location/{usgs_frozen_sites['TX']['site_no']}/",
+                    "notes": "Daily discharge (parameter 00060); frozen flagship Texas streamgage.",
+                },
+                {
+                    "application": "fl_streamflow",
+                    "provider": "USGS NWIS daily discharge",
+                    "source_reference": f"{usgs_frozen_sites['FL']['site_no']} ({usgs_frozen_sites['FL']['station_name']})",
+                    "source_url": f"https://waterdata.usgs.gov/monitoring-location/{usgs_frozen_sites['FL']['site_no']}/",
+                    "notes": "Daily discharge (parameter 00060); frozen flagship Florida streamgage.",
+                },
+                {
+                    "application": "tx_nfip_claims",
+                    "provider": "OpenFEMA NFIP Redacted Claims v2",
+                    "source_reference": "Texas state filter on dateOfLoss and amountPaidOnBuildingClaim",
+                    "source_url": OPENFEMA_NFIP_CLAIMS_ENDPOINT,
+                    "notes": "Building-claim payouts aggregated to daily state totals; EVI uses positive-payout days, EI keeps zero-filled calendar days.",
+                },
+                {
+                    "application": "fl_nfip_claims",
+                    "provider": "OpenFEMA NFIP Redacted Claims v2",
+                    "source_reference": "Florida state filter on dateOfLoss and amountPaidOnBuildingClaim",
+                    "source_url": OPENFEMA_NFIP_CLAIMS_ENDPOINT,
+                    "notes": "Building-claim payouts aggregated to daily state totals; EVI uses positive-payout days, EI keeps zero-filled calendar days.",
+                },
+            ]
+
+            provenance = pd.DataFrame(provenance_rows)
+            display(provenance)
+            display(Markdown(f"USGS API endpoint used by the downloader: `{USGS_DV_ENDPOINT}`"))
+            """
+        ),
+        md_cell(
+            """
+            ### Manuscript-Facing Application Tables
+
+            The application workflow now emits a matched LaTeX table set for manuscript assembly:
+            a cross-application summary table, a return-level table, and an EI-focused comparison table.
+            This keeps the application chapter structurally parallel to the benchmark/report pipelines rather than relying on figures alone.
+            """
+        ),
+        md_cell(
+            """
+            ### Inline Application Plots
+
+            Unlike the benchmark sections, the application plots require fitted bundle objects rather than only summary CSVs.
+            The next cell reuses the cached raw inputs and re-fits the six application bundles once so the notebook can call the plotting helpers directly and display the figures inline.
+            """
+        ),
+        code_cell(
+            """
+            application_bundles = build_application_bundles(DIRS)
+            application_bundle_map = {bundle.spec.key: bundle for bundle in application_bundles}
+            plot_application_overview(application_bundles)
+            plt.show()
+            """
+        ),
+        code_cell(
+            """
+            application_return_levels = pd.read_csv(OUT / "application_return_levels.csv")
+            application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
+
+            display(application_summary)
+            display(application_return_levels.head(12))
+            display(application_ei_methods)
+
+            print((TABLE_DIR / "application_summary_main.tex").read_text())
+            print((TABLE_DIR / "application_return_levels_main.tex").read_text())
+            print((TABLE_DIR / "application_ei_main.tex").read_text())
+            """
+        ),
+        code_cell(
+            """
+            def _fmt_value(value, *, digits=2, sci_at=1e6):
+                if pd.isna(value):
+                    return "NA"
+                value = float(value)
+                if abs(value) >= sci_at:
+                    return f"{value:.2e}"
+                if abs(value) >= 1_000:
+                    return f"{value:,.0f}"
+                return f"{value:.{digits}f}"
+
+
+            def _fmt_interval(center, lo, hi, *, digits=2, sci_at=1e6):
+                return f"{_fmt_value(center, digits=digits, sci_at=sci_at)} [{_fmt_value(lo, digits=digits, sci_at=sci_at)}, {_fmt_value(hi, digits=digits, sci_at=sci_at)}]"
+
+
+            def _summary_row(app_key):
+                return application_summary.loc[application_summary["application"] == app_key].iloc[0]
+
+
+            def _screening_row(app_key, analysis_type):
+                return application_screening.loc[
+                    (application_screening["name"] == app_key)
+                    & (application_screening["analysis_type"] == analysis_type)
+                ].iloc[0]
+
+
+            def _return_row(app_key, horizon):
+                return application_return_levels.loc[
+                    (application_return_levels["application"] == app_key)
+                    & (application_return_levels["horizon_years"] == float(horizon))
+                ].iloc[0]
+            """
+        ),
+        code_cell(
+            """
+            houston_row = _summary_row("houston_hobby_precipitation")
+            phoenix_row = _summary_row("phoenix_hot_dry_severity")
+            tx_stream_row = _summary_row("tx_streamflow")
+            fl_stream_row = _summary_row("fl_streamflow")
+            tx_nfip_row = _summary_row("tx_nfip_claims")
+            fl_nfip_row = _summary_row("fl_nfip_claims")
+
+            display(
+                Markdown(
+                    f'''
+            **Cross-application reading guide**
+
+            - **Houston precipitation** is the mildest dependence case: `theta = {_fmt_value(houston_row['theta_hat_bb_sliding_fgls'])}` implies an average cluster size of about `{_fmt_value(houston_row['mean_cluster_size'])}` wet days.
+            - **Texas and Florida streamflow** are the strongest clustering cases: BB-sliding-FGLS gives `theta = {_fmt_value(tx_stream_row['theta_hat_bb_sliding_fgls'], digits=3)}` in Texas and `{_fmt_value(fl_stream_row['theta_hat_bb_sliding_fgls'], digits=3)}` in Florida, implying flood-wave cluster sizes around `{_fmt_value(tx_stream_row['mean_cluster_size'])}` and `{_fmt_value(fl_stream_row['mean_cluster_size'])}` days.
+            - **Texas and Florida NFIP claims** have the heaviest tails: `xi = {_fmt_value(tx_nfip_row['xi_hat'])}` in Texas and `{_fmt_value(fl_nfip_row['xi_hat'])}` in Florida, with both states showing multi-day claim waves (`theta ~ 0.31`).
+            - **Phoenix hot-dry severity** has a lighter tail than Houston (`xi = {_fmt_value(phoenix_row['xi_hat'])}`) but much stronger clustering (`theta = {_fmt_value(phoenix_row['theta_hat_bb_sliding_fgls'])}`), so persistence matters even when the tail is milder.
+                    '''
+                )
+            )
+            """
+        ),
+        *single_application_section(
+            heading="""
             ## 3. Flagship Application: Houston Wet-Season Daily Precipitation
 
             This is the main manuscript-facing application because block maxima are native, return levels are interpretable for flood-related risk, and the record is long enough to study finite-block behavior under serial dependence.
-            """
-        ),
-        code_cell(
-            """
-            houston = prepare_precipitation_series(ROOT / "data" / "raw" / "ghcn" / "USW00012918.csv.gz")
-            houston_fit = estimate_evi_quantile(
-                houston.series.values,
-                quantile=0.5,
-                sliding=True,
-                bootstrap_reps=120,
-                random_state=7,
-            )
-            houston_levels = estimate_return_level(
-                houston_fit,
-                years=np.array([1, 10, 25, 50]),
-                observations_per_year=183.0,
-            )
-            houston_ei = estimate_extremal_index_reciprocal(houston.series)
-            houston_screen = screen_extreme_series(houston.series, name="houston_hobby_precipitation")
+            """,
+            application_key="houston_hobby_precipitation",
+            variable_prefix="houston",
+            include_target=True,
+            interpretation_code="""
+            houston_evi_screen = _screening_row("houston_hobby_precipitation", "evi")
+            houston_ei_screen = _screening_row("houston_hobby_precipitation", "ei")
+            houston_rl10 = _return_row("houston_hobby_precipitation", 10.0)
+            houston_rl50 = _return_row("houston_hobby_precipitation", 50.0)
+            houston_k_gaps = houston_ei.loc[houston_ei["method"] == "k_gaps"].iloc[0]
 
-            display(pd.Series(houston_screen.to_record()))
             display(
-                pd.DataFrame(
-                    {
-                        "return_horizon_years": [1, 10, 25, 50],
-                        "median_block_maximum_mm": houston_levels,
-                    }
+                Markdown(
+                    f'''
+            **Interpretation.** Houston combines a moderately heavy wet-day tail (`xi = {_fmt_interval(houston_summary.iloc[0]['xi_hat'], houston_summary.iloc[0]['xi_lo'], houston_summary.iloc[0]['xi_hi'])}`) with only mild clustering. The EI estimate `theta = {_fmt_interval(houston_summary.iloc[0]['theta_hat_bb_sliding_fgls'], houston_summary.iloc[0]['theta_lo_bb_sliding_fgls'], houston_summary.iloc[0]['theta_hi_bb_sliding_fgls'])}` is close to the K-gaps reference `{_fmt_interval(houston_summary.iloc[0]['theta_hat_k_gaps'], houston_k_gaps['theta_lo'], houston_k_gaps['theta_hi'])}`, implying an average extreme-rainfall cluster size of about `{_fmt_value(houston_summary.iloc[0]['mean_cluster_size'])}` days.
+
+            The screening output also shows why keeping zeros in the EI time axis matters here: only `{100 * houston_evi_screen['daily_positive_share']:.1f}%` of wet-season days are positive, so dry-day spacing is part of the clustering problem rather than noise. Because dependence is modest, EI adjustment only slightly lowers the return levels, from `{_fmt_value(houston_rl10['return_level'])}` to `{_fmt_value(houston_rl10['return_level_ei_adjusted'])}` at 10 years and from `{_fmt_value(houston_rl50['return_level'])}` to `{_fmt_value(houston_rl50['return_level_ei_adjusted'])}` at 50 years.
+                    '''
                 )
             )
-
-            fig, axes = plt.subplots(2, 1, figsize=(8, 5))
-            axes[0].plot(houston.series.index, houston.series.values, color="tab:blue", lw=0.6)
-            axes[0].set_ylabel("precipitation (mm)")
-            axes[0].set_title("Houston wet-season daily precipitation")
-            axes[0].grid(alpha=0.25)
-            axes[1].plot(houston.annual_maxima.index, houston.annual_maxima.values, color="tab:red", lw=0.9)
-            axes[1].set_xlabel("year")
-            axes[1].set_ylabel("annual max (mm)")
-            axes[1].grid(alpha=0.25)
-            fig.tight_layout()
-            plt.show()
-            """
+            """,
         ),
-        code_cell(
-            """
-            plot_scaling_fit(
-                houston_fit,
-                title="Houston sliding-block quantile scaling",
-                ylabel="log median block maximum",
-            )
-            plt.show()
+        *group_application_section(
+            heading="""
+            ## 4. Hydrologic Response Applications: Texas and Florida Streamflow
 
-            houston_methods = pd.read_csv(OUT / "application_methods.csv")
-            display(houston_methods[houston_methods["application"] == "houston_hobby_precipitation"])
-            pd.Series(
-                {
-                    "northrop_reciprocal_ei": houston_ei.northrop_estimate,
-                    "bb_reciprocal_ei": houston_ei.bb_estimate,
-                }
+            The streamflow applications move one step downstream from weather into hydrologic response.
+            Here the same daily discharge series is used for display, EVI, and EI, so the estimated `xi`, `theta`, and EI-adjusted return levels all describe the same calendar-day river process.
+            This makes the streamflow cases the cleanest bridge from the meteorological Houston case to impact-facing insurance data.
+            """,
+            application_keys=["tx_streamflow", "fl_streamflow"],
+            variable_prefix="streamflow",
+            include_target=True,
+            interpretation_code="""
+            tx_stream_rl10 = _return_row("tx_streamflow", 10.0)
+            fl_stream_rl10 = _return_row("fl_streamflow", 10.0)
+            tx_stream_rl50 = _return_row("tx_streamflow", 50.0)
+            fl_stream_rl50 = _return_row("fl_streamflow", 50.0)
+
+            display(
+                Markdown(
+                    f'''
+            **Interpretation.** The two river gauges are the most dependence-dominated applications in the package. BB-sliding-FGLS gives `theta = {_fmt_interval(streamflow_summary.loc[streamflow_summary['application'] == 'tx_streamflow', 'theta_hat_bb_sliding_fgls'].iloc[0], streamflow_summary.loc[streamflow_summary['application'] == 'tx_streamflow', 'theta_lo_bb_sliding_fgls'].iloc[0], streamflow_summary.loc[streamflow_summary['application'] == 'tx_streamflow', 'theta_hi_bb_sliding_fgls'].iloc[0], digits=3)}` in Texas and `{_fmt_interval(streamflow_summary.loc[streamflow_summary['application'] == 'fl_streamflow', 'theta_hat_bb_sliding_fgls'].iloc[0], streamflow_summary.loc[streamflow_summary['application'] == 'fl_streamflow', 'theta_lo_bb_sliding_fgls'].iloc[0], streamflow_summary.loc[streamflow_summary['application'] == 'fl_streamflow', 'theta_hi_bb_sliding_fgls'].iloc[0], digits=3)}` in Florida, corresponding to average flood-wave cluster sizes of roughly `{_fmt_value(streamflow_summary.loc[streamflow_summary['application'] == 'tx_streamflow', 'mean_cluster_size'].iloc[0])}` and `{_fmt_value(streamflow_summary.loc[streamflow_summary['application'] == 'fl_streamflow', 'mean_cluster_size'].iloc[0])}` days.
+
+            That dependence materially changes the extrapolation story. In Texas, the 10-year return level drops from `{_fmt_value(tx_stream_rl10['return_level'])}` to `{_fmt_value(tx_stream_rl10['return_level_ei_adjusted'])}` once EI is accounted for; in Florida, the same adjustment moves the 10-year level from `{_fmt_value(fl_stream_rl10['return_level'])}` to `{_fmt_value(fl_stream_rl10['return_level_ei_adjusted'])}`. The 50-year levels show the same pattern, so these streamflow cases are the clearest demonstration that clustering can dominate return-level interpretation.
+                    '''
+                )
             )
-            """
+            """,
         ),
-        md_cell(
-            """
-            ## 4. Secondary Application: Phoenix Hot-Dry Severity
+        *group_application_section(
+            heading="""
+            ## 5. Hazard-to-Impact Applications: Texas and Florida NFIP Building Payout Waves
+
+            The NFIP cases are intentionally constructed differently from the raw physical-hazard series.
+            We keep the **calendar-day zero-filled daily payout totals** for display and EI so the clustering analysis preserves claim-wave timing,
+            but we fit EVI and return levels on the **positive-payout-day** series so the tail extrapolation is not diluted by long runs of structural zeros.
+            The return levels reported here should therefore be read as **claim-active-day return levels**, not calendar-day return levels.
+            """,
+            application_keys=["tx_nfip_claims", "fl_nfip_claims"],
+            variable_prefix="nfip",
+            include_registry=True,
+            interpretation_code="""
+            tx_nfip_evi_screen = _screening_row("tx_nfip_claims", "evi")
+            fl_nfip_evi_screen = _screening_row("fl_nfip_claims", "evi")
+            tx_nfip_ei_screen = _screening_row("tx_nfip_claims", "ei")
+            fl_nfip_ei_screen = _screening_row("fl_nfip_claims", "ei")
+            tx_nfip_rl10 = _return_row("tx_nfip_claims", 10.0)
+            fl_nfip_rl10 = _return_row("fl_nfip_claims", 10.0)
+
+            display(
+                Markdown(
+                    f'''
+            **Interpretation.** The NFIP applications are the clearest heavy-tail examples in the package. Texas has `xi = {_fmt_interval(nfip_summary.loc[nfip_summary['application'] == 'tx_nfip_claims', 'xi_hat'].iloc[0], nfip_summary.loc[nfip_summary['application'] == 'tx_nfip_claims', 'xi_lo'].iloc[0], nfip_summary.loc[nfip_summary['application'] == 'tx_nfip_claims', 'xi_hi'].iloc[0])}` and Florida has `{_fmt_interval(nfip_summary.loc[nfip_summary['application'] == 'fl_nfip_claims', 'xi_hat'].iloc[0], nfip_summary.loc[nfip_summary['application'] == 'fl_nfip_claims', 'xi_lo'].iloc[0], nfip_summary.loc[nfip_summary['application'] == 'fl_nfip_claims', 'xi_hi'].iloc[0])}`, so the claim-active-day tail is much heavier than in the physical-hazard series.
+
+            The split-series design is also justified by the raw timing structure: only `{100 * tx_nfip_ei_screen['daily_positive_share']:.1f}%` of Texas calendar days and `{100 * fl_nfip_ei_screen['daily_positive_share']:.1f}%` of Florida calendar days carry positive payouts, so EI needs the zero-filled daily axis to preserve claim-wave timing. On that calendar scale, BB-sliding-FGLS gives `theta ~ {_fmt_value(nfip_summary.loc[nfip_summary['application'] == 'tx_nfip_claims', 'theta_hat_bb_sliding_fgls'].iloc[0])}` in Texas and `{_fmt_value(nfip_summary.loc[nfip_summary['application'] == 'fl_nfip_claims', 'theta_hat_bb_sliding_fgls'].iloc[0])}` in Florida, implying mean claim-wave sizes of about `{_fmt_value(nfip_summary.loc[nfip_summary['application'] == 'tx_nfip_claims', 'mean_cluster_size'].iloc[0])}` and `{_fmt_value(nfip_summary.loc[nfip_summary['application'] == 'fl_nfip_claims', 'mean_cluster_size'].iloc[0])}` active days. The 10-year claim-active-day return levels, `{_fmt_value(tx_nfip_rl10['return_level'])}` in Texas and `{_fmt_value(fl_nfip_rl10['return_level'])}` in Florida, should therefore be read together with the EI evidence for multi-day claim waves.
+                    '''
+                )
+            )
+            """,
+        ),
+        *single_application_section(
+            heading="""
+            ## 6. Secondary Application: Phoenix Hot-Dry Severity
 
             The secondary case keeps the methodology univariate but modernizes the climate-risk framing.
             The severity index is built from warm-season positive temperature anomalies and rolling precipitation deficits, so annual maxima retain a direct environmental interpretation.
-            """
-        ),
-        code_cell(
-            """
-            phoenix = prepare_hot_dry_series(ROOT / "data" / "raw" / "ghcn" / "USW00023183.csv.gz")
-            phoenix_fit = estimate_evi_quantile(
-                phoenix.series.values,
-                quantile=0.5,
-                sliding=True,
-                bootstrap_reps=120,
-                random_state=7,
-            )
-            phoenix_levels = estimate_return_level(
-                phoenix_fit,
-                years=np.array([1, 10, 25, 50]),
-                observations_per_year=214.0,
-            )
-            phoenix_ei = estimate_extremal_index_reciprocal(phoenix.series)
-            phoenix_screen = screen_extreme_series(phoenix.series, name="phoenix_hot_dry_severity")
+            """,
+            application_key="phoenix_hot_dry_severity",
+            variable_prefix="phoenix",
+            include_target=True,
+            interpretation_code="""
+            phoenix_rl10 = _return_row("phoenix_hot_dry_severity", 10.0)
+            phoenix_rl50 = _return_row("phoenix_hot_dry_severity", 50.0)
 
-            display(pd.Series(phoenix_screen.to_record()))
             display(
-                pd.DataFrame(
-                    {
-                        "return_horizon_years": [1, 10, 25, 50],
-                        "median_block_maximum_severity": phoenix_levels,
-                    }
+                Markdown(
+                    f'''
+            **Interpretation.** Phoenix is a useful contrast case because the tail is milder than Houston but the clustering is stronger. The EVI fit `xi = {_fmt_interval(phoenix_summary.iloc[0]['xi_hat'], phoenix_summary.iloc[0]['xi_lo'], phoenix_summary.iloc[0]['xi_hi'])}` is comparatively small, yet the EI estimate `theta = {_fmt_interval(phoenix_summary.iloc[0]['theta_hat_bb_sliding_fgls'], phoenix_summary.iloc[0]['theta_lo_bb_sliding_fgls'], phoenix_summary.iloc[0]['theta_hi_bb_sliding_fgls'])}` implies an average cluster size of about `{_fmt_value(phoenix_summary.iloc[0]['mean_cluster_size'])}` hot-dry days.
+
+            The comparison with Houston is therefore conceptually useful: Houston is more tail-heavy but less persistent, whereas Phoenix is less tail-heavy but more persistent. In Phoenix the EI-adjusted return levels fall from `{_fmt_value(phoenix_rl10['return_level'])}` to `{_fmt_value(phoenix_rl10['return_level_ei_adjusted'])}` at 10 years and from `{_fmt_value(phoenix_rl50['return_level'])}` to `{_fmt_value(phoenix_rl50['return_level_ei_adjusted'])}` at 50 years, so persistence still matters even though the upper tail is relatively mild.
+                    '''
                 )
             )
-
-            fig, axes = plt.subplots(2, 1, figsize=(8, 5))
-            axes[0].plot(phoenix.series.index, phoenix.series.values, color="tab:orange", lw=0.6)
-            axes[0].set_ylabel("severity")
-            axes[0].set_title("Phoenix warm-season hot-dry severity")
-            axes[0].grid(alpha=0.25)
-            axes[1].plot(phoenix.annual_maxima.index, phoenix.annual_maxima.values, color="tab:red", lw=0.9)
-            axes[1].set_xlabel("year")
-            axes[1].set_ylabel("annual max severity")
-            axes[1].grid(alpha=0.25)
-            fig.tight_layout()
-            plt.show()
-            """
-        ),
-        code_cell(
-            """
-            plot_scaling_fit(
-                phoenix_fit,
-                title="Phoenix sliding-block quantile scaling",
-                ylabel="log median block maximum",
-            )
-            plt.show()
-
-            phoenix_methods = pd.read_csv(OUT / "application_methods.csv")
-            display(phoenix_methods[phoenix_methods["application"] == "phoenix_hot_dry_severity"])
-            pd.Series(
-                {
-                    "northrop_reciprocal_ei": phoenix_ei.northrop_estimate,
-                    "bb_reciprocal_ei": phoenix_ei.bb_estimate,
-                }
-            )
-            """
-        ),
-        md_cell(
-            """
-            ## Appendix-Style Legacy Diagnostic
-
-            The earlier cryosphere examples are no longer part of the manuscript’s main pitch, but they remain useful as supplementary demonstrations of the screening and clustering diagnostics.
-            """
-        ),
-        code_cell(
-            """
-            df_snowcover = pd.read_pickle(ROOT / "data" / "df_snowcover.pkl.gz")
-            greenland = np.log(df_snowcover["Greenland"].max()) - np.log(df_snowcover["Greenland"])
-            greenland = greenland.dropna()
-            greenland_screen = screen_extreme_series(
-                greenland,
-                name="greenland_land_log_loss",
-                min_xi_lower=-1.0,
-            )
-            greenland_ei = estimate_extremal_index_reciprocal(greenland)
-
-            display(pd.Series(greenland_screen.to_record()))
-            pd.Series(
-                {
-                    "northrop_reciprocal_ei": greenland_ei.northrop_estimate,
-                    "bb_reciprocal_ei": greenland_ei.bb_estimate,
-                }
-            )
-            """
+            """,
         ),
     ]
     return {

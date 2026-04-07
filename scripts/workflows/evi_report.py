@@ -21,7 +21,9 @@ from typing import Iterable
 import sys
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from import_bootstrap import ensure_scripts_on_path_from_entry
+
+    ensure_scripts_on_path_from_entry(__file__)
     _STANDALONE_SCRIPT = True
 else:
     _STANDALONE_SCRIPT = False
@@ -51,7 +53,6 @@ if _STANDALONE_SCRIPT:
         BENCHMARK_SET_LABELS,
         BLOCK_LINESTYLES,
         CORE_METHODS,
-        FAMILY_LABELS,
         UNIVERSAL_BENCHMARK_SET,
         family_label,
         ordered_families,
@@ -65,6 +66,7 @@ if _STANDALONE_SCRIPT:
         sort_by_family_order,
         sort_by_method_order,
     )
+    from workflows.workflow_runtime import status
 else:
     from .benchmark_common import (
         IQR_LOWER,
@@ -78,7 +80,6 @@ else:
         BENCHMARK_SET_LABELS,
         BLOCK_LINESTYLES,
         CORE_METHODS,
-        FAMILY_LABELS,
         UNIVERSAL_BENCHMARK_SET,
         family_label,
         ordered_families,
@@ -92,6 +93,7 @@ else:
         sort_by_family_order,
         sort_by_method_order,
     )
+    from .workflow_runtime import status
 
 # ---------------------------------------------------------------------------
 # Aggregation helpers
@@ -742,7 +744,9 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
 
+    status("evi_report", "loading benchmark summaries")
     benchmark_outputs = load_or_materialize_evi_benchmark_outputs(root, force=False)
+    status("evi_report", "writing manuscript figures and LaTeX tables")
     write_evi_benchmark_manuscript_artifacts(
         benchmark_outputs.summary,
         benchmark_outputs.external_summary,
@@ -771,7 +775,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
 def main() -> None:
     outputs = build_evi_benchmark_manuscript_outputs()
     for name, path in outputs.items():
-        print(f"{name}: {path}")
+        status("evi_report", f"{name}: {path}")
 
 
 __all__ = [

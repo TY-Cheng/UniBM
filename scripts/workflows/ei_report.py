@@ -23,7 +23,9 @@ import sys
 from typing import Iterable
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from import_bootstrap import ensure_scripts_on_path_from_entry
+
+    ensure_scripts_on_path_from_entry(__file__)
     _STANDALONE_SCRIPT = True
 else:
     _STANDALONE_SCRIPT = False
@@ -44,7 +46,6 @@ from unibm.extremal_index import EI_CI_LEVEL
 
 if _STANDALONE_SCRIPT:
     from workflows.benchmark_design import (
-        FAMILY_LABELS,
         UNIVERSAL_BENCHMARK_SET,
         family_label,
         ordered_families,
@@ -67,9 +68,9 @@ if _STANDALONE_SCRIPT:
         quantile_agg,
         render_latex_table,
     )
+    from workflows.workflow_runtime import status
 else:
     from .benchmark_design import (
-        FAMILY_LABELS,
         UNIVERSAL_BENCHMARK_SET,
         family_label,
         ordered_families,
@@ -92,6 +93,7 @@ else:
         quantile_agg,
         render_latex_table,
     )
+    from .workflow_runtime import status
 
 # ---------------------------------------------------------------------------
 # Story-table helpers
@@ -665,7 +667,9 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
 
+    status("ei_report", "loading benchmark summaries")
     benchmark_outputs = load_or_materialize_ei_benchmark_outputs(root, force=False)
+    status("ei_report", "writing manuscript figures and LaTeX tables")
     write_ei_benchmark_manuscript_artifacts(
         benchmark_outputs.summary,
         benchmark_outputs.external_summary,
@@ -694,7 +698,7 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
 def main() -> None:
     outputs = build_ei_benchmark_manuscript_outputs()
     for name, path in outputs.items():
-        print(f"{name}: {path}")
+        status("ei_report", f"{name}: {path}")
 
 
 __all__ = [

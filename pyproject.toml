@@ -44,9 +44,9 @@ dev = [
     "coverage",
     "ipykernel",
     "missingno",
-    "python-dotenv",
     "requests",
     "ruff",
+    "sphinx>=8",
 ]
 
 [tool.hatch.build]
@@ -57,9 +57,12 @@ packages = ["scripts/unibm"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "/.env.example",
+    "/justfile",
     "/LICENSE",
     "/README.md",
     "/data/metadata/application",
+    "/docs",
     "/pyproject.toml",
     "/scripts/config.py",
     "/scripts/data_prep",
@@ -83,6 +86,7 @@ explicit = true
 
 [tool.ruff]
 line-length = 99
+extend-exclude = ["justfile"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -103,3 +107,20 @@ make-summary-multi-line = true
 pre-summary-space = true
 recursive = true
 skip-ignore = false
+
+[tool.coverage.run]
+branch = true
+source = ["scripts/unibm"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+fail_under = 90
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "pragma: no cover",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"

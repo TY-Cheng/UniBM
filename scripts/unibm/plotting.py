@@ -1,4 +1,5 @@
 """Plotting helpers for UniBM model objects."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -8,10 +9,7 @@ import sys
 from ._runtime import prepare_matplotlib_env
 
 prepare_matplotlib_env()
-# isort: off
-import matplotlib.pyplot as plt  # noqa: E402
-
-# isort: on
+import matplotlib.pyplot as plt
 import numpy as np
 
 from .models import ExtremalIndexReciprocalFit, ScalingFit
@@ -31,6 +29,12 @@ def _should_close_figure(close: bool | None) -> bool:
     return "ipykernel" not in sys.modules
 
 
+def _save_figure_outputs(fig, file_path: Path) -> None:
+    """Save the requested figure to disk."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(file_path)
+
+
 def plot_scaling_fit(
     fit: ScalingFit,
     *,
@@ -42,7 +46,33 @@ def plot_scaling_fit(
     xlabel: str = "log(block size)",
     ylabel: str | None = None,
 ) -> None:
-    """Visualize the fitted scaling relation over the selected block-size plateau."""
+    """Plot a UniBM scaling fit on the log-log block-size scale.
+
+    Parameters
+    ----------
+    fit
+        Fitted scaling model returned by :func:`unibm.core.estimate_evi_quantile`
+        or :func:`unibm.core.estimate_target_scaling`.
+    file_path
+        Optional output path used when ``save=True``.
+    dpi
+        Figure DPI.
+    title
+        Optional plot title.
+    save
+        If ``True``, save the figure to ``file_path``.
+    close
+        Whether to close the figure after rendering. By default, figures stay
+        open in notebook kernels and close automatically in batch usage.
+    xlabel, ylabel
+        Axis labels. ``ylabel`` defaults to a label inferred from the target
+        stored on ``fit``.
+
+    Returns
+    -------
+    None
+        The function draws a Matplotlib figure and optionally writes it to disk.
+    """
     if ylabel is None:
         if fit.target == "quantile":
             ylabel = f"log block quantile (tau={fit.quantile:.2f})"
@@ -80,8 +110,7 @@ def plot_scaling_fit(
     fig.tight_layout()
     file_path = _resolved_file_path(file_path)
     if save and file_path is not None:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(file_path)
+        _save_figure_outputs(fig, file_path)
     if _should_close_figure(close):
         plt.close(fig)
 
@@ -97,7 +126,31 @@ def plot_extremal_index_reciprocal(
     xlabel: str = "log(block size)",
     ylabel: str = "1 / extremal index",
 ) -> None:
-    """Visualize reciprocal extremal-index diagnostics over candidate block sizes."""
+    """Plot reciprocal-EI diagnostic paths over the block-size grid.
+
+    Parameters
+    ----------
+    fit
+        Diagnostic reciprocal-EI object returned by
+        :func:`unibm.diagnostics.estimate_extremal_index_reciprocal`.
+    file_path
+        Optional output path used when ``save=True``.
+    dpi
+        Figure DPI.
+    title
+        Optional plot title.
+    save
+        If ``True``, save the figure to ``file_path``.
+    close
+        Whether to close the figure after rendering.
+    xlabel, ylabel
+        Axis labels.
+
+    Returns
+    -------
+    None
+        The function draws a Matplotlib figure and optionally writes it to disk.
+    """
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=dpi)
     ax.scatter(
         fit.log_block_sizes,
