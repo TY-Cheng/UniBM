@@ -209,6 +209,20 @@ Application method defaults are now intentionally asymmetric:
   empirical-PIT to unit-Frechet seasonal sensitivity for those same four EI
   methods and the same formal EI applications.
 
+Interpreting the streamflow/NFIP application diagnostics:
+
+- the `quantile scaling` panel is the fitted UniBM log-log block-summary curve;
+- the `return level` panel is not a separate GEV fit, but the same fitted
+  scaling law evaluated at larger block sizes and then mapped to return
+  horizons;
+- the EVI plateau and the EI stable window are selected from different
+  statistical paths, so they do not need to match;
+- EI-adjusted return levels can be lower than unadjusted single-day return
+  levels because `theta < 1` reduces the effective number of independent
+  extreme episodes per calendar year;
+- for NFIP, active-day return levels and calendar-day EI estimates are kept
+  separate on purpose because they live on different clocks.
+
 Manuscript-facing application tables are written to `UniBM_manuscript/Table/`:
 
 - `application_summary_main.tex`
