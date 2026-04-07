@@ -7,12 +7,41 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.data_prep.usgs import (
+    _extract_usgs_daily_series,
+    _normalize_site_no,
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
 
 
 class UsgsPrepTests(unittest.TestCase):
+    def test_extract_usgs_daily_series_prefers_mean_stat_code(self) -> None:
+        payload = {
+            "value": {
+                "timeSeries": [
+                    {
+                        "name": "USGS:02236000:00060:00001",
+                        "sourceInfo": {"siteName": "Station"},
+                        "values": [{"value": [{"dateTime": "2024-01-01", "value": "99"}]}],
+                    },
+                    {
+                        "name": "USGS:02236000:00060:00003",
+                        "sourceInfo": {"siteName": "Station"},
+                        "values": [{"value": [{"dateTime": "2024-01-01", "value": "10"}]}],
+                    },
+                ]
+            }
+        }
+
+        series, station_name = _extract_usgs_daily_series(payload)
+
+        self.assertEqual(station_name, "Station")
+        self.assertEqual(float(series.iloc[0]), 10.0)
+
+    def test_normalize_site_no_preserves_leading_zeroes(self) -> None:
+        self.assertEqual(_normalize_site_no("02236000"), "02236000")
+        self.assertEqual(_normalize_site_no("02236000.0"), "02236000")
+
     def test_prepare_usgs_streamflow_series_preserves_site_match_with_leading_zero(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "usgs_02236000.csv.gz"

@@ -23,6 +23,7 @@ from .bootstrap import draw_circular_block_bootstrap_samples
 from .core import generate_block_sizes
 from .diagnostics import empirical_cdf
 from ._validation import positive_finite_values
+from .window_ops import sliding_window_extreme_valid
 
 Z_CRIT_95 = 1.96
 EI_ALPHA = 0.05
@@ -253,9 +254,7 @@ def _rolling_window_minima(
     if scores.size < block_size or block_size < 2:
         return np.asarray([], dtype=float)
     if sliding:
-        windows = np.lib.stride_tricks.sliding_window_view(scores, block_size)
-        valid = np.all(np.isfinite(windows), axis=1)
-        return windows.min(axis=1)[valid]
+        return sliding_window_extreme_valid(scores, block_size, reducer="min")
     n_block = scores.size // block_size
     if n_block < 1:
         return np.asarray([], dtype=float)
@@ -401,7 +400,35 @@ def prepare_ei_bundle(
     threshold_quantiles: tuple[float, ...] = (0.90, 0.95),
     allow_zeros: bool = False,
 ) -> EiPreparedBundle:
-    """Build all reusable EI benchmark ingredients for one replicate."""
+    """Build all reusable EI ingredients for one series.
+
+    Parameters
+    ----------
+    vec
+        One-dimensional raw series.
+    block_sizes
+        Optional explicit block-size grid for the BM-EI paths. If omitted, the
+        grid is generated automatically from the filtered sample size.
+    threshold_quantiles
+        Threshold quantiles used to prepare exceedance-index candidates for the
+        threshold estimators such as Ferro-Segers and K-gaps.
+    allow_zeros
+        If ``True``, retain finite non-negative observations. This is useful for
+        calendar-time application series such as zero-filled NFIP daily losses
+        or dry-day environmental sequences. If ``False``, keep strictly
+        positive finite values only.
+
+    Returns
+    -------
+    EiPreparedBundle
+        Shared container reused across formal EI estimators.
+
+    Notes
+    -----
+    The bundle separates expensive path construction from estimator-specific
+    fitting. Build it once, then reuse it across native BM, pooled BM,
+    Ferro-Segers, and K-gaps estimators.
+    """
     values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
     if block_sizes is None:
         block_sizes = generate_block_sizes(values.size)
@@ -723,7 +750,33 @@ def estimate_native_bm_ei(
     sliding: bool,
     use_adjusted_chandwich: bool = False,
 ) -> ExtremalIndexEstimate:
-    """Estimate theta with a native single-b BM estimator."""
+    """Estimate ``theta`` with a native single-block-size BM estimator.
+
+    Parameters
+    ----------
+    bundle
+        Prepared EI ingredients returned by :func:`prepare_ei_bundle`.
+    base_path
+        BM base path to use. Supported values are ``"northrop"`` and ``"bb"``.
+    sliding
+        If ``True``, use the sliding-block path. If ``False``, use the disjoint
+        path.
+    use_adjusted_chandwich
+        If ``True`` and ``base_path="northrop"``, apply the 1D Chandler-Bate
+        scale adjustment to the pseudo-likelihood before building the profile
+        interval.
+
+    Returns
+    -------
+    ExtremalIndexEstimate
+        Formal EI estimate with point estimate, interval, selected block size,
+        and diagnostic path metadata.
+
+    Notes
+    -----
+    This estimator chooses a single block size from the stable BM path and then
+    fits the native fixed-``b`` estimator at that level.
+    """
     path = bundle.paths[(base_path, sliding)]
     selected_level = path.selected_level
     statistics = path.sample_statistics[selected_level]
@@ -763,7 +816,35 @@ def estimate_pooled_bm_ei(
     regression: str,
     bootstrap_result: dict[str, np.ndarray | None] | None = None,
 ) -> ExtremalIndexEstimate:
-    """Estimate theta by pooling the BM reciprocal-EI path over a stable window."""
+    """Estimate ``theta`` by pooling a BM reciprocal-EI path over a stable window.
+
+    Parameters
+    ----------
+    bundle
+        Prepared EI ingredients returned by :func:`prepare_ei_bundle`.
+    base_path
+        BM base path to pool, either ``"northrop"`` or ``"bb"``.
+    sliding
+        If ``True``, use the sliding-block path. If ``False``, use the disjoint
+        path.
+    regression
+        Pooling regression type. The workflow currently uses ``"OLS"`` and
+        ``"FGLS"``.
+    bootstrap_result
+        Optional bootstrap path draws already aligned to the selected stable
+        window. When supplied with ``regression="FGLS"``, the covariance matrix
+        is used for GLS weighting.
+
+    Returns
+    -------
+    ExtremalIndexEstimate
+        Pooled BM EI estimate on the ``theta`` scale.
+
+    Notes
+    -----
+    Pooling is performed on ``z = log(1/theta)`` and then mapped back to
+    ``theta`` so the interval respects the positive reciprocal-EI geometry.
+    """
     path = bundle.paths[(base_path, sliding)]
     method = f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}"
     return _build_bm_estimate(
@@ -812,7 +893,23 @@ def estimate_ferro_segers(
     *,
     threshold_quantiles: tuple[float, float] = (0.90, 0.95),
 ) -> ExtremalIndexEstimate:
-    """Estimate theta with the classical Ferro-Segers intervals estimator."""
+    """Estimate ``theta`` with the Ferro-Segers intervals estimator.
+
+    Parameters
+    ----------
+    bundle
+        Prepared EI ingredients returned by :func:`prepare_ei_bundle`.
+    threshold_quantiles
+        Candidate threshold quantiles used to define exceedance times. The
+        estimator is fit at each threshold and then a winner is chosen by
+        overlap-aware interval comparison.
+
+    Returns
+    -------
+    ExtremalIndexEstimate
+        Threshold-side EI estimate with the selected threshold quantile and
+        corresponding confidence interval.
+    """
     candidates: list[ThresholdCandidate] = []
     for quantile in threshold_quantiles:
         indices = bundle.threshold_candidates[float(quantile)]
@@ -911,7 +1008,29 @@ def estimate_k_gaps(
     threshold_quantiles: tuple[float, float] = (0.90, 0.95),
     k_grid: tuple[int, int] = (1, 2),
 ) -> ExtremalIndexEstimate:
-    """Estimate theta with the K-gaps likelihood and overlap-based tuning selection."""
+    """Estimate ``theta`` with the K-gaps likelihood.
+
+    Parameters
+    ----------
+    bundle
+        Prepared EI ingredients returned by :func:`prepare_ei_bundle`.
+    threshold_quantiles
+        Candidate threshold quantiles used to define exceedance times.
+    k_grid
+        Candidate run parameters ``K`` for the K-gaps likelihood.
+
+    Returns
+    -------
+    ExtremalIndexEstimate
+        Threshold-side EI estimate with the selected threshold and run
+        parameter.
+
+    Notes
+    -----
+    Selection is performed in two stages: first across ``K`` values within each
+    threshold, then across threshold quantiles, using interval-overlap logic to
+    prefer the more stable candidate when possible.
+    """
     threshold_winners: list[ThresholdCandidate] = []
     for quantile in threshold_quantiles:
         indices = bundle.threshold_candidates[float(quantile)]

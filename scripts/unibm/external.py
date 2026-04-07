@@ -258,7 +258,27 @@ def estimate_hill_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate xi with Hill's raw-sample tail estimator and an automatic `k` rule."""
+    """Estimate ``xi`` with Hill's raw-sample tail estimator.
+
+    Parameters
+    ----------
+    sample
+        One-dimensional raw sample. Only positive finite observations are kept.
+    k_values
+        Optional threshold-count grid. If omitted, a default log-spaced grid is
+        built by :func:`candidate_tail_counts`.
+
+    Returns
+    -------
+    ExternalXiEstimate
+        Selected Hill estimate together with the full threshold path and an
+        asymptotic Wald interval.
+
+    Notes
+    -----
+    The function computes the Hill path over the requested ``k`` values and
+    then chooses a stable window automatically.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -288,7 +308,22 @@ def estimate_pickands_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate xi with the Pickands raw-sample tail estimator."""
+    """Estimate ``xi`` with the Pickands raw-sample tail estimator.
+
+    Parameters
+    ----------
+    sample
+        One-dimensional raw sample. Only positive finite observations are kept.
+    k_values
+        Optional threshold-count grid. If omitted, a default grid is built by
+        :func:`candidate_tail_counts`.
+
+    Returns
+    -------
+    ExternalXiEstimate
+        Selected Pickands estimate together with the full threshold path and an
+        asymptotic Wald interval.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -321,7 +356,22 @@ def estimate_dedh_moment_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate xi with the DEdH moment estimator."""
+    """Estimate ``xi`` with the DEdH moment estimator.
+
+    Parameters
+    ----------
+    sample
+        One-dimensional raw sample. Only positive finite observations are kept.
+    k_values
+        Optional threshold-count grid. If omitted, a default grid is built by
+        :func:`candidate_tail_counts`.
+
+    Returns
+    -------
+    ExternalXiEstimate
+        Selected DEdH estimate together with the full threshold path and an
+        asymptotic Wald interval.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -433,8 +483,27 @@ def estimate_max_spectrum_evi(
     scales: np.ndarray | None = None,
     min_scale_count: int = 3,
 ) -> ExternalXiEstimate:
-    """Estimate xi with the dependent max-spectrum estimator.
+    """Estimate ``xi`` with the dependent max-spectrum estimator.
 
+    Parameters
+    ----------
+    sample
+        One-dimensional raw sample kept in time order. Only positive finite
+        observations are used.
+    scales
+        Optional dyadic scale grid. If omitted, the function builds one with
+        :func:`candidate_max_spectrum_scales`.
+    min_scale_count
+        Minimum number of dyadic scales required in the regression window.
+
+    Returns
+    -------
+    ExternalXiEstimate
+        Selected max-spectrum estimate, its start-scale path, and an asymptotic
+        Wald interval.
+
+    Notes
+    -----
     The max-spectrum estimator regresses the mean log block maxima ``Y_j`` on
     the dyadic scale index ``j``. Since ``E[Y_j]`` grows approximately like
     ``const + xi * j`` for Pareto-type tails, the regression slope is a direct

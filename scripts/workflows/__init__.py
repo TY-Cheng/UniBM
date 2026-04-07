@@ -11,6 +11,10 @@ The workflow package is intentionally small:
 - ``benchmark_design.py`` defines the simulation and method grids;
 - ``benchmark_common.py`` provides shared scoring and table helpers;
 - ``application.py`` is the runnable application entrypoint;
+- ``application_specs.py`` contains the application registry and data containers;
+- ``application_inputs.py`` prepares provider-specific raw and derived series;
+- ``application_fit.py`` performs application-side fitting and process parallelism;
+- ``application_outputs.py`` writes application tables and figures;
 - ``application_metadata.py`` creates default metadata assets when local copies are missing;
 - ``freeze_usgs_station_selection.py`` freezes the Texas/Florida USGS application sites;
 - ``application_screening.py`` contains application-side screening helpers.

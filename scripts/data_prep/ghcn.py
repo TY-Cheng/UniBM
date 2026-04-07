@@ -55,6 +55,44 @@ def read_ghcn_station_csv(path: Path | str) -> pd.DataFrame:
     return df
 
 
+def ghcn_station_data_needs_refresh(
+    path: Path | str,
+    *,
+    required_elements: tuple[str, ...] = (),
+    min_rows: int = 365,
+    min_span_days: int = 365 * 5,
+) -> bool:
+    """Return whether an on-disk GHCN station extract looks unusable.
+
+    This is a lightweight integrity guard for cached application inputs. It is
+    intentionally conservative: existing files are reused unless they are
+    missing, unreadable, empty, obviously too short, or do not contain the
+    required GHCN elements for the downstream application.
+    """
+    path = Path(path)
+    if not path.exists():
+        return True
+    try:
+        df = read_ghcn_station_csv(path)
+    except Exception:
+        return True
+    if df.empty or "date" not in df.columns or "element" not in df.columns:
+        return True
+    if int(df.shape[0]) < int(min_rows):
+        return True
+    date_index = pd.DatetimeIndex(df["date"]).dropna()
+    if date_index.empty:
+        return True
+    span_days = int((date_index.max() - date_index.min()).days)
+    if span_days < int(min_span_days):
+        return True
+    if required_elements:
+        available = {str(element) for element in df["element"].dropna().astype(str).unique()}
+        if not set(required_elements).issubset(available):
+            return True
+    return False
+
+
 def _extract_ghcn_element(df: pd.DataFrame, element: str, *, scale: float) -> pd.Series:
     """Extract one quality-controlled GHCN element as a dated numeric series."""
     sub = df.loc[df["element"] == element].copy()
@@ -120,6 +158,8 @@ def prepare_hot_dry_series(
         min(tmax.index.max(), precipitation.index.max()),
         freq="D",
     )
+    coverage = _drop_partial_terminal_year(pd.Series(0.0, index=date_index))
+    date_index = pd.DatetimeIndex(coverage.index)
     tmax = tmax.reindex(date_index)
     precipitation = precipitation.reindex(date_index).fillna(0.0)
     rolling_precipitation = precipitation.rolling(
@@ -146,7 +186,6 @@ def prepare_hot_dry_series(
     )
     severity = hot_anomaly.clip(lower=0).fillna(0) + dry_anomaly.clip(lower=0).fillna(0)
     severity = severity[severity > 0]
-    severity = _drop_partial_terminal_year(severity)
     annual_maxima = severity.groupby(severity.index.year).max()
     return PreparedSeries(
         name="warm-season hot-dry severity",

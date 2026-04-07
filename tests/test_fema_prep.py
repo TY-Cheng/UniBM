@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from scripts.data_prep.fema import prepare_nfip_claim_series
+from scripts.data_prep.fema import nfip_claims_needs_refresh, prepare_nfip_claim_series
 
 
 class FemaPrepTests(unittest.TestCase):
@@ -51,6 +51,23 @@ class FemaPrepTests(unittest.TestCase):
             )
             self.assertAlmostEqual(float(display.loc["2024-01-02"]), 0.0, places=6)
             self.assertTrue((evi > 0).all())
+
+    def test_nfip_claims_needs_refresh_flags_invalid_and_accepts_valid_extract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            broken = root / "broken.csv.gz"
+            broken.write_bytes(b"")
+            self.assertTrue(nfip_claims_needs_refresh(broken, state_code="TX"))
+
+            valid = root / "valid.csv.gz"
+            pd.DataFrame(
+                {
+                    "state": ["TX", "TX"],
+                    "dateOfLoss": ["2024-01-01", "2024-01-02"],
+                    "amountPaidOnBuildingClaim": [100.0, 0.0],
+                }
+            ).to_csv(valid, index=False, compression="gzip")
+            self.assertFalse(nfip_claims_needs_refresh(valid, state_code="TX"))
 
 
 if __name__ == "__main__":

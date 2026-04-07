@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
 import sys
 import unittest
@@ -96,6 +97,7 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
             scaling_ylabel="log median positive payouts",
             return_level_basis="claim_active_day",
             return_level_label="claim-active-day return period (years)",
+            ei_allow_zeros=True,
         )
 
         bundle = build_application_bundle(spec, inputs)
@@ -104,6 +106,39 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
         self.assertTrue((bundle.prepared.evi.series > 0.0).all())
         self.assertTrue((bundle.prepared.ei.series >= 0.0).all())
         self.assertTrue(np.isfinite(bundle.evi_fit.slope))
+        self.assertTrue(np.isfinite(bundle.ei_primary.theta_hat))
+        self.assertTrue(np.isfinite(bundle.ei_comparator.theta_hat))
+
+    def test_non_fema_bundle_can_preserve_zero_inflated_ei_calendar(self) -> None:
+        rs = np.random.default_rng(29)
+        index = pd.date_range("1990-01-01", periods=365 * 25, freq="D")
+        zero_filled = pd.Series(0.0, index=index, dtype=float)
+        active_mask = rs.random(index.size) < 0.25
+        zero_filled.loc[active_mask] = rs.gamma(shape=2.5, scale=4.0, size=active_mask.sum())
+
+        prepared = _make_prepared(
+            zero_filled,
+            name="zero-inflated precipitation",
+            provider="ghcn",
+            role="shared",
+        )
+        inputs = ApplicationPreparedInputs(display=prepared, evi=prepared, ei=prepared)
+        spec = ApplicationSpec(
+            key="zero_inflated_precip",
+            provider="ghcn",
+            label="Zero-inflated precipitation",
+            figure_stem="zero_inflated_precip",
+            raw_key="none",
+            ylabel="value",
+            time_series_title="Zero-inflated precipitation",
+            scaling_title="Zero-inflated scaling",
+            scaling_ylabel="log median block maximum",
+            ei_allow_zeros=True,
+        )
+
+        bundle = build_application_bundle(spec, inputs)
+
+        self.assertGreater(int((bundle.prepared.ei.series == 0.0).sum()), 0)
         self.assertTrue(np.isfinite(bundle.ei_primary.theta_hat))
         self.assertTrue(np.isfinite(bundle.ei_comparator.theta_hat))
 

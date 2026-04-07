@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from json import JSONDecodeError
 import json
+import os
 from pathlib import Path
+import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -26,12 +28,36 @@ USGS_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _normalize_site_no(site_no: object) -> str:
-    """Normalize a USGS site id so CSV round-tripping preserves equality checks."""
+    """Normalize a USGS site id without discarding significant leading zeros."""
     text = str(site_no).strip()
     if text.endswith(".0"):
         text = text[:-2]
-    digits = text.lstrip("0")
-    return digits or "0"
+    return text
+
+
+def _timeseries_stat_code(item: dict[str, object]) -> str | None:
+    """Extract the USGS daily statistic code from one timeSeries payload item."""
+    name = item.get("name")
+    if isinstance(name, str):
+        parts = name.split(":")
+        if len(parts) >= 4 and parts[-1]:
+            return str(parts[-1])
+    variable = item.get("variable")
+    if isinstance(variable, dict):
+        options = variable.get("options")
+        if isinstance(options, dict):
+            option = options.get("option")
+            if isinstance(option, list):
+                for entry in option:
+                    if isinstance(entry, dict) and entry.get("name") == "Statistic":
+                        code = entry.get("optionCode")
+                        if code is not None:
+                            return str(code)
+            elif isinstance(option, dict) and option.get("name") == "Statistic":
+                code = option.get("optionCode")
+                if code is not None:
+                    return str(code)
+    return None
 
 
 def _drop_partial_terminal_year(series: pd.Series, *, min_fraction: float = 0.9) -> pd.Series:
@@ -50,7 +76,12 @@ def _extract_usgs_daily_series(payload: dict[str, object]) -> tuple[pd.Series, s
     time_series = payload.get("value", {}).get("timeSeries", [])  # type: ignore[union-attr]
     if not isinstance(time_series, list) or not time_series:
         raise ValueError("USGS daily-values payload did not contain any timeSeries records.")
-    item = time_series[0]
+    mean_daily = [
+        item
+        for item in time_series
+        if isinstance(item, dict) and _timeseries_stat_code(item) == "00003"
+    ]
+    item = mean_daily[0] if mean_daily else time_series[0]
     if not isinstance(item, dict):
         raise ValueError("Malformed USGS daily-values payload.")
     source_info = item.get("sourceInfo", {})
@@ -112,7 +143,9 @@ def _open_usgs_json_with_retries(url: str, *, site_no: str) -> dict[str, object]
             flush=True,
         )
         time.sleep(USGS_RETRY_WAIT_SECONDS)
-    raise RuntimeError(f"USGS fetch failed after {USGS_MAX_RETRIES} retries: {url}") from last_error
+    raise RuntimeError(
+        f"USGS fetch failed after {USGS_MAX_RETRIES} retries: {url}"
+    ) from last_error
 
 
 def download_usgs_daily_discharge(
@@ -127,6 +160,7 @@ def download_usgs_daily_discharge(
         "format": "json",
         "sites": str(site_no),
         "parameterCd": "00060",
+        "statCd": "00003",
         "siteStatus": "all",
     }
     if start_date is not None:
@@ -146,7 +180,22 @@ def download_usgs_daily_discharge(
     )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(output_path, index=False, compression="gzip")
+    with tempfile.NamedTemporaryFile(
+        dir=output_path.parent,
+        prefix=f"{output_path.stem}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        frame.to_csv(tmp_path, index=False, compression="gzip")
+        os.replace(tmp_path, output_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
     return output_path
 
 

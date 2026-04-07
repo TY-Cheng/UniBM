@@ -17,6 +17,7 @@ from .bootstrap import circular_block_summary_bootstrap
 from .models import BlockSummaryCurve, PlateauWindow, ScalingFit
 from .summaries import summarize_block_maxima
 from ._validation import as_1d_float_array, warn_on_negative_values, warn_on_nonpositive_values
+from .window_ops import sliding_window_extreme_valid
 
 Z_CRIT_95 = 1.96
 
@@ -89,10 +90,7 @@ def block_maxima(
     if block_size < 2 or arr.size < block_size:
         return np.asarray([], dtype=float)
     if sliding:
-        windows = np.lib.stride_tricks.sliding_window_view(arr, block_size)
-        maxima = windows.max(axis=-1)
-        valid = np.all(np.isfinite(windows), axis=-1)
-        return maxima[valid]
+        return sliding_window_extreme_valid(arr, block_size, reducer="max")
     n_block = arr.size // block_size
     if n_block < 1:
         return np.asarray([], dtype=float)
@@ -395,10 +393,64 @@ def estimate_evi_quantile(
     plateau: PlateauWindow | None = None,
     bootstrap_result: dict[str, Any] | None = None,
 ) -> ScalingFit:
-    """Estimate the EVI from a block-quantile scaling law.
+    """Estimate the extreme value index from a block-quantile scaling law.
 
-    The benchmark and applications usually set `quantile=0.5`, so this becomes a
-    median-based estimator in practice, but the implementation remains quantile-general.
+    The estimator builds block maxima over a grid of block sizes, summarizes
+    each block-maxima sample by a chosen quantile, selects an intermediate
+    approximately linear plateau on the log-log scale, and regresses
+    ``log(summary)`` on ``log(block size)``. The fitted slope is the UniBM EVI
+    estimate.
+
+    Parameters
+    ----------
+    vec
+        One-dimensional raw series. The series may contain missing values, but
+        at least 32 finite observations are required after filtering.
+    quantile
+        Block-summary quantile in ``(0, 1)``. The benchmark and application
+        workflows typically use ``0.5`` so this becomes a median-based fit.
+    sliding
+        If ``True``, use overlapping block maxima. If ``False``, use disjoint
+        non-overlapping blocks.
+    block_sizes
+        Optional explicit block-size grid. If omitted, the function constructs
+        an intermediate-range grid via :func:`generate_block_sizes`.
+    num_step, min_block_size, max_block_size
+        Optional controls for the automatically generated block-size grid.
+    bootstrap_reps
+        Number of circular block-bootstrap replicates used to estimate a
+        cross-block covariance matrix for FGLS. Set to ``0`` or ``1`` to skip
+        bootstrap covariance estimation.
+    super_block_size
+        Optional super-block size used by the bootstrap backbone.
+    random_state
+        Seed for bootstrap resampling.
+    plateau_points
+        Minimum number of positive block summaries required inside the selected
+        plateau.
+    trim_fraction
+        Fraction of the left and right ends of the positive block-size grid
+        excluded before plateau search.
+    curvature_penalty
+        Penalty applied to local curvature during plateau selection.
+    covariance_shrinkage
+        Diagonal shrinkage applied to the bootstrap covariance matrix before
+        FGLS fitting.
+    curve, plateau, bootstrap_result
+        Optional precomputed intermediate objects. These are mainly useful for
+        benchmark workflows that reuse summaries or bootstrap backbones across
+        repeated fits.
+
+    Returns
+    -------
+    unibm.models.ScalingFit
+        Immutable result object containing the fitted slope, confidence
+        interval, selected plateau, and the underlying block-summary curve.
+
+    Notes
+    -----
+    The returned slope is the EVI estimate ``xi``. Return-level extrapolation
+    is then handled by :func:`estimate_return_level`.
     """
     return _fit_scaling_model(
         vec=vec,
@@ -443,7 +495,41 @@ def estimate_target_scaling(
     plateau: PlateauWindow | None = None,
     bootstrap_result: dict[str, Any] | None = None,
 ) -> ScalingFit:
-    """Fit the same log-log scaling model for an arbitrary block summary target."""
+    """Fit the UniBM log-log scaling model for an arbitrary block summary.
+
+    Parameters
+    ----------
+    vec
+        One-dimensional raw series.
+    target
+        Block-summary functional. Supported values are those implemented by
+        :func:`unibm.summaries.summarize_block_maxima`, such as ``"quantile"``,
+        ``"mean"``, and ``"mode"``.
+    quantile
+        Quantile level used only when ``target="quantile"``.
+    sliding
+        If ``True``, use overlapping block maxima. Otherwise use disjoint
+        blocks.
+    block_sizes, num_step, min_block_size, max_block_size
+        Controls for the candidate block-size grid.
+    bootstrap_reps, super_block_size, random_state
+        Controls for the circular block bootstrap used for covariance-aware
+        fitting.
+    plateau_points, trim_fraction, curvature_penalty, covariance_shrinkage
+        Plateau-selection and FGLS regularization controls.
+    curve, plateau, bootstrap_result
+        Optional precomputed intermediate objects reused by benchmark code.
+
+    Returns
+    -------
+    unibm.models.ScalingFit
+        The fitted scaling model for the requested block-summary target.
+
+    Notes
+    -----
+    This is the generic version of :func:`estimate_evi_quantile`. For the
+    canonical EVI workflow, prefer :func:`estimate_evi_quantile`.
+    """
     return _fit_scaling_model(
         vec=vec,
         target=target,
@@ -486,12 +572,34 @@ def estimate_return_level(
     observations_per_year: float = 365.25,
     extremal_index: float | None = None,
 ) -> float | np.ndarray:
-    """Map a fitted quantile-scaling law to return-horizon block quantiles.
+    """Map a fitted quantile-scaling law to return-horizon levels.
 
-    `extremal_index`, when supplied, is the standard extremal index
-    ``theta in (0, 1]`` rather than its reciprocal. Smaller `theta` values
-    reduce the effective number of independent years and therefore shorten the
-    implied return-horizon block size.
+    Parameters
+    ----------
+    fit
+        Quantile-based :class:`~unibm.models.ScalingFit`. The fit should usually
+        come from :func:`estimate_evi_quantile`.
+    years
+        Return horizons in years. May be a scalar or an array.
+    observations_per_year
+        Effective observation frequency used to convert return horizons into
+        block sizes. Daily environmental applications typically use ``365`` or
+        ``365.25``.
+    extremal_index
+        Optional extremal index ``theta`` in ``(0, 1]``. When supplied, the
+        return horizon is adjusted by the effective number of independent
+        extremes. Pass ``theta`` itself, not ``1/theta``.
+
+    Returns
+    -------
+    float or ndarray
+        Return-level estimate(s) on the original data scale.
+
+    Notes
+    -----
+    This function assumes the fitted scaling law was built from block
+    quantiles. If dependence adjustment is needed, the standard form is to pass
+    the extremal index ``theta`` from an EI estimator.
     """
     years_arr = np.atleast_1d(np.asarray(years, dtype=float))
     effective_years = years_arr if extremal_index is None else years_arr * float(extremal_index)

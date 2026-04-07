@@ -42,6 +42,7 @@ from .benchmark_common import (
     quantile_agg,
     wilson_interval,
 )
+from .workflow_runtime import status
 
 EI_INTERNAL_METHODS = [
     "northrop_disjoint_ols",
@@ -526,6 +527,11 @@ def run_ei_benchmark(
     if configs is None:
         configs = default_ei_simulation_configs()
     workers = resolve_benchmark_workers(len(configs), max_workers=max_workers)
+    status(
+        "ei_benchmark",
+        f"evaluating {len(configs)} EI scenarios with {workers} worker process"
+        f"{'' if workers == 1 else 'es'}",
+    )
     tasks = [
         (cfg, scenario_random_state(cfg, master_seed=random_state), cache_dir) for cfg in configs
     ]
@@ -549,6 +555,7 @@ def run_ei_benchmark(
     external_detail = (
         pd.concat(external_frames, ignore_index=True) if external_frames else pd.DataFrame()
     )
+    status("ei_benchmark", "aggregating EI benchmark summaries")
     internal_summary = summarize_ei_benchmark(internal_detail)
     external_summary = summarize_ei_benchmark(external_detail)
     return internal_detail, internal_summary, external_detail, external_summary

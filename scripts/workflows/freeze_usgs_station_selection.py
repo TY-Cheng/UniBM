@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from import_bootstrap import ensure_scripts_on_path_from_entry
+
+    ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
 from data_prep.usgs import (
@@ -20,10 +21,7 @@ from data_prep.usgs import (
 )
 from workflows.application_metadata import ensure_application_metadata
 from workflows.application_screening import screen_extreme_series
-
-
-def _status(message: str) -> None:
-    print(f"[freeze_usgs] {message}", flush=True)
+from workflows.workflow_runtime import resolve_bool_env, status
 
 
 def _load_candidate_sites(path: Path) -> dict[str, list[dict[str, str]]]:
@@ -78,16 +76,18 @@ def _candidate_screening_rows(
     raw_dir: Path,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    force_refresh = resolve_bool_env("UNIBM_FORCE_REFRESH_APPLICATION_DATA", default=False)
     for candidate in candidates:
         site_no = str(candidate["site_no"])
         station_name = str(candidate["station_name"])
         raw_file = raw_dir / f"usgs_{site_no}.csv.gz"
         try:
-            if usgs_daily_discharge_needs_refresh(raw_file):
-                _status(f"refreshing USGS raw series {site_no} ({station_name})")
+            if force_refresh or usgs_daily_discharge_needs_refresh(raw_file):
+                verb = "force-refreshing" if force_refresh and raw_file.exists() else "refreshing"
+                status("freeze_usgs", f"{verb} USGS raw series {site_no} ({station_name})")
                 download_usgs_daily_discharge(site_no, raw_file)
             else:
-                _status(f"reusing USGS raw series {site_no} ({station_name})")
+                status("freeze_usgs", f"reusing USGS raw series {site_no} ({station_name})")
             prepared = prepare_usgs_streamflow_series(
                 raw_file,
                 state_code=state_code,
@@ -95,9 +95,10 @@ def _candidate_screening_rows(
                 station_name=station_name,
             )
             review = screen_extreme_series(prepared.series, name=f"{state_code}_{site_no}")
-            _status(
+            status(
+                "freeze_usgs",
                 f"screened {state_code} {site_no}: recommended={review.recommended}, "
-                f"plateau_points={review.plateau_points}, xi_lo={review.xi_lower:.3f}"
+                f"plateau_points={review.plateau_points}, xi_lo={review.xi_lower:.3f}",
             )
             rows.append(
                 {
@@ -109,7 +110,7 @@ def _candidate_screening_rows(
                 }
             )
         except Exception as exc:
-            _status(f"skipped {state_code} {site_no} due to error: {exc}")
+            status("freeze_usgs", f"skipped {state_code} {site_no} due to error: {exc}")
             rows.append(
                 _failed_screening_row(
                     state_code=state_code,
@@ -152,7 +153,7 @@ def freeze_usgs_station_selection(root: Path | str = ".") -> dict[str, Path]:
 
     candidate_path = metadata_dir / "usgs_candidate_sites.json"
     frozen_path = metadata_dir / "usgs_frozen_sites.json"
-    _status(f"loading candidate sites from {candidate_path}")
+    status("freeze_usgs", f"loading candidate sites from {candidate_path}")
     candidates = _load_candidate_sites(candidate_path)
     rows = [
         row
@@ -164,13 +165,16 @@ def freeze_usgs_station_selection(root: Path | str = ".") -> dict[str, Path]:
         )
     ]
     ranked = _rank_candidates(pd.DataFrame(rows))
-    _status("writing ranked USGS site screening table")
+    status("freeze_usgs", "writing ranked USGS site screening table")
     ranked.to_csv(out_dir / "application_usgs_site_screening.csv", index=False)
 
     frozen: dict[str, dict[str, object]] = {}
     for state_code, group in ranked.groupby("state_code", sort=True):
         winner = group.iloc[0]
-        _status(f"selected {state_code} site {winner['site_no']} ({winner['station_name']})")
+        status(
+            "freeze_usgs",
+            f"selected {state_code} site {winner['site_no']} ({winner['station_name']})",
+        )
         frozen[state_code] = {
             "site_no": str(winner["site_no"]),
             "station_name": str(winner["station_name"]),
@@ -179,7 +183,7 @@ def freeze_usgs_station_selection(root: Path | str = ".") -> dict[str, Path]:
         }
     with frozen_path.open("w") as fh:
         json.dump(frozen, fh, indent=2)
-    _status(f"wrote frozen site registry to {frozen_path}")
+    status("freeze_usgs", f"wrote frozen site registry to {frozen_path}")
     return {
         "screening": out_dir / "application_usgs_site_screening.csv",
         "frozen_sites": frozen_path,
@@ -189,7 +193,7 @@ def freeze_usgs_station_selection(root: Path | str = ".") -> dict[str, Path]:
 def main() -> None:
     outputs = freeze_usgs_station_selection()
     for name, path in outputs.items():
-        print(f"{name}: {path}")
+        status("freeze_usgs", f"{name}: {path}")
 
 
 if __name__ == "__main__":
