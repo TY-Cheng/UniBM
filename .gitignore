@@ -1,12 +1,8 @@
-# ==============================================================================
-# Project-specific generated artifacts
-# ==============================================================================
-.python-version
+# Project-generated outputs
+/.python-version
 /doc/
 /docs/_build/
 /out/
-/data/
-!/data/
 /data/*
 !/data/metadata/
 /data/metadata/*
@@ -15,104 +11,81 @@
 !/data/metadata/application/cpi_u_calendar_2025_base.csv
 !/data/metadata/application/usgs_candidate_sites.json
 !/data/metadata/application/usgs_frozen_sites.json
+/UniBM_manuscript/
 scratch*
 *.pkl
 *.csv.gz
 *.npz
-UniBM_manuscript/
 
-# Keep the generated research notebook under version control.
-# (Currently no blanket *.ipynb ignore exists, but this documents intent
-#  and future-proofs in case one is added.)
-!/scripts/vignette.ipynb
+# Notebook artifacts
+.ipynb_checkpoints/
+!/notebooks/vignette.ipynb
 
-# ==============================================================================
 # Python runtime
-# ==============================================================================
 __pycache__/
 *.py[codz]
 *$py.class
 *.so
 
-# ==============================================================================
-# Packaging / distribution  (hatch build artifacts)
-# ==============================================================================
+# Packaging / build
 .Python
+MANIFEST
 build/
 dist/
-*.egg-info/
 *.egg
-MANIFEST
+*.egg-info/
 
-# ==============================================================================
-# uv
-# ==============================================================================
-uv.lock
-
-# ==============================================================================
-# Testing & coverage
-# ==============================================================================
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# ==============================================================================
-# Jupyter / IPython
-# ==============================================================================
-.ipynb_checkpoints
-profile_default/
-ipython_config.py
-
-# ==============================================================================
-# Environments & secrets
-# ==============================================================================
+# Environments / secrets
 .env
 .envrc
-.venv
+.venv/
+ENV/
 env/
 venv/
-ENV/
 
-# ==============================================================================
-# Editors – VS Code
-# ==============================================================================
-# Use .vscode/* (not .vscode/) so the negation rules below can work.
+# Testing / coverage
+.coverage
+.coverage.*
+.hypothesis/
+.nox/
+.pytest_cache/
+.tox/
+.cache
+cover/
+coverage.xml
+htmlcov/
+nosetests.xml
+*.cover
+*.py.cover
+
+# Tool caches
+.dmypy.json
+.mypy_cache/
+.ruff_cache/
+dmypy.json
+
+# IPython
+ipython_config.py
+profile_default/
+
+# Editors
 .vscode/*
+!.vscode/*.code-snippets
+!.vscode/extensions.json
+!.vscode/launch.json
 !.vscode/settings.json
 !.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-!.vscode/*.code-snippets
 !*.code-workspace
 *.vsix
 
-# ==============================================================================
-# Linters & type checkers
-# ==============================================================================
-.ruff_cache/
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# uv
+uv.lock
 
-# ==============================================================================
 # macOS
-# ==============================================================================
 **/.DS_Store
 
-# ==============================================================================
 # Misc
-# ==============================================================================
 *.log
-pip-log.txt
-pip-delete-this-directory.txt
 .pypirc
+pip-delete-this-directory.txt
+pip-log.txt

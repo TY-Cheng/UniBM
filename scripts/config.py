@@ -1,4 +1,4 @@
-"""Repository path resolution shared by scripts, workflows, and the vignette.
+"""Repository path resolution shared by domain scripts and the vignette.
 
 The repo keeps one `.env` file at the root with `DIR_WORK` as the primary
 anchor. Every other path is derived from that anchor so local scripts, notebook

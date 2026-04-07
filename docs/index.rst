@@ -3,8 +3,8 @@ UniBM Documentation
 
 UniBM packages the reusable statistical core for block-maxima inference under
 serial dependence. The benchmark, application, and manuscript workflows live
-under ``scripts/workflows``; this site focuses on the reusable ``scripts/unibm``
-layer.
+under ``scripts/benchmark``, ``scripts/application``, ``scripts/shared``, and
+``scripts/vignette``; this site focuses on the reusable ``scripts/unibm`` layer.
 
 .. toctree::
    :maxdepth: 2

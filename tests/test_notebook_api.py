@@ -1,8 +1,16 @@
 from __future__ import annotations
+# ruff: noqa: E402
 
+import sys
 import unittest
+from pathlib import Path
 
-from scripts.workflows import notebook_api
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import vignette.api as notebook_api
 
 
 class NotebookApiTests(unittest.TestCase):
@@ -17,11 +25,13 @@ class NotebookApiTests(unittest.TestCase):
             "build_application_outputs",
             "build_ei_benchmark_manuscript_outputs",
             "build_evi_benchmark_manuscript_outputs",
+            "plot_application_composite",
             "plot_application_overview",
             "plot_application_time_series",
             "plot_application_scaling",
             "plot_application_ei",
             "plot_application_return_levels",
+            "seasonal_monthly_pit_unit_frechet",
             "plot_benchmark_panels",
             "plot_ei_core_panels",
             "plot_interval_sharpness_scatter",

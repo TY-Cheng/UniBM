@@ -6,7 +6,7 @@ extreme value index (`xi`) and the extremal index (`theta`).
 
 ## Quick Start
 
-From the repository root, the standard end-to-end entrypoint is:
+From the repository root, the standard end-to-end workflow is:
 
 ```bash
 uv sync --dev
@@ -14,7 +14,7 @@ just full
 uvx ruff format ./**/*.py ./**/*.ipynb
 ```
 
-This runs:
+This covers:
 
 - benchmark rebuilds;
 - benchmark report generation;
@@ -32,7 +32,7 @@ just rebuild
 
 Optional: install [`just`](https://github.com/casey/just) if you want short
 task aliases. Without `just`, all commands below can still be run directly with
-`uv run python ...`.
+`uv run python ...` and `uv run jupytext ...`.
 
 ## Setup
 
@@ -52,7 +52,7 @@ uv sync --dev
 
 ## Recommended Commands
 
-The `justfile` is organized around three levels of use:
+The main task entrypoints are:
 
 ```bash
 just rebuild
@@ -60,19 +60,15 @@ just qa
 just docs
 ```
 
-And one full entrypoint:
-
-```bash
-just full
-```
+`just full` expands to `rebuild + qa + docs`.
 
 Current defaults:
 
 - `workers="6"` for benchmark and application multiprocessing;
 - `screening_bootstrap="20"` for USGS screening.
 
-Those defaults are intentionally conservative. They are fast enough for routine
-use without being overly aggressive on memory or CPU contention.
+These defaults are intentionally conservative. They are fast enough for routine
+use without being overly aggressive on CPU or memory.
 
 Examples with explicit overrides:
 
@@ -92,26 +88,26 @@ just full
 uvx ruff format ./**/*.py ./**/*.ipynb
 ```
 
-If you prefer the raw commands instead of `just`, the canonical rebuild order
-behind that workflow is:
+If you prefer the raw commands instead of `just`, the workflow behind `just full`
+plus the final formatting pass is:
 
 ```bash
 uv sync --dev
 
-UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/workflows/evi_benchmark.py
-UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/workflows/ei_benchmark.py
+UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/evi_benchmark.py
+UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/ei_benchmark.py
 
-uv run python scripts/workflows/evi_report.py
-uv run python scripts/workflows/ei_report.py
+uv run python scripts/benchmark/evi_report.py
+uv run python scripts/benchmark/ei_report.py
 
-UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/workflows/freeze_usgs_station_selection.py
-UNIBM_APPLICATION_WORKERS=6 uv run python scripts/workflows/application.py
+UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/application/freeze_usgs.py
+UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 
-uv run python scripts/rebuild_vignette.py
+uv run jupytext --sync notebooks/vignette.py
 uv run python -m unittest discover -s tests -p 'test_*.py'
 uv run coverage run -m unittest discover -s tests -p 'test_*.py'
 uv run coverage report -m
-uvx ruff check .
+uvx ruff check scripts tests notebooks
 uv run sphinx-build -b html docs docs/_build/html
 uvx ruff format ./**/*.py ./**/*.ipynb
 ```
@@ -120,9 +116,10 @@ Notes:
 
 - Prefer `uv sync --dev` over `uv sync -U` for reproducible rebuilds. `-U`
   upgrades dependencies and is better treated as an explicit maintenance step.
-- `just full` expands to `rebuild + qa + docs`; the final `uvx ruff format`
-  remains a separate explicit formatting pass in your standard workflow.
-- `uv run python scripts/workflows/profile_sliding_windows.py` is optional
+- `just full` expands to `rebuild + qa + docs`; the final
+  `uvx ruff format ./**/*.py ./**/*.ipynb` remains a separate explicit
+  formatting pass in your standard workflow.
+- `uv run python scripts/shared/profile_sliding_windows.py` is optional
   profiling/diagnostics and not required for benchmark, application, vignette,
   or docs outputs.
 
@@ -133,8 +130,8 @@ Notes:
 Rebuild the raw benchmark summaries:
 
 ```bash
-UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/workflows/evi_benchmark.py
-UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/workflows/ei_benchmark.py
+UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/evi_benchmark.py
+UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/ei_benchmark.py
 ```
 
 `UNIBM_BENCHMARK_WORKERS` controls scenario-level multiprocessing.
@@ -142,8 +139,8 @@ UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/workflows/ei_benchmark.py
 Build manuscript-facing benchmark figures and tables:
 
 ```bash
-uv run python scripts/workflows/evi_report.py
-uv run python scripts/workflows/ei_report.py
+uv run python scripts/benchmark/evi_report.py
+uv run python scripts/benchmark/ei_report.py
 ```
 
 ### Applications
@@ -151,21 +148,21 @@ uv run python scripts/workflows/ei_report.py
 Run the application workflow:
 
 ```bash
-UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/workflows/freeze_usgs_station_selection.py
-UNIBM_APPLICATION_WORKERS=6 uv run python scripts/workflows/application.py
+UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/application/freeze_usgs.py
+UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 ```
 
-The current `SERRA`-oriented application package materializes six series across
-three environmental-risk layers:
+The current `SERRA`-oriented application package uses six application-facing
+series across three environmental-risk layers:
 
-- Houston wet-season precipitation;
-- Phoenix hot-dry severity as a secondary compound-hazard case;
+- Houston wet-season precipitation as a secondary EVI-only weather case;
+- Phoenix hot-dry severity as a secondary EVI-only compound-hazard case;
 - Texas streamflow;
 - Florida streamflow;
 - Texas NFIP daily building payouts;
 - Florida NFIP daily building payouts.
 
-`freeze_usgs_station_selection.py` screens a curated Texas/Florida gauge pool
+`scripts/application/freeze_usgs.py` screens a curated Texas/Florida gauge pool
 and freezes one flagship USGS site per state into
 `data/metadata/application/usgs_frozen_sites.json`. The main application
 workflow then downloads any missing raw inputs and writes manuscript-facing CSVs
@@ -173,7 +170,7 @@ and figures.
 
 Provider-specific notes:
 
-- `GHCN-Daily` is used for Houston and Phoenix.
+- `GHCN-Daily` is used for Houston and Phoenix weather-side EVI cases.
 - `USGS daily discharge` is used for Texas and Florida streamflow.
 - `OpenFEMA NFIP claims` is used for Texas and Florida impact series.
 - NFIP uses `positive-payout-day` totals for EVI and `zero-filled daily` totals
@@ -197,7 +194,20 @@ Main application outputs are written to `out/applications/`:
 - `application_return_levels.csv`
 - `application_methods.csv`
 - `application_ei_methods.csv`
+- `application_ei_seasonal_methods.csv`
 - `application_usgs_site_screening.csv`
+
+Application method defaults are now intentionally asymmetric:
+
+- `application_methods.csv` records only the headline EVI fit
+  `sliding_median_fgls`;
+- `application_ei_methods.csv` records the four-method EI comparison set
+  `bb_sliding_fgls`, `northrop_sliding_fgls`, `k_gaps`, and `ferro_segers`
+  only for the formal EI applications (`tx_streamflow`, `fl_streamflow`,
+  `tx_nfip_claims`, and `fl_nfip_claims`);
+- `application_ei_seasonal_methods.csv` stores the appendix-only monthly
+  empirical-PIT to unit-Frechet seasonal sensitivity for those same four EI
+  methods and the same formal EI applications.
 
 Manuscript-facing application tables are written to `UniBM_manuscript/Table/`:
 
@@ -210,9 +220,18 @@ Manuscript-facing application figures are written to
 
 - `application_ts_<stem>.pdf`
 - `application_evi_<stem>.pdf`
-- `application_ei_<stem>.pdf`
+- `application_target_<stem>.pdf`
+- `application_ei_<stem>.pdf` for the formal EI applications only
 - `application_rl_<stem>.pdf`
+- `application_composite_<stem>.pdf`
 - `application_overview.pdf`
+
+The composite figure is now the default notebook-facing visual. For streamflow
+and NFIP it combines target stability, the headline median-sliding-FGLS scaling
+fit, the four-method EI comparison, and the return-level panel in one 2x2
+layout. Houston and Phoenix use an EVI-only composite variant where the raw
+daily series replaces the EI panel. The older single-purpose PDFs remain
+available as secondary/debug outputs.
 
 Return-level plotting uses a mixed scale convention:
 
@@ -222,11 +241,21 @@ Return-level plotting uses a mixed scale convention:
 
 ### Vignette
 
-Rebuild the notebook:
+Sync the notebook artifact from the Jupytext source of truth:
 
 ```bash
-uv run python scripts/rebuild_vignette.py
+just vignette
+# or
+uv run jupytext --sync notebooks/vignette.py
 ```
+
+The old generator entrypoint
+`uv run python scripts/rebuild_vignette.py`
+no longer exists after the Jupytext migration.
+
+The source of truth now lives at `notebooks/vignette.py` in Jupytext
+`py:percent` format, and the committed paired notebook lives at
+`notebooks/vignette.ipynb`.
 
 The vignette presents the application section in the same style as the
 benchmark sections:
@@ -237,6 +266,12 @@ benchmark sections:
   `build_application_bundles(...)` and rendered inline with
   `plot_application_*` helpers rather than embedding external PDFs.
 
+Application sections now use `plot_application_composite(...)` as the main
+visual. The notebook still shows the raw time series separately, but the
+headline formal-EI application comparison is carried by the composite figure
+plus the CSV/LaTeX tables for streamflow and NFIP. Houston and Phoenix appear
+later in the notebook only as secondary EVI-only weather plots.
+
 The application notebook also includes a dedicated **Data Provenance and Source
 Records** section summarizing:
 
@@ -244,6 +279,12 @@ Records** section summarizing:
 - the frozen USGS gauge ids used for Texas and Florida streamflow;
 - the OpenFEMA NFIP endpoint and state-level claim filters used for Texas and
   Florida building-payout series.
+
+It also reports an appendix-only **seasonal-adjusted EI sensitivity** based on
+a monthly empirical PIT -> unit-Frechet transform of each prepared EI series
+for the formal EI applications only. Those rows are a robustness check and are
+not used in the main return-level adjustment or in the headline application
+summary tables.
 
 `out/benchmark/preview/` is no longer part of the formal workflow. It was used
 only for temporary benchmark figure previews while tuning display limits and has
@@ -310,7 +351,7 @@ The guarded sliding-window fast path is benchmarked separately before any
 future replacement of the stride-based baseline:
 
 ```bash
-uv run python scripts/workflows/profile_sliding_windows.py
+uv run python scripts/shared/profile_sliding_windows.py
 ```
 
 This writes `out/sliding_window_profile.csv` and prints runtime plus peak-memory
@@ -323,10 +364,17 @@ comparisons for:
 ## Repository Layout
 
 - `scripts/unibm/` contains the reusable statistical core.
-- `scripts/workflows/` contains benchmark, manuscript, and application
-  pipelines.
+- `scripts/benchmark/` contains synthetic benchmark compute/report pipelines.
+- `scripts/application/` contains real-data application build, screening,
+  metadata, and export code.
+- `scripts/shared/` contains shared CLI bootstrap, runtime, and profiling
+  helpers.
+- `scripts/vignette/` contains the notebook-facing helper API used by the
+  Jupytext vignette.
 - `scripts/data_prep/` contains application-specific preprocessing helpers.
 - `data/metadata/application/` contains frozen USGS site selections and the CPI
   deflator table used by the NFIP workflow.
 - `docs/` contains Sphinx docs for the reusable statistical layer.
-- `scripts/rebuild_vignette.py` regenerates `scripts/vignette.ipynb`.
+- `notebooks/vignette.py` is the Jupytext source of truth for the research
+  notebook, and `uv run jupytext --sync notebooks/vignette.py` regenerates the
+  paired `notebooks/vignette.ipynb`.

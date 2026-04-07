@@ -43,6 +43,7 @@ Repository = "https://github.com/TY-Cheng/UniBM"
 dev = [
     "coverage",
     "ipykernel",
+    "jupytext",
     "missingno",
     "requests",
     "ruff",
@@ -63,13 +64,15 @@ include = [
     "/README.md",
     "/data/metadata/application",
     "/docs",
+    "/notebooks",
     "/pyproject.toml",
+    "/scripts/application",
+    "/scripts/benchmark",
     "/scripts/config.py",
     "/scripts/data_prep",
-    "/scripts/rebuild_vignette.py",
+    "/scripts/shared",
     "/scripts/unibm",
-    "/scripts/vignette.ipynb",
-    "/scripts/workflows",
+    "/scripts/vignette",
     "/tests",
 ]
 
@@ -86,7 +89,7 @@ explicit = true
 
 [tool.ruff]
 line-length = 99
-extend-exclude = ["justfile"]
+extend-exclude = ["docs/_build", "justfile"]
 
 [tool.ruff.format]
 quote-style = "double"
