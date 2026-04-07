@@ -598,8 +598,28 @@ def estimate_return_level(
     Notes
     -----
     This function assumes the fitted scaling law was built from block
-    quantiles. If dependence adjustment is needed, the standard form is to pass
-    the extremal index ``theta`` from an EI estimator.
+    quantiles. It does **not** fit a separate annual-maxima or GEV model.
+    Instead, it reuses the same UniBM scaling law from the fitted block-summary
+    curve and evaluates that law at larger block sizes.
+
+    Concretely, if the fitted block quantile satisfies
+
+    ``Q_b \approx exp(alpha) * b**xi``,
+
+    then a ``T``-year return-horizon estimate is obtained by setting
+    ``b = observations_per_year * T`` and evaluating the same scaling law at
+    that horizon.
+
+    If dependence adjustment is needed, pass the extremal index ``theta`` from
+    an EI estimator. The current mapping uses
+    ``b = observations_per_year * theta * T``. In this interpretation,
+    ``theta < 1`` reduces the effective number of independent extreme episodes
+    per calendar year, so the EI-adjusted return level is typically lower than
+    the unadjusted single-day calendar-time return level.
+
+    The EVI plateau that supports ``xi`` and the EI stable window that supports
+    ``theta`` are selected from different statistical paths and therefore need
+    not coincide.
     """
     years_arr = np.atleast_1d(np.asarray(years, dtype=float))
     effective_years = years_arr if extremal_index is None else years_arr * float(extremal_index)

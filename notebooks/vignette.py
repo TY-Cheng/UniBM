@@ -686,6 +686,22 @@ display(
 # As an appendix sensitivity, the notebook also reports a monthly empirical-PIT to unit-Frechet transform that strips month-specific marginal seasonality while preserving the daily ordering.
 # Those seasonal-adjusted EI rows are shown below each application and should be read as a robustness check, not as the headline application estimator.
 #
+# **How the scaling, EI, and return-level panels fit together.**
+#
+# The return-level panel is **not** a separate annual-maxima fit. It is the same UniBM scaling law shown in the quantile-scaling panel, simply evaluated at larger block sizes.
+# In other words, the quantile-scaling panel works on `log(block size)` versus `log block summary`, while the return-level panel converts those larger block sizes into return horizons on the original physical scale.
+# That is why the two panels are mathematically linked but still use different x-axes: one is a fitting axis (`block size`), the other is an interpretation axis (`return period in years`).
+#
+# The EVI plateau and the EI stable window also need not coincide.
+# The EVI fit asks where the block-quantile curve is approximately linear on the log-log scale, whereas the EI fit asks where the estimated clustering path is stable enough to support a formal `theta` estimate.
+# Those are different statistical objects, so it is normal for the selected block-size ranges to overlap only partially or even to sit in different parts of the admissible grid.
+#
+# For risk management, the two outputs answer different questions.
+# Use the EVI/return-level panel when the decision is about **severity** on the original scale, such as discharge or payout magnitude at a chosen horizon.
+# Use the EI panel when the decision is about **persistence and recovery**, such as whether extremes arrive as isolated shocks or as multi-day flood waves or claim waves.
+# For the streamflow applications, the EI-adjusted return-level panel is useful because both `xi` and `theta` are defined on the same calendar-day discharge process.
+# For NFIP, the active-day return levels and the calendar-day EI estimates are intentionally kept separate because they live on different clocks.
+#
 # %% [markdown]
 # ## 3. Hydrologic Response Applications: Texas and Florida Streamflow
 #
