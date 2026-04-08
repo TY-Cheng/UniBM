@@ -17,11 +17,15 @@ Typical imports
 .. code-block:: python
 
    import numpy as np
-   from unibm import estimate_evi_quantile, estimate_return_level
+   from unibm import estimate_evi_quantile, estimate_design_life_level
 
    sample = np.random.default_rng(7).pareto(2.0, 4096) + 1.0
    fit = estimate_evi_quantile(sample, quantile=0.5, sliding=True, bootstrap_reps=120)
-   rl = estimate_return_level(fit, years=np.array([10.0]), observations_per_year=365.25)
+   design_life = estimate_design_life_level(
+       fit,
+       years=np.array([10.0]),
+       observations_per_year=365.25,
+   )
 
 Package boundaries
 ------------------

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
@@ -11,9 +12,15 @@ from unibm._runtime import prepare_matplotlib_env
 
 prepare_matplotlib_env("unibm-application")
 import matplotlib
+from matplotlib.collections import LineCollection
+from matplotlib.legend_handler import HandlerBase
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
 if "ipykernel" not in sys.modules:
     matplotlib.use("Agg")
+matplotlib.rcParams["hatch.linewidth"] = 1.1
 
 from config import resolve_repo_dirs
 import numpy as np
@@ -32,24 +39,243 @@ from application.screening import screen_extreme_series, screen_extremal_index_s
 from application.specs import (
     APPLICATION_EI_METHOD_IDS,
     APPLICATION_EVI_METHOD_IDS,
+    APPLICATION_DESIGN_LIFE_TAUS,
     APPLICATION_RANDOM_STATE,
-    RETURN_LEVEL_HORIZONS,
+    DESIGN_LIFE_LEVEL_HORIZONS,
     ApplicationBundle,
 )
 from shared.runtime import status
 from benchmark.common import render_latex_table
 from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
-from unibm.core import estimate_return_level
-from unibm.plotting import plot_scaling_fit
+from unibm.core import block_summary_curve
+from unibm.models import ScalingFit
+
+
+@dataclass(frozen=True)
+class _WindowBandLegendSpec:
+    """Legend-only proxy for a stable-window band with diagonal stripes."""
+
+    facecolor: tuple[float, float, float, float]
+    linecolor: tuple[float, float, float, float]
+    direction: str
+
+
+@dataclass(frozen=True)
+class _ApplicationTauScalingView:
+    """Application-layer shared-xi quantile view for one tau value."""
+
+    tau: float
+    intercept: float
+    slope: float
+    block_sizes: np.ndarray
+    values: np.ndarray
+    plateau_mask: np.ndarray
+    headline: bool
+
+    @property
+    def log_block_sizes(self) -> np.ndarray:
+        return np.log(self.block_sizes.astype(float))
+
+    @property
+    def log_values(self) -> np.ndarray:
+        return np.log(self.values.astype(float))
+
+    @property
+    def plateau_bounds(self) -> tuple[int, int]:
+        plateau_block_sizes = self.block_sizes[self.plateau_mask]
+        return int(plateau_block_sizes[0]), int(plateau_block_sizes[-1])
+
+    def fitted_log_values(self) -> np.ndarray:
+        return self.intercept + self.slope * self.log_block_sizes
+
+    def design_life_levels(self, years: np.ndarray, *, observations_per_year: float) -> np.ndarray:
+        block_sizes = observations_per_year * np.asarray(years, dtype=float)
+        return np.exp(self.intercept + self.slope * np.log(block_sizes))
+
+
+_TAU_STYLES: dict[float, dict[str, object]] = {
+    0.5: {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.8, "alpha": 0.98},
+    0.9: {"color": "#ff7f0e", "linestyle": "--", "linewidth": 1.25, "alpha": 0.92},
+    0.95: {"color": "#2ca02c", "linestyle": "-.", "linewidth": 1.25, "alpha": 0.92},
+    0.99: {"color": "#9467bd", "linestyle": ":", "linewidth": 1.35, "alpha": 0.95},
+}
+_DESIGN_LIFE_AXIS_TICKS = np.asarray([1.0, 2.0, 5.0, 10.0, 25.0, 50.0], dtype=float)
+
+
+class _WindowBandLegendHandler(HandlerBase):
+    """Draw diagonal stable-window stripes inside legend swatches."""
+
+    def create_artists(
+        self,
+        legend,
+        orig_handle: _WindowBandLegendSpec,
+        xdescent: float,
+        ydescent: float,
+        width: float,
+        height: float,
+        fontsize: float,
+        trans,
+    ) -> list[object]:
+        rect = Rectangle(
+            (xdescent, ydescent),
+            width,
+            height,
+            facecolor=orig_handle.facecolor,
+            edgecolor="none",
+            linewidth=0.0,
+            transform=trans,
+        )
+        artists: list[object] = [rect]
+        spacing = max(width / 16.0, 1.2)
+        diagonal_dx = height
+        cursor = xdescent - diagonal_dx
+        while cursor <= xdescent + width:
+            if orig_handle.direction == "forward":
+                y0 = max(0.0, (xdescent - cursor) / diagonal_dx)
+                y1 = min(1.0, (xdescent + width - cursor) / diagonal_dx)
+                if y0 < y1:
+                    artists.append(
+                        Line2D(
+                            [
+                                cursor + diagonal_dx * y0,
+                                cursor + diagonal_dx * y1,
+                            ],
+                            [
+                                ydescent + y0 * height,
+                                ydescent + y1 * height,
+                            ],
+                            color=orig_handle.linecolor,
+                            linewidth=0.65,
+                            transform=trans,
+                        )
+                    )
+            else:
+                y0 = max(0.0, (cursor + diagonal_dx - (xdescent + width)) / diagonal_dx)
+                y1 = min(1.0, (cursor + diagonal_dx - xdescent) / diagonal_dx)
+                if y0 < y1:
+                    artists.append(
+                        Line2D(
+                            [
+                                cursor + diagonal_dx * (1.0 - y0),
+                                cursor + diagonal_dx * (1.0 - y1),
+                            ],
+                            [
+                                ydescent + y0 * height,
+                                ydescent + y1 * height,
+                            ],
+                            color=orig_handle.linecolor,
+                            linewidth=0.65,
+                            transform=trans,
+                        )
+                    )
+            cursor += spacing
+        return artists
 
 
 def _application_observations_per_year(bundle: ApplicationBundle) -> float:
-    """Return the effective observation rate used in return-level mapping."""
+    """Return the effective observation rate used in design-life-level mapping."""
     if bundle.spec.observations_per_year is not None:
         return float(bundle.spec.observations_per_year)
     series = bundle.prepared.evi.series
     n_years = max((series.index.max() - series.index.min()).days / 365.25, 1.0)
     return float(series.size / n_years)
+
+
+def _tau_label(tau: float) -> str:
+    """Return a compact display label for one design-life level."""
+    return f"tau={float(tau):.2f}"
+
+
+def _format_design_life_tick(value: float, _pos: float) -> str:
+    """Format one log-scale design-life tick without decimal clutter."""
+    if value >= 1.0 and np.isclose(value, round(value)):
+        return f"{int(round(value))}"
+    return f"{value:g}"
+
+
+def _apply_design_life_xaxis(ax) -> None:
+    """Apply a stable, denser x-axis layout for design-life plots."""
+    tick_values = _DESIGN_LIFE_AXIS_TICKS[
+        (_DESIGN_LIFE_AXIS_TICKS >= DESIGN_LIFE_LEVEL_HORIZONS.min())
+        & (_DESIGN_LIFE_AXIS_TICKS <= DESIGN_LIFE_LEVEL_HORIZONS.max())
+    ]
+    ax.set_xscale("log")
+    ax.set_xlim(float(DESIGN_LIFE_LEVEL_HORIZONS.min()), float(DESIGN_LIFE_LEVEL_HORIZONS.max()))
+    ax.xaxis.set_major_locator(FixedLocator(tick_values))
+    ax.xaxis.set_major_formatter(FuncFormatter(_format_design_life_tick))
+    ax.xaxis.set_minor_locator(NullLocator())
+
+
+def _tau_style(tau: float) -> dict[str, object]:
+    """Return plotting style for one application-layer tau curve."""
+    for key, style in _TAU_STYLES.items():
+        if np.isclose(float(tau), float(key)):
+            return style
+    return {"color": "0.35", "linestyle": "-", "linewidth": 1.1, "alpha": 0.9}
+
+
+def _align_curve_values_to_block_sizes(curve, block_sizes: np.ndarray) -> np.ndarray:
+    """Align a block-summary curve to an explicit positive block-size grid."""
+    lookup = {
+        int(block_size): float(value)
+        for block_size, value in zip(
+            curve.positive_block_sizes, curve.positive_values, strict=True
+        )
+    }
+    aligned: list[float] = []
+    for block_size in np.asarray(block_sizes, dtype=int):
+        value = lookup.get(int(block_size))
+        if value is None:
+            raise ValueError(
+                "Derived tau block-summary curve does not cover the headline positive "
+                f"block-size grid; missing block size {int(block_size)}."
+            )
+        aligned.append(value)
+    return np.asarray(aligned, dtype=float)
+
+
+def _tau_scaling_views_for_fit(
+    series: pd.Series, headline_fit: ScalingFit
+) -> list[_ApplicationTauScalingView]:
+    """Build the shared-xi tau grid for any given quantile scaling fit."""
+    block_sizes = np.asarray(headline_fit.block_sizes, dtype=int)
+    plateau_mask = np.asarray(headline_fit.plateau_mask, dtype=bool)
+    log_block_sizes = np.asarray(headline_fit.log_block_sizes, dtype=float)
+    views: list[_ApplicationTauScalingView] = []
+
+    for tau in APPLICATION_DESIGN_LIFE_TAUS:
+        tau_value = float(tau)
+        if np.isclose(tau_value, float(headline_fit.quantile)):
+            values = np.asarray(headline_fit.values, dtype=float)
+            intercept = float(headline_fit.intercept)
+            slope = float(headline_fit.slope)
+            headline = True
+        else:
+            curve = block_summary_curve(
+                series.values,
+                block_sizes=block_sizes,
+                sliding=headline_fit.sliding,
+                quantile=tau_value,
+                target="quantile",
+            )
+            values = _align_curve_values_to_block_sizes(curve, block_sizes)
+            slope = float(headline_fit.slope)
+            intercept = float(
+                np.mean(np.log(values[plateau_mask]) - slope * log_block_sizes[plateau_mask])
+            )
+            headline = False
+        views.append(
+            _ApplicationTauScalingView(
+                tau=tau_value,
+                intercept=intercept,
+                slope=slope,
+                block_sizes=block_sizes.astype(float),
+                values=values,
+                plateau_mask=plateau_mask.copy(),
+                headline=headline,
+            )
+        )
+    return views
 
 
 def _bundle_has_formal_ei(bundle: ApplicationBundle) -> bool:
@@ -145,6 +371,21 @@ def _save_figure_pair(fig, file_path: Path) -> None:
     fig.savefig(file_path)
 
 
+def _wrapped_axis_label(text: str, *, prefix: str | None = None) -> str:
+    """Wrap long parenthetical units onto a second line for axis readability."""
+    if " (" in text and len(text) >= 24:
+        head, tail = text.split(" (", 1)
+        wrapped = f"{head}\n({tail}"
+    else:
+        wrapped = text
+    if prefix is None:
+        return wrapped
+    if "\n" in wrapped:
+        head, tail = wrapped.split("\n", 1)
+        return f"{prefix} {head}\n{tail}"
+    return f"{prefix} {wrapped}"
+
+
 def _should_close_figure(close: bool | None) -> bool:
     """Close figures automatically in batch runs but keep them alive in notebooks."""
     if close is not None:
@@ -192,42 +433,34 @@ def _role_series_rows(
     return rows
 
 
-def _application_return_level_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
-    """Return long-form return-level summaries for one application."""
+def _application_design_life_level_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
+    """Return long-form design-life-level summaries for one application."""
     observations_per_year = _application_observations_per_year(bundle)
-    unconditional = estimate_return_level(
-        bundle.evi_fit,
-        RETURN_LEVEL_HORIZONS,
-        observations_per_year=observations_per_year,
-    )
-    adjusted = None
-    if bundle.spec.provider != "fema" and _bundle_has_formal_ei(bundle):
-        adjusted = estimate_return_level(
-            bundle.evi_fit,
-            RETURN_LEVEL_HORIZONS,
-            observations_per_year=observations_per_year,
-            extremal_index=bundle.ei_primary.theta_hat,
-        )
     rows: list[dict[str, object]] = []
-    for idx, horizon in enumerate(RETURN_LEVEL_HORIZONS):
-        rows.append(
-            {
-                "application": bundle.spec.key,
-                "label": bundle.spec.label,
-                "provider": bundle.spec.provider,
-                "return_level_basis": bundle.spec.return_level_basis,
-                "horizon_years": float(horizon),
-                "return_level": float(unconditional[idx]),
-                "return_level_ei_adjusted": (
-                    float("nan") if adjusted is None else float(adjusted[idx])
-                ),
-                "theta_hat": (
-                    float("nan")
-                    if not _bundle_has_formal_ei(bundle)
-                    else float(bundle.ei_primary.theta_hat)
-                ),
-            }
+    for view in _tau_scaling_views_for_fit(bundle.prepared.evi.series, bundle.evi_fit):
+        design_life_levels = view.design_life_levels(
+            DESIGN_LIFE_LEVEL_HORIZONS,
+            observations_per_year=observations_per_year,
         )
+        for idx, years in enumerate(DESIGN_LIFE_LEVEL_HORIZONS):
+            rows.append(
+                {
+                    "application": bundle.spec.key,
+                    "label": bundle.spec.label,
+                    "provider": bundle.spec.provider,
+                    "design_life_level_basis": bundle.spec.design_life_level_basis,
+                    "tau": float(view.tau),
+                    "is_headline_tau": bool(view.headline),
+                    "shared_xi": True,
+                    "design_life_years": float(years),
+                    "design_life_level": float(design_life_levels[idx]),
+                    "theta_hat": (
+                        float("nan")
+                        if not _bundle_has_formal_ei(bundle)
+                        else float(bundle.ei_primary.theta_hat)
+                    ),
+                }
+            )
     return rows
 
 
@@ -291,7 +524,8 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
             if northrop is None or northrop.stable_window is None
             else float(northrop.stable_window.hi)
         ),
-        "return_level_basis": bundle.spec.return_level_basis,
+        "design_life_level_basis": bundle.spec.design_life_level_basis,
+        "headline_tau": float(bundle.evi_fit.quantile),
         "observations_per_year": _application_observations_per_year(bundle),
     }
 
@@ -343,32 +577,33 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def application_return_level_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build a compact manuscript-facing return-level comparison table."""
+def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build a compact manuscript-facing design-life-level comparison table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
-        table_rows = pd.DataFrame(_application_return_level_rows(bundle)).set_index(
-            "horizon_years"
-        )
+        table_rows = pd.DataFrame(_application_design_life_level_rows(bundle))
 
-        def _fmt(level: float, adjusted: bool = False) -> str:
-            column = "return_level_ei_adjusted" if adjusted else "return_level"
-            if level not in table_rows.index:
+        def _fmt(frame: pd.DataFrame, level: float) -> str:
+            if frame.empty:
                 return "NA"
-            value = float(table_rows.loc[level, column])
+            match = frame.loc[frame["design_life_years"] == float(level), "design_life_level"]
+            if match.empty:
+                return "NA"
+            value = float(match.iloc[0])
             return f"{value:.2f}" if np.isfinite(value) else "NA"
 
-        rows.append(
-            {
-                "Application": bundle.spec.label,
-                "Basis": bundle.spec.return_level_basis,
-                "1y RL": _fmt(1.0),
-                "10y RL": _fmt(10.0),
-                "10y RL (EI-adj)": _fmt(10.0, adjusted=True),
-                "50y RL": _fmt(50.0),
-                "50y RL (EI-adj)": _fmt(50.0, adjusted=True),
-            }
-        )
+        for tau in APPLICATION_DESIGN_LIFE_TAUS:
+            tau_rows = table_rows.loc[np.isclose(table_rows["tau"], float(tau))]
+            rows.append(
+                {
+                    "Application": bundle.spec.label,
+                    "Basis": bundle.spec.design_life_level_basis,
+                    "$\\tau$": f"{float(tau):.2f}",
+                    "1y level": _fmt(tau_rows, 1.0),
+                    "10y level": _fmt(tau_rows, 10.0),
+                    "50y level": _fmt(tau_rows, 50.0),
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -422,32 +657,58 @@ def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]
     for method, fit in fits.items():
         spec = METHOD_LOOKUP[method]
         if fit.target == "quantile":
-            one_year, ten_year = estimate_return_level(
-                fit,
-                years=np.asarray([1.0, 10.0]),
-                observations_per_year=observations_per_year,
-            )
+            tau_views = _tau_scaling_views_for_fit(bundle.prepared.evi.series, fit)
+            for view in tau_views:
+                tau_value = float(view.tau)
+                one_year, ten_year = view.design_life_levels(
+                    np.asarray([1.0, 10.0]),
+                    observations_per_year=observations_per_year,
+                )
+                rows.append(
+                    {
+                        "application": bundle.spec.key,
+                        "provider": bundle.spec.provider,
+                        "design_life_level_basis": bundle.spec.design_life_level_basis,
+                        "tau": tau_value,
+                        "is_headline_tau": bool(np.isclose(tau_value, float(fit.quantile))),
+                        "shared_xi": True,
+                        "method": method,
+                        "method_label": METHOD_LABELS[method],
+                        "summary_target": spec.summary_target,
+                        "block_scheme": spec.block_scheme,
+                        "regression": spec.regression,
+                        "xi_hat": float(fit.slope),
+                        "xi_lo": float(fit.confidence_interval[0]),
+                        "xi_hi": float(fit.confidence_interval[1]),
+                        "plateau_lo": int(fit.plateau_bounds[0]),
+                        "plateau_hi": int(fit.plateau_bounds[1]),
+                        "one_year_design_life_level": float(one_year),
+                        "ten_year_design_life_level": float(ten_year),
+                    }
+                )
         else:
-            one_year, ten_year = float("nan"), float("nan")
-        rows.append(
-            {
-                "application": bundle.spec.key,
-                "provider": bundle.spec.provider,
-                "return_level_basis": bundle.spec.return_level_basis,
-                "method": method,
-                "method_label": METHOD_LABELS[method],
-                "summary_target": spec.summary_target,
-                "block_scheme": spec.block_scheme,
-                "regression": spec.regression,
-                "xi_hat": float(fit.slope),
-                "xi_lo": float(fit.confidence_interval[0]),
-                "xi_hi": float(fit.confidence_interval[1]),
-                "plateau_lo": int(fit.plateau_bounds[0]),
-                "plateau_hi": int(fit.plateau_bounds[1]),
-                "one_year_level": float(one_year),
-                "ten_year_level": float(ten_year),
-            }
-        )
+            rows.append(
+                {
+                    "application": bundle.spec.key,
+                    "provider": bundle.spec.provider,
+                    "design_life_level_basis": bundle.spec.design_life_level_basis,
+                    "tau": float("nan"),
+                    "is_headline_tau": False,
+                    "shared_xi": False,
+                    "method": method,
+                    "method_label": METHOD_LABELS[method],
+                    "summary_target": spec.summary_target,
+                    "block_scheme": spec.block_scheme,
+                    "regression": spec.regression,
+                    "xi_hat": float(fit.slope),
+                    "xi_lo": float(fit.confidence_interval[0]),
+                    "xi_hi": float(fit.confidence_interval[1]),
+                    "plateau_lo": int(fit.plateau_bounds[0]),
+                    "plateau_hi": int(fit.plateau_bounds[1]),
+                    "one_year_design_life_level": float("nan"),
+                    "ten_year_design_life_level": float("nan"),
+                }
+            )
     return rows
 
 
@@ -486,6 +747,8 @@ def _plot_daily_and_annual(
     *,
     ylabel: str,
     title: str,
+    display_yscale: str = "linear",
+    annual_max_yscale: str = "linear",
     file_path: Path | None = None,
     save: bool = False,
     close: bool | None = None,
@@ -501,7 +764,8 @@ def _plot_daily_and_annual(
         lw=0.6,
         alpha=0.85,
     )
-    axes[0].set_ylabel(ylabel)
+    axes[0].set_ylabel(_wrapped_axis_label(ylabel))
+    axes[0].set_yscale(display_yscale)
     axes[0].set_title(title)
     axes[0].grid(alpha=0.25)
     axes[1].plot(
@@ -513,7 +777,8 @@ def _plot_daily_and_annual(
         color="tab:red",
     )
     axes[1].set_xlabel("Year")
-    axes[1].set_ylabel(f"annual max {ylabel}")
+    axes[1].set_ylabel(_wrapped_axis_label(ylabel, prefix="annual max"))
+    axes[1].set_yscale(annual_max_yscale)
     axes[1].grid(alpha=0.25)
     fig.tight_layout()
     if save and file_path is not None:
@@ -573,42 +838,66 @@ def _draw_display_series_ax(ax, bundle: ApplicationBundle) -> None:
         alpha=0.85,
     )
     ax.set_xlabel("date")
-    ax.set_ylabel(bundle.spec.ylabel)
+    ax.set_ylabel(_wrapped_axis_label(bundle.spec.ylabel))
     ax.set_title(f"{bundle.spec.label} daily series")
     ax.grid(alpha=0.3)
 
 
 def _draw_scaling_ax(ax, bundle: ApplicationBundle) -> None:
-    """Draw the headline median-sliding-FGLS scaling fit on a provided axis."""
-    fit = bundle.evi_fit
-    x = np.asarray(fit.log_block_sizes, dtype=float)
-    y = np.asarray(fit.log_values, dtype=float)
-    plateau_mask = np.asarray(fit.plateau_mask, dtype=bool)
-    ax.scatter(x=x, y=y, s=12, alpha=0.7, color="tab:blue", label="log block summary")
+    """Draw the multi-tau shared-xi scaling panel on a provided axis."""
+    tau_views = _tau_scaling_views_for_fit(bundle.prepared.evi.series, bundle.evi_fit)
+    headline = next(view for view in tau_views if view.headline)
+
+    for view in tau_views:
+        style = _tau_style(view.tau)
+        x = np.asarray(view.log_block_sizes, dtype=float)
+        y = np.asarray(view.log_values, dtype=float)
+        ax.plot(
+            x,
+            y,
+            color=style["color"],
+            linewidth=0.85 if not view.headline else 1.0,
+            linestyle="-",
+            alpha=0.22 if not view.headline else 0.30,
+            zorder=1.0,
+        )
+        ax.plot(
+            x,
+            np.asarray(view.fitted_log_values(), dtype=float),
+            color=style["color"],
+            linestyle=style["linestyle"],
+            linewidth=style["linewidth"],
+            alpha=style["alpha"],
+            label=_tau_label(view.tau),
+            zorder=2.0 if view.headline else 1.8,
+        )
+
+    plateau_mask = np.asarray(headline.plateau_mask, dtype=bool)
     ax.scatter(
-        x=x[plateau_mask],
-        y=y[plateau_mask],
-        s=18,
-        alpha=0.9,
+        headline.log_block_sizes,
+        headline.log_values,
+        s=11,
+        alpha=0.55,
+        color=_tau_style(headline.tau)["color"],
+        label=f"{_tau_label(headline.tau)} path",
+        zorder=2.1,
+    )
+    ax.scatter(
+        headline.log_block_sizes[plateau_mask],
+        headline.log_values[plateau_mask],
+        s=20,
+        alpha=0.95,
         color="tab:red",
-        label="selected plateau",
+        label=f"{_tau_label(headline.tau)} plateau",
+        zorder=2.3,
     )
-    fitted = fit.intercept + fit.slope * x[plateau_mask]
-    ax.plot(
-        x[plateau_mask],
-        fitted,
-        color="black",
-        linestyle="--",
-        lw=1.1,
-        label=f"slope = {fit.slope:.3f}",
-    )
-    ax.axvline(np.log(fit.plateau_bounds[0]), color="grey", linestyle=":", lw=1)
-    ax.axvline(np.log(fit.plateau_bounds[1]), color="grey", linestyle=":", lw=1)
+    ax.axvline(np.log(headline.plateau_bounds[0]), color="grey", linestyle=":", lw=1)
+    ax.axvline(np.log(headline.plateau_bounds[1]), color="grey", linestyle=":", lw=1)
     ax.set_xlabel("log(block size)")
     ax.set_ylabel(bundle.spec.scaling_ylabel)
     ax.set_title(bundle.spec.scaling_title)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncols=2, title=f"shared ξ = {headline.slope:.3f}")
 
 
 def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
@@ -642,51 +931,6 @@ def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
         alpha=0.85,
         label="Northrop sliding path",
     )
-    bb_window = bundle.ei_bb_sliding_fgls.stable_window
-    northrop_window = bundle.ei_northrop_sliding_fgls.stable_window
-    if (
-        bb_window is not None
-        and northrop_window is not None
-        and (
-            float(bb_window.lo) == float(northrop_window.lo)
-            and float(bb_window.hi) == float(northrop_window.hi)
-        )
-    ):
-        ax.axvspan(
-            np.log(float(bb_window.lo)),
-            np.log(float(bb_window.hi)),
-            facecolor=bb_color,
-            edgecolor=bb_color,
-            alpha=0.05,
-            hatch="///",
-            label="BB stable window",
-        )
-        ax.axvspan(
-            np.log(float(northrop_window.lo)),
-            np.log(float(northrop_window.hi)),
-            facecolor=northrop_color,
-            edgecolor=northrop_color,
-            alpha=0.03,
-            hatch="\\\\",
-            label="Northrop stable window",
-        )
-    else:
-        if bb_window is not None:
-            ax.axvspan(
-                np.log(float(bb_window.lo)),
-                np.log(float(bb_window.hi)),
-                color=bb_color,
-                alpha=0.08,
-                label="BB stable window",
-            )
-        if northrop_window is not None:
-            ax.axvspan(
-                np.log(float(northrop_window.lo)),
-                np.log(float(northrop_window.hi)),
-                color=northrop_color,
-                alpha=0.05,
-                label="Northrop stable window",
-            )
     ax.axhline(
         bundle.ei_bb_sliding_fgls.theta_hat,
         color=bb_color,
@@ -715,41 +959,150 @@ def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
         linestyle=":",
         label="Ferro-Segers",
     )
+    bb_window = bundle.ei_bb_sliding_fgls.stable_window
+    northrop_window = bundle.ei_northrop_sliding_fgls.stable_window
+    bb_face = matplotlib.colors.to_rgba(bb_color, 0.028)
+    bb_line = matplotlib.colors.to_rgba(bb_color, 0.095)
+    northrop_face = matplotlib.colors.to_rgba(northrop_color, 0.028)
+    northrop_line = matplotlib.colors.to_rgba(northrop_color, 0.095)
+
+    def _draw_window_band(
+        lo: float,
+        hi: float,
+        *,
+        facecolor: tuple[float, float, float, float],
+        linecolor: tuple[float, float, float, float],
+        direction: str,
+        zorder: float,
+    ) -> _WindowBandLegendSpec:
+        fig = ax.figure
+        fig.canvas.draw()
+        x_min, x_max = ax.get_xlim()
+        left = (lo - x_min) / (x_max - x_min)
+        right = (hi - x_min) / (x_max - x_min)
+        bbox = ax.get_window_extent(fig.canvas.get_renderer())
+        diagonal_dx = bbox.height / max(bbox.width, 1.0)
+
+        rect = Rectangle(
+            (left, 0.0),
+            right - left,
+            1.0,
+            transform=ax.transAxes,
+            facecolor=facecolor,
+            edgecolor="none",
+            linewidth=0.0,
+            zorder=zorder,
+        )
+        ax.add_patch(rect)
+
+        spacing = max((right - left) / 16.0, 0.012)
+        segments: list[list[tuple[float, float]]] = []
+        if direction == "forward":
+            cursor = left - diagonal_dx
+            while cursor <= right:
+                y0 = max(0.0, (left - cursor) / diagonal_dx)
+                y1 = min(1.0, (right - cursor) / diagonal_dx)
+                if y0 < y1:
+                    segments.append(
+                        [
+                            (cursor + diagonal_dx * y0, y0),
+                            (cursor + diagonal_dx * y1, y1),
+                        ]
+                    )
+                cursor += spacing
+        else:
+            cursor = left - diagonal_dx
+            while cursor <= right:
+                y0 = max(0.0, (cursor + diagonal_dx - right) / diagonal_dx)
+                y1 = min(1.0, (cursor + diagonal_dx - left) / diagonal_dx)
+                if y0 < y1:
+                    segments.append(
+                        [
+                            (cursor + diagonal_dx * (1.0 - y0), y0),
+                            (cursor + diagonal_dx * (1.0 - y1), y1),
+                        ]
+                    )
+                cursor += spacing
+        stripes = LineCollection(
+            segments,
+            colors=[linecolor],
+            linewidths=0.65,
+            transform=ax.transAxes,
+            zorder=zorder + 0.01,
+        )
+        ax.add_collection(stripes)
+        return _WindowBandLegendSpec(
+            facecolor=facecolor,
+            linecolor=linecolor,
+            direction=direction,
+        )
+
+    legend_handles, legend_labels = ax.get_legend_handles_labels()
+    band_handles: list[_WindowBandLegendSpec] = []
+    band_labels: list[str] = []
+    if bb_window is not None:
+        band_handles.append(
+            _draw_window_band(
+                np.log(float(bb_window.lo)),
+                np.log(float(bb_window.hi)),
+                facecolor=bb_face,
+                linecolor=bb_line,
+                direction="forward",
+                zorder=0.15,
+            )
+        )
+        band_labels.append("BB stable window")
+    if northrop_window is not None:
+        band_handles.append(
+            _draw_window_band(
+                np.log(float(northrop_window.lo)),
+                np.log(float(northrop_window.hi)),
+                facecolor=northrop_face,
+                linecolor=northrop_line,
+                direction="backward",
+                zorder=0.16,
+            )
+        )
+        band_labels.append("Northrop stable window")
     ax.set_xlabel("log(block size)")
     ax.set_ylabel("extremal index")
     ax.set_title(f"{bundle.spec.label} extremal-index comparison")
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, ncols=2)
-
-
-def _draw_return_levels_ax(ax, bundle: ApplicationBundle) -> None:
-    """Draw the application return-level comparison on a provided axis."""
-    rows = pd.DataFrame(_application_return_level_rows(bundle))
-    ax.plot(
-        rows["horizon_years"],
-        rows["return_level"],
-        marker="o",
-        color="tab:blue",
-        lw=1.2,
-        label="UniBM return level",
+    handles = legend_handles[:2] + band_handles + legend_handles[2:]
+    labels = legend_labels[:2] + band_labels + legend_labels[2:]
+    ax.legend(
+        handles,
+        labels,
+        fontsize=8,
+        ncols=2,
+        handler_map={_WindowBandLegendSpec: _WindowBandLegendHandler()},
     )
-    adjusted = rows["return_level_ei_adjusted"].to_numpy(dtype=float)
-    if np.any(np.isfinite(adjusted)):
+
+
+def _draw_design_life_levels_ax(ax, bundle: ApplicationBundle) -> None:
+    """Draw the application design-life-level comparison on a provided axis."""
+    rows = pd.DataFrame(_application_design_life_level_rows(bundle))
+    for tau in APPLICATION_DESIGN_LIFE_TAUS:
+        tau_value = float(tau)
+        tau_rows = rows.loc[np.isclose(rows["tau"], tau_value)].sort_values("design_life_years")
+        style = _tau_style(tau_value)
         ax.plot(
-            rows["horizon_years"],
-            adjusted,
-            marker="s",
-            color="tab:red",
-            lw=1.2,
-            label="EI-adjusted return level",
+            tau_rows["design_life_years"],
+            tau_rows["design_life_level"],
+            marker="o" if np.isclose(tau_value, 0.5) else None,
+            color=style["color"],
+            linestyle=style["linestyle"],
+            linewidth=style["linewidth"],
+            alpha=style["alpha"],
+            label=f"design-life level ({_tau_label(tau_value)})",
         )
-    ax.set_xscale("log")
-    ax.set_yscale(bundle.spec.return_level_yscale)
-    ax.set_xlabel(bundle.spec.return_level_label)
+    _apply_design_life_xaxis(ax)
+    ax.set_yscale(bundle.spec.design_life_level_yscale)
+    ax.set_xlabel(bundle.spec.design_life_level_label)
     ax.set_ylabel(bundle.spec.ylabel)
-    ax.set_title(f"{bundle.spec.label} return levels")
+    ax.set_title(f"{bundle.spec.label} design-life levels")
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncols=2)
 
 
 def _plot_target_stability(
@@ -765,6 +1118,25 @@ def _plot_target_stability(
 
     fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
     _draw_target_stability_ax(ax, bundle, title=title)
+    fig.tight_layout()
+    if save and file_path is not None:
+        _save_figure_pair(fig, file_path)
+    if _should_close_figure(close):
+        plt.close(fig)
+
+
+def _plot_scaling_panel(
+    bundle: ApplicationBundle,
+    *,
+    file_path: Path | None = None,
+    save: bool = False,
+    close: bool | None = None,
+) -> None:
+    """Plot the multi-tau application scaling panel."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
+    _draw_scaling_ax(ax, bundle)
     fig.tight_layout()
     if save and file_path is not None:
         _save_figure_pair(fig, file_path)
@@ -791,18 +1163,18 @@ def _plot_ei_fit(
         plt.close(fig)
 
 
-def _plot_return_levels(
+def _plot_design_life_levels(
     bundle: ApplicationBundle,
     *,
     file_path: Path | None = None,
     save: bool = False,
     close: bool | None = None,
 ) -> None:
-    """Plot return levels for one application."""
+    """Plot design-life levels for one application."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=600)
-    _draw_return_levels_ax(ax, bundle)
+    _draw_design_life_levels_ax(ax, bundle)
     fig.tight_layout()
     if save and file_path is not None:
         _save_figure_pair(fig, file_path)
@@ -831,7 +1203,7 @@ def _plot_composite_application_diagnostics(
         _draw_ei_ax(axes[1, 0], bundle)
     else:
         _draw_display_series_ax(axes[1, 0], bundle)
-    _draw_return_levels_ax(axes[1, 1], bundle)
+    _draw_design_life_levels_ax(axes[1, 1], bundle)
     fig.suptitle(f"{bundle.spec.label}: application diagnostics", y=0.995)
     fig.tight_layout()
     if save and file_path is not None:
@@ -940,6 +1312,8 @@ def plot_application_time_series(
         bundle.prepared.display,
         ylabel=bundle.spec.ylabel,
         title=bundle.spec.time_series_title,
+        display_yscale=bundle.spec.time_series_display_yscale,
+        annual_max_yscale=bundle.spec.time_series_annual_max_yscale,
         close=close,
     )
 
@@ -950,12 +1324,7 @@ def plot_application_scaling(
     close: bool | None = None,
 ) -> None:
     """Plot the application EVI scaling fit inline."""
-    plot_scaling_fit(
-        bundle.evi_fit,
-        title=bundle.spec.scaling_title,
-        ylabel=bundle.spec.scaling_ylabel,
-        close=close,
-    )
+    _plot_scaling_panel(bundle, close=close)
 
 
 def plot_application_target_stability(
@@ -984,13 +1353,13 @@ def plot_application_ei(
     _plot_ei_fit(bundle, close=close)
 
 
-def plot_application_return_levels(
+def plot_application_design_life_levels(
     bundle: ApplicationBundle,
     *,
     close: bool | None = None,
 ) -> None:
-    """Plot the application return-level curves inline."""
-    _plot_return_levels(bundle, close=close)
+    """Plot the application design-life-level curves inline."""
+    _plot_design_life_levels(bundle, close=close)
 
 
 def plot_application_composite(
@@ -1017,15 +1386,15 @@ def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
         bundle.prepared.display,
         ylabel=bundle.spec.ylabel,
         title=bundle.spec.time_series_title,
+        display_yscale=bundle.spec.time_series_display_yscale,
+        annual_max_yscale=bundle.spec.time_series_annual_max_yscale,
         file_path=fig_dir / f"application_ts_{bundle.spec.figure_stem}.pdf",
         save=True,
     )
-    plot_scaling_fit(
-        bundle.evi_fit,
+    _plot_scaling_panel(
+        bundle,
         file_path=fig_dir / f"application_evi_{bundle.spec.figure_stem}.pdf",
         save=True,
-        title=bundle.spec.scaling_title,
-        ylabel=bundle.spec.scaling_ylabel,
     )
     if bundle.spec.target_stability_title is not None:
         _plot_target_stability(
@@ -1043,9 +1412,9 @@ def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
         )
     elif ei_path.exists():
         ei_path.unlink()
-    _plot_return_levels(
+    _plot_design_life_levels(
         bundle,
-        file_path=fig_dir / f"application_rl_{bundle.spec.figure_stem}.pdf",
+        file_path=fig_dir / f"application_design_life_{bundle.spec.figure_stem}.pdf",
         save=True,
     )
     _plot_composite_application_diagnostics(
@@ -1145,7 +1514,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     series_registry_rows: list[dict[str, object]] = []
     screening_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
-    return_level_rows: list[dict[str, object]] = []
+    design_life_level_rows: list[dict[str, object]] = []
     method_rows: list[dict[str, object]] = []
     ei_method_rows: list[dict[str, object]] = []
     seasonal_ei_method_rows: list[dict[str, object]] = []
@@ -1170,7 +1539,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             ).to_record()
             screening_rows.append(ei_review)
         summary_rows.append(application_summary_record(bundle))
-        return_level_rows.extend(_application_return_level_rows(bundle))
+        design_life_level_rows.extend(_application_design_life_level_rows(bundle))
         method_rows.extend(application_method_rows(bundle))
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
@@ -1190,15 +1559,17 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     with (out_dir / "application_summary.json").open("w") as fh:
         json.dump(summary_rows, fh, indent=2)
 
-    pd.DataFrame(return_level_rows).sort_values(["application", "horizon_years"]).to_csv(
-        out_dir / "application_return_levels.csv",
+    pd.DataFrame(design_life_level_rows).sort_values(
+        ["application", "tau", "design_life_years"]
+    ).to_csv(
+        out_dir / "application_design_life_levels.csv",
         index=False,
     )
     _usgs_site_audit_frame(metadata_app_dir).to_csv(
         out_dir / "application_usgs_site_screening.csv",
         index=False,
     )
-    pd.DataFrame(method_rows).sort_values(["application", "method"]).to_csv(
+    pd.DataFrame(method_rows).sort_values(["application", "tau", "method"]).to_csv(
         out_dir / "application_methods.csv",
         index=False,
     )
@@ -1235,18 +1606,21 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             label="tab:application-summary-main",
         )
     )
-    status("application", "writing application LaTeX return-level table")
-    (table_dir / "application_return_levels_main.tex").write_text(
+    status("application", "writing application LaTeX design-life-level table")
+    (table_dir / "application_design_life_levels_main.tex").write_text(
         render_latex_table(
-            application_return_level_table(bundles),
+            application_design_life_level_table(bundles),
             caption=(
-                "Application-side UniBM return-level summary across the manuscript case studies. "
-                "Streamflow rows report baseline and formal-EI-adjusted return levels at 1, 10, and "
-                "50 years. Houston and Phoenix are retained as EVI-only environmental applications, so "
-                "their EI-adjusted columns are intentionally blank. NFIP rows are reported on the "
-                "claim-active-day basis, so EI-adjusted calendar-day levels are intentionally omitted."
+                "Application-side UniBM design-life-level summary across the manuscript case studies. "
+                "Rows show the shared-$\\xi$ application tau grid "
+                "(`tau = 0.50, 0.90, 0.95, 0.99`) obtained by evaluating the fitted block-maximum "
+                "quantile scaling law at 1-, 10-, and 50-year design-life spans. The `tau = 0.50` row is the "
+                "headline median design-life level, while higher-tau rows are increasingly conservative "
+                "upper design-life levels derived by reusing the same plateau and slope with tau-specific "
+                "intercept shifts. Streamflow rows are on the calendar-day basis, while NFIP rows are "
+                "on the claim-active-day basis."
             ),
-            label="tab:application-return-levels-main",
+            label="tab:application-design-life-levels-main",
         )
     )
     status("application", "writing application LaTeX EI comparison table")
@@ -1267,13 +1641,14 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_series_registry": out_dir / "application_series_registry.csv",
         "application_screening": out_dir / "application_screening.csv",
         "application_summary": out_dir / "application_summary.csv",
-        "application_return_levels": out_dir / "application_return_levels.csv",
+        "application_design_life_levels": out_dir / "application_design_life_levels.csv",
         "application_methods": out_dir / "application_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
         "application_ei_seasonal_methods": out_dir / "application_ei_seasonal_methods.csv",
         "application_usgs_site_screening": out_dir / "application_usgs_site_screening.csv",
         "application_summary_main": table_dir / "application_summary_main.tex",
-        "application_return_levels_main": table_dir / "application_return_levels_main.tex",
+        "application_design_life_levels_main": table_dir
+        / "application_design_life_levels_main.tex",
         "application_ei_main": table_dir / "application_ei_main.tex",
     }
 
@@ -1282,14 +1657,14 @@ __all__ = [
     "application_ei_table",
     "application_ei_method_rows",
     "application_method_rows",
-    "application_return_level_table",
+    "application_design_life_level_table",
     "application_summary_record",
     "application_summary_table",
     "build_application_outputs",
     "plot_application_composite",
     "plot_application_ei",
+    "plot_application_design_life_levels",
     "plot_application_overview",
-    "plot_application_return_levels",
     "plot_application_scaling",
     "plot_application_target_stability",
     "plot_application_time_series",

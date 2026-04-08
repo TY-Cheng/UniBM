@@ -12,7 +12,7 @@ from scripts.unibm.core import (
     block_maxima,
     block_summary_curve,
     estimate_evi_quantile,
-    estimate_return_level,
+    estimate_design_life_level,
     estimate_target_scaling,
     generate_block_sizes,
     predict_block_quantile,
@@ -176,7 +176,7 @@ class UniBmCoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
             _fit_scaling_model(np.zeros(64, dtype=float), target="quantile")
 
-    def test_evi_prediction_and_return_level_helpers(self) -> None:
+    def test_evi_prediction_and_design_life_level_helpers(self) -> None:
         values = self._positive_sample(seed=202)
         fit = estimate_evi_quantile(
             values,
@@ -186,15 +186,12 @@ class UniBmCoreTests(unittest.TestCase):
         )
         prediction = predict_block_quantile(fit, 10.0)
         self.assertTrue(np.isfinite(prediction))
-        levels = estimate_return_level(fit, np.array([1.0, 10.0]), observations_per_year=365.25)
-        self.assertEqual(levels.shape, (2,))
-        adjusted = estimate_return_level(
+        levels = estimate_design_life_level(
             fit,
-            10.0,
+            np.array([1.0, 10.0]),
             observations_per_year=365.25,
-            extremal_index=0.5,
         )
-        self.assertTrue(np.isfinite(adjusted))
+        self.assertEqual(levels.shape, (2,))
         with self.assertRaisesRegex(ValueError, "quantile-based ScalingFit"):
             predict_block_quantile(
                 estimate_target_scaling(

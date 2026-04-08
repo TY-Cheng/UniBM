@@ -449,8 +449,8 @@ def estimate_evi_quantile(
 
     Notes
     -----
-    The returned slope is the EVI estimate ``xi``. Return-level extrapolation
-    is then handled by :func:`estimate_return_level`.
+    The returned slope is the EVI estimate ``xi``. Design-life-level
+    extrapolation is then handled by :func:`estimate_design_life_level`.
     """
     return _fit_scaling_model(
         vec=vec,
@@ -565,14 +565,14 @@ def predict_block_quantile(fit: ScalingFit, block_size: float) -> float:
     return float(np.exp(fit.intercept + fit.slope * log_b))
 
 
-def estimate_return_level(
+def estimate_design_life_level(
     fit: ScalingFit,
     years: float | np.ndarray,
     *,
     observations_per_year: float = 365.25,
-    extremal_index: float | None = None,
+    tau: float | None = None,
 ) -> float | np.ndarray:
-    """Map a fitted quantile-scaling law to return-horizon levels.
+    """Map a fitted quantile-scaling law to design-life levels.
 
     Parameters
     ----------
@@ -580,20 +580,21 @@ def estimate_return_level(
         Quantile-based :class:`~unibm.models.ScalingFit`. The fit should usually
         come from :func:`estimate_evi_quantile`.
     years
-        Return horizons in years. May be a scalar or an array.
+        Design-life lengths in years. May be a scalar or an array.
     observations_per_year
-        Effective observation frequency used to convert return horizons into
+        Effective observation frequency used to convert design-life lengths into
         block sizes. Daily environmental applications typically use ``365`` or
         ``365.25``.
-    extremal_index
-        Optional extremal index ``theta`` in ``(0, 1]``. When supplied, the
-        return horizon is adjusted by the effective number of independent
-        extremes. Pass ``theta`` itself, not ``1/theta``.
+    tau
+        Optional explicit block-maximum quantile level. If omitted, the
+        function uses ``fit.quantile``. Supplying a different ``tau`` than the
+        fitted one is not allowed because the intercept already encodes the
+        level-specific scaling offset.
 
     Returns
     -------
     float or ndarray
-        Return-level estimate(s) on the original data scale.
+        Design-life-level estimate(s) on the original data scale.
 
     Notes
     -----
@@ -606,24 +607,40 @@ def estimate_return_level(
 
     ``Q_b \approx exp(alpha) * b**xi``,
 
-    then a ``T``-year return-horizon estimate is obtained by setting
+    then a ``T``-year design-life-level estimate is obtained by setting
     ``b = observations_per_year * T`` and evaluating the same scaling law at
-    that horizon.
+    that design-life length.
 
-    If dependence adjustment is needed, pass the extremal index ``theta`` from
-    an EI estimator. The current mapping uses
-    ``b = observations_per_year * theta * T``. In this interpretation,
-    ``theta < 1`` reduces the effective number of independent extreme episodes
-    per calendar year, so the EI-adjusted return level is typically lower than
-    the unadjusted single-day calendar-time return level.
+    The current application workflow uses ``tau = 0.5``, so the resulting
+    curve should be interpreted as a **median design-life level**, i.e. a
+    ``T``-year block-maximum median, rather than as a classical return-period
+    level.
+
+    Different ``tau`` values are expected to share the same asymptotic slope
+    ``xi`` and to differ mainly in intercept. In this direct block-maxima
+    framework, serial dependence is already internalized in the fitted
+    block-maximum law. Design-life levels should therefore be read directly
+    from the dependent-series fit rather than by applying a second BM-side
+    extremal-index adjustment.
 
     The EVI plateau that supports ``xi`` and the EI stable window that supports
     ``theta`` are selected from different statistical paths and therefore need
     not coincide.
     """
+    if fit.target != "quantile":
+        raise ValueError(
+            "estimate_design_life_level requires a quantile-based ScalingFit. "
+            f"Received target={fit.target!r}."
+        )
+    fit_tau = float(fit.quantile)
+    tau_value = fit_tau if tau is None else float(tau)
+    if not np.isclose(tau_value, fit_tau):
+        raise ValueError(
+            "estimate_design_life_level must use the same tau as the fitted ScalingFit. "
+            f"Received tau={tau_value:.4f}, fit.quantile={fit_tau:.4f}."
+        )
     years_arr = np.atleast_1d(np.asarray(years, dtype=float))
-    effective_years = years_arr if extremal_index is None else years_arr * float(extremal_index)
-    block_sizes = observations_per_year * effective_years
+    block_sizes = observations_per_year * years_arr
     estimates = np.asarray(
         [predict_block_quantile(fit, block_size=float(size)) for size in block_sizes]
     )

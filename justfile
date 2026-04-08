@@ -4,20 +4,41 @@ set dotenv-load := true
 default:
     @just --list
 
+# Main Entrypoints
+full workers="6" screening_bootstrap="20":
+    just clean-generated
+    just sync
+    just rebuild "{{workers}}" "{{screening_bootstrap}}"
+    just vignette-execute
+    just qa
+    just docs
+    just format
+
+rebuild workers="6" screening_bootstrap="20":
+    just benchmark "{{workers}}"
+    just application "{{workers}}" "{{screening_bootstrap}}"
+    just vignette
+
+benchmark workers="6":
+    just benchmark-sim "{{workers}}"
+    just benchmark-reports
+
+application workers="6" screening_bootstrap="20":
+    just freeze-usgs "{{screening_bootstrap}}"
+    just application-build "{{workers}}"
+
 # Setup
 sync:
     uv sync --dev
 
-# Rebuild
-freeze-usgs screening_bootstrap="20":
-    UNIBM_SCREENING_BOOTSTRAP_REPS={{screening_bootstrap}} uv run python scripts/application/freeze_usgs.py
+# Benchmark
+benchmark-sim workers="6":
+    just evi-benchmark "{{workers}}"
+    just ei-benchmark "{{workers}}"
 
-application workers="6":
-    UNIBM_APPLICATION_WORKERS={{workers}} uv run python scripts/application/build.py
-
-applications workers="6" screening_bootstrap="20":
-    just freeze-usgs "{{screening_bootstrap}}"
-    just application "{{workers}}"
+benchmark-reports:
+    uv run python scripts/benchmark/evi_report.py
+    uv run python scripts/benchmark/ei_report.py
 
 evi-benchmark workers="6":
     UNIBM_BENCHMARK_WORKERS={{workers}} uv run python scripts/benchmark/evi_benchmark.py
@@ -25,27 +46,12 @@ evi-benchmark workers="6":
 ei-benchmark workers="6":
     UNIBM_BENCHMARK_WORKERS={{workers}} uv run python scripts/benchmark/ei_benchmark.py
 
-benchmarks workers="6":
-    just evi-benchmark "{{workers}}"
-    just ei-benchmark "{{workers}}"
+# Application
+freeze-usgs screening_bootstrap="20":
+    UNIBM_SCREENING_BOOTSTRAP_REPS={{screening_bootstrap}} uv run python scripts/application/freeze_usgs.py
 
-reports:
-    uv run python scripts/benchmark/evi_report.py
-    uv run python scripts/benchmark/ei_report.py
-
-vignette:
-    uv run jupytext --sync notebooks/vignette.py
-
-rebuild workers="6" screening_bootstrap="20":
-    just benchmarks "{{workers}}"
-    just reports
-    just applications "{{workers}}" "{{screening_bootstrap}}"
-    just vignette
-
-full workers="6" screening_bootstrap="20":
-    just rebuild "{{workers}}" "{{screening_bootstrap}}"
-    just qa
-    just docs
+application-build workers="6":
+    UNIBM_APPLICATION_WORKERS={{workers}} uv run python scripts/application/build.py
 
 # QA
 test:
@@ -76,7 +82,22 @@ docs:
 docs-clean:
     rm -rf docs/_build
 
+# Notebook
+vignette:
+    uv run jupytext --sync notebooks/vignette.py
+    just format
+
+vignette-execute:
+    uv run --with nbconvert --with ipykernel jupyter-nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
+    just format
+
 # Utilities
+clean-generated:
+    mkdir -p out/benchmark/cache
+    find out -mindepth 1 -maxdepth 1 ! -name benchmark -exec rm -rf {} +
+    find out/benchmark -mindepth 1 -maxdepth 1 ! -name cache -exec rm -rf {} +
+    rm -rf UniBM_manuscript/Figure UniBM_manuscript/Table
+
 format:
     uvx ruff format ./**/*.py ./**/*.ipynb
 

@@ -2,7 +2,7 @@
 
 This package exposes the reusable statistical layer only. Repo-local benchmark,
 screening, and manuscript orchestration code lives under `scripts/benchmark`,
-`scripts/application`, `scripts/shared`, and `scripts/vignette`.
+`scripts/application`, `scripts/shared`, and `scripts/notebook_api`.
 """
 
 from .bootstrap import (
@@ -17,8 +17,8 @@ from .bootstrap import (
 from .core import (
     block_maxima,
     block_summary_curve,
+    estimate_design_life_level,
     estimate_evi_quantile,
-    estimate_return_level,
     estimate_target_scaling,
     generate_block_sizes,
     predict_block_quantile,
@@ -59,6 +59,7 @@ __all__ = [
     "circular_block_summary_bootstrap_multi_target",
     "draw_circular_block_bootstrap_samples",
     "empirical_cdf",
+    "estimate_design_life_level",
     "evaluate_block_summary_bootstrap_backbone",
     "estimate_dedh_moment_evi",
     "estimate_evi_quantile",
@@ -66,7 +67,6 @@ __all__ = [
     "estimate_hill_evi",
     "estimate_max_spectrum_evi",
     "estimate_pickands_evi",
-    "estimate_return_level",
     "estimate_target_scaling",
     "generate_block_sizes",
     "kernel_cdf",

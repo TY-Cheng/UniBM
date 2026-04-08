@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import warnings
+from unittest import mock
 
 import numpy as np
 
@@ -18,6 +19,7 @@ from scripts.unibm.bootstrap import (
     draw_circular_block_bootstrap_samples,
     evaluate_block_summary_bootstrap_backbone,
 )
+from scripts.unibm.summaries import summarize_block_maxima
 
 
 class UniBmBootstrapTests(unittest.TestCase):
@@ -25,6 +27,26 @@ class UniBmBootstrapTests(unittest.TestCase):
     def _positive_sample(size: int = 256, seed: int = 303) -> np.ndarray:
         rs = np.random.default_rng(seed)
         return rs.pareto(2.0, size) + 1.0
+
+    @staticmethod
+    def _loop_reference(
+        backbone: BlockSummaryBootstrapBackbone,
+        *,
+        target: str,
+        quantile: float = 0.5,
+    ) -> tuple[np.ndarray, int]:
+        block_sizes = np.asarray(backbone.block_sizes, dtype=int)
+        samples = np.full((backbone.segment_draws.shape[0], block_sizes.size), np.nan, dtype=float)
+        invalid_summary_count = 0
+        for rep, draw in enumerate(backbone.segment_draws):
+            for idx, block_size in enumerate(block_sizes):
+                maxima = backbone.maxima_by_block[int(block_size)][draw].reshape(-1)
+                summary = summarize_block_maxima(maxima, target=target, quantile=quantile)
+                if np.isfinite(summary) and summary > 0:
+                    samples[rep, idx] = np.log(summary)
+                else:
+                    invalid_summary_count += 1
+        return samples, invalid_summary_count
 
     def test_bootstrap_primitives_validate_inputs(self) -> None:
         self.assertEqual(default_circular_bootstrap_block_size(100, minimum=10), 10)
@@ -79,6 +101,59 @@ class UniBmBootstrapTests(unittest.TestCase):
         self.assertEqual(tuple(evaluated["block_sizes"]), (4, 8, 16))
         self.assertIsNotNone(evaluated["covariance"])
         self.assertEqual(evaluated["samples"].shape[1], 3)
+
+    def test_vectorized_quantile_and_mean_match_loop_reference(self) -> None:
+        sample = self._positive_sample(size=512, seed=77)
+        block_sizes = np.array([4, 8, 16], dtype=int)
+        backbone = build_block_summary_bootstrap_backbone(
+            sample,
+            block_sizes,
+            sliding=True,
+            reps=5,
+            super_block_size=64,
+            random_state=17,
+        )
+        assert backbone is not None
+
+        for target in ("quantile", "mean"):
+            expected_samples, expected_invalid = self._loop_reference(
+                backbone,
+                target=target,
+                quantile=0.5,
+            )
+            evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target=target)
+            valid_rows = np.all(np.isfinite(expected_samples), axis=1)
+            np.testing.assert_allclose(evaluated["samples"], expected_samples[valid_rows])
+            self.assertEqual(evaluated["invalid_replicates"], int(np.sum(~valid_rows)))
+            self.assertEqual(
+                expected_invalid,
+                int(np.size(expected_samples) - np.sum(np.isfinite(expected_samples))),
+            )
+            if evaluated["samples"].shape[0] >= 2:
+                expected_cov = np.atleast_2d(np.cov(expected_samples[valid_rows], rowvar=False))
+                np.testing.assert_allclose(evaluated["covariance"], expected_cov)
+
+    def test_mode_backbone_uses_per_replicate_summary_path(self) -> None:
+        sample = self._positive_sample(size=512, seed=19)
+        block_sizes = np.array([4, 8, 16], dtype=int)
+        backbone = build_block_summary_bootstrap_backbone(
+            sample,
+            block_sizes,
+            sliding=True,
+            reps=4,
+            super_block_size=64,
+            random_state=23,
+        )
+        assert backbone is not None
+
+        with mock.patch("scripts.unibm.bootstrap.summarize_block_maxima") as mocked_summary:
+            mocked_summary.return_value = 1.0
+            evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target="mode")
+
+        self.assertEqual(
+            mocked_summary.call_count, backbone.segment_draws.shape[0] * block_sizes.size
+        )
+        self.assertEqual(evaluated["samples"].shape, (4, 3))
 
     def test_evaluate_backbone_warns_on_nonpositive_summaries(self) -> None:
         backbone = BlockSummaryBootstrapBackbone(
