@@ -235,6 +235,52 @@ def build_block_summary_bootstrap_backbone(
     )
 
 
+def _selected_bootstrap_maxima(
+    backbone: BlockSummaryBootstrapBackbone,
+    *,
+    block_size: int,
+) -> np.ndarray:
+    """Return all replicate maxima for one block size as a 2D matrix."""
+    maxima_bank = np.asarray(backbone.maxima_by_block[int(block_size)], dtype=float)
+    selected = maxima_bank[backbone.segment_draws]
+    return selected.reshape(backbone.segment_draws.shape[0], -1)
+
+
+def _evaluate_quantile_bootstrap_column(
+    backbone: BlockSummaryBootstrapBackbone,
+    *,
+    block_size: int,
+    quantile: float,
+) -> np.ndarray:
+    """Evaluate one quantile bootstrap column across all replicates at once."""
+    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
+    return np.quantile(selected, quantile, axis=1, method="median_unbiased")
+
+
+def _evaluate_mean_bootstrap_column(
+    backbone: BlockSummaryBootstrapBackbone,
+    *,
+    block_size: int,
+) -> np.ndarray:
+    """Evaluate one mean bootstrap column across all replicates at once."""
+    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
+    return np.mean(selected, axis=1)
+
+
+def _evaluate_mode_bootstrap_column(
+    backbone: BlockSummaryBootstrapBackbone,
+    *,
+    block_size: int,
+    quantile: float,
+) -> np.ndarray:
+    """Evaluate one mode bootstrap column via the existing per-replicate path."""
+    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
+    summaries = np.full(selected.shape[0], np.nan, dtype=float)
+    for rep, maxima in enumerate(selected):
+        summaries[rep] = summarize_block_maxima(maxima, target="mode", quantile=quantile)
+    return summaries
+
+
 def evaluate_block_summary_bootstrap_backbone(
     backbone: BlockSummaryBootstrapBackbone | None,
     *,
@@ -274,14 +320,29 @@ def evaluate_block_summary_bootstrap_backbone(
     block_sizes = np.asarray(backbone.block_sizes, dtype=int)
     samples = np.full((reps, block_sizes.size), np.nan, dtype=float)
     invalid_summary_count = 0
-    for rep, draw in enumerate(backbone.segment_draws):
-        for idx, block_size in enumerate(block_sizes):
-            maxima = backbone.maxima_by_block[int(block_size)][draw].reshape(-1)
-            summary = summarize_block_maxima(maxima, target=target, quantile=quantile)
-            if np.isfinite(summary) and summary > 0:
-                samples[rep, idx] = np.log(summary)
-            else:
-                invalid_summary_count += 1
+    for idx, block_size in enumerate(block_sizes):
+        if target == "quantile":
+            summaries = _evaluate_quantile_bootstrap_column(
+                backbone,
+                block_size=int(block_size),
+                quantile=quantile,
+            )
+        elif target == "mean":
+            summaries = _evaluate_mean_bootstrap_column(
+                backbone,
+                block_size=int(block_size),
+            )
+        elif target == "mode":
+            summaries = _evaluate_mode_bootstrap_column(
+                backbone,
+                block_size=int(block_size),
+                quantile=quantile,
+            )
+        else:
+            raise ValueError(f"Unsupported target: {target}")
+        valid_mask = np.isfinite(summaries) & (summaries > 0)
+        samples[valid_mask, idx] = np.log(summaries[valid_mask])
+        invalid_summary_count += int(np.size(summaries) - np.sum(valid_mask))
     if invalid_summary_count:
         warnings.warn(
             (

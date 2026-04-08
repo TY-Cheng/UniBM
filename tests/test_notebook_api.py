@@ -10,7 +10,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import vignette.api as notebook_api
+import notebook_api.api as notebook_api
 
 
 class NotebookApiTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class NotebookApiTests(unittest.TestCase):
             "plot_application_time_series",
             "plot_application_scaling",
             "plot_application_ei",
-            "plot_application_return_levels",
+            "plot_application_design_life_levels",
             "seasonal_monthly_pit_unit_frechet",
             "plot_benchmark_panels",
             "plot_ei_core_panels",

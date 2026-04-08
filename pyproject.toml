@@ -12,11 +12,12 @@ readme = "README.md"
 license = { file = "LICENSE" }
 keywords = [
     "block maxima",
+    "block-maximum quantiles",
+    "design-life levels",
     "environmental extremes",
     "extreme value theory",
     "extremal index",
     "heavy tails",
-    "return levels",
     "serial dependence",
     "sliding blocks",
 ]
@@ -72,7 +73,7 @@ include = [
     "/scripts/data_prep",
     "/scripts/shared",
     "/scripts/unibm",
-    "/scripts/vignette",
+    "/scripts/notebook_api",
     "/tests",
 ]
 

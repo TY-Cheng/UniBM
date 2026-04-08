@@ -30,7 +30,15 @@ class VignetteSourceTests(unittest.TestCase):
         text = VIGNETTE_SOURCE.read_text()
         self.assertIn("plot_application_composite", text)
         self.assertIn("application_ei_seasonal_methods", text)
-        self.assertIn("_load_vignette_api", text)
+        self.assertIn(
+            "Definitions: Return Period, Design-Life Level, and `T`-Year Block-Maximum",
+            text,
+        )
+        self.assertIn("application_design_life_levels.csv", text)
+        self.assertIn("_load_notebook_api", text)
+        self.assertIn('"notebook_api" / "api.py"', text)
+        self.assertNotIn("application_return_levels.csv", text)
+        self.assertNotIn("EI-adjusted", text)
         self.assertNotIn("houston_ei =", text)
         self.assertNotIn("phoenix_ei =", text)
 

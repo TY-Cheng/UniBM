@@ -62,9 +62,9 @@ _bootstrap = _load_import_bootstrap(Path.cwd().resolve())
 _scripts_dir = _bootstrap.bootstrap_notebook_scripts_dir(Path.cwd().resolve())
 
 
-def _load_vignette_api(scripts_dir: Path):
-    api_path = scripts_dir / "vignette" / "api.py"
-    spec = importlib.util.spec_from_file_location("_unibm_vignette_api", api_path)
+def _load_notebook_api(scripts_dir: Path):
+    api_path = scripts_dir / "notebook_api" / "api.py"
+    spec = importlib.util.spec_from_file_location("_unibm_notebook_api", api_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load notebook API helper from {api_path}")
     module = importlib.util.module_from_spec(spec)
@@ -82,7 +82,7 @@ from IPython.display import Markdown, display
 from data_prep.fema import OPENFEMA_NFIP_CLAIMS_ENDPOINT
 from data_prep.usgs import USGS_DV_ENDPOINT
 
-_vignette_api = _load_vignette_api(_scripts_dir)
+_vignette_api = _load_notebook_api(_scripts_dir)
 CORE_METHODS = _vignette_api.CORE_METHODS
 UNIVERSAL_BENCHMARK_SET = _vignette_api.UNIVERSAL_BENCHMARK_SET
 benchmark_story_latex = _vignette_api.benchmark_story_latex
@@ -125,13 +125,13 @@ REQUIRED_OUTPUTS = [
     OUT / "application_series_registry.csv",
     OUT / "application_screening.csv",
     OUT / "application_summary.csv",
-    OUT / "application_return_levels.csv",
+    OUT / "application_design_life_levels.csv",
     OUT / "application_methods.csv",
     OUT / "application_ei_methods.csv",
     OUT / "application_ei_seasonal_methods.csv",
     OUT / "application_usgs_site_screening.csv",
     TABLE_DIR / "application_summary_main.tex",
-    TABLE_DIR / "application_return_levels_main.tex",
+    TABLE_DIR / "application_design_life_levels_main.tex",
     TABLE_DIR / "application_ei_main.tex",
     FIG_DIR / "application_composite_houston_precipitation.pdf",
     FIG_DIR / "application_composite_phoenix_hotdry.pdf",
@@ -170,7 +170,7 @@ else:
 
 # %%
 application_summary = pd.read_csv(OUT / "application_summary.csv")
-application_return_levels = pd.read_csv(OUT / "application_return_levels.csv")
+application_design_life_levels = pd.read_csv(OUT / "application_design_life_levels.csv")
 application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
 application_ei_seasonal_methods = pd.read_csv(OUT / "application_ei_seasonal_methods.csv")
 application_methods = pd.read_csv(OUT / "application_methods.csv")
@@ -200,6 +200,33 @@ application_series_registry = pd.read_csv(OUT / "application_series_registry.csv
 # 5. report an estimator-specific Gaussian/Wald confidence interval.
 #
 # The key distinction is that the internal UniBM bootstrap estimates the covariance structure of the regression inputs across block sizes, whereas the external baselines default to their own asymptotic Gaussian/Wald inference. A raw-series bootstrap percentile interval remains available only as an optional sensitivity analysis for those external estimators.
+#
+# %% [markdown]
+# ## Definitions: Return Period, Design-Life Level, and `T`-Year Block-Maximum `\tau`-Quantiles
+#
+# Before turning to the benchmark and application results, it helps to separate three related but non-identical ideas.
+#
+# 1. **Classical return period / annual exceedance probability (AEP).**
+#    A “100-year flood” in the classical engineering sense is usually shorthand for a level with annual exceedance probability `0.01`.
+#    That does **not** mean “it will happen only once in 100 years.” Under the usual stationary/independent yearly-block approximation, the probability of seeing at least one exceedance over 100 years is `1 - (1 - 0.01)^100 ≈ 63.4%`.
+# 2. **Design-life level.**
+#    In the water-resources literature, a design-life level is a quantile of the maximum over a design-life span rather than an annual exceedance threshold.
+# 3. **UniBM design-life level.**
+#    The current UniBM application workflow estimates `Q_tau(M_T)`, the `tau`-quantile of the block maximum over a `T`-year design-life span. The headline application fit uses `tau = 0.50`, and the displayed companion curves `0.90 / 0.95 / 0.99` reuse the same plateau and `xi` while shifting only the intercept.
+#
+# In that sense, the application-side design-life-level panel is a direct estimate of a **design-life level**, i.e. a `T`-year block-maximum `tau`-quantile, rather than a classical return-period level.
+# The quantile-scaling panel shows the fitted relationship on the `block size` axis, while the design-life-level panel simply evaluates the same fitted law at larger block sizes corresponding to longer design-life spans.
+# Higher-`tau` application curves are not separate EVI estimators: they are **shared-`xi` derived quantiles** that keep the headline slope and plateau fixed.
+#
+# This quantity is often easier to communicate in planning settings:
+# `Q_0.5(M_100y)` means that, under the fitted model, there is a 50% chance that the maximum over the next 100 years stays below that threshold.
+# By contrast, `Q_0.99(M_100y)` is a much more stress-oriented upper design-life quantile and is naturally the least stable of the displayed application curves.
+# That complements rather than replaces the classical AEP language used in engineering standards.
+#
+# Official USGS references for the classical hydrologic terminology:
+#
+# - [100-Year Flood—It's All About Chance](https://pubs.usgs.gov/gip/106/)
+# - [Guidelines for determining flood flow frequency — Bulletin 17C](https://www.usgs.gov/publications/guidelines-determining-flood-flow-frequency-bulletin-17c)
 #
 # ```mermaid
 # flowchart TD
@@ -237,7 +264,7 @@ application_series_registry = pd.read_csv(OUT / "application_series_registry.csv
 #     E8 --> G["Compare xi estimation and uncertainty"]
 #     F4 --> G
 #
-#     C6 --> H["Return-level extrapolation<br/>estimate_return_level()"]
+#     C6 --> H["Design-life-level extrapolation<br/>estimate_design_life_level()"]
 #     G --> I["Simulation metrics:<br/>APE, coverage, Winkler interval score"]
 # ```
 #
@@ -487,7 +514,7 @@ sources
 # The application workflow is intentionally not “one raw series, one estimator” for every case.
 #
 # - **Houston precipitation** uses the wet-season daily precipitation series for display and EVI only; it is retained as a weather-side tail example rather than a formal EI case.
-# - **Texas and Florida streamflow** use the same full-year daily discharge series for display, EVI, and EI, so return levels and extremal-index summaries refer to the same hydrologic process.
+# - **Texas and Florida streamflow** use the same full-year daily discharge series for display, EVI, and EI, so design-life levels and extremal-index summaries refer to the same hydrologic process.
 # - **Texas and Florida NFIP claims** deliberately split the series by task:
 #   the display and EI series are zero-filled daily state payout totals on the calendar-day axis,
 #   while the EVI series keeps only positive-payout days so tail extrapolation is done on the claim-active-day scale.
@@ -571,10 +598,12 @@ display(Markdown(f"USGS API endpoint used by the downloader: `{USGS_DV_ENDPOINT}
 # ### Manuscript-Facing Application Tables
 #
 # The application workflow now emits a matched LaTeX table set for manuscript assembly:
-# a cross-application summary table, a return-level table, and an EI-focused comparison table.
+# a cross-application summary table, a design-life-level table, and an EI-focused comparison table.
 # This keeps the application chapter structurally parallel to the benchmark/report pipelines rather than relying on figures alone.
 # By design, the default EVI method table now reports only the headline `sliding_median_fgls` fit,
-# while the EI comparison table carries the four-method set
+# expanded over the application tau grid `0.50 / 0.90 / 0.95 / 0.99` by reusing the same plateau and `xi`
+# while estimating only tau-specific intercept shifts.
+# The EI comparison table carries the four-method set
 # `BB-sliding-FGLS`, `Northrop-sliding-FGLS`, `K-gaps`, and `Ferro-Segers`
 # only for the formal EI applications (streamflow and NFIP).
 #
@@ -585,7 +614,7 @@ display(Markdown(f"USGS API endpoint used by the downloader: `{USGS_DV_ENDPOINT}
 # Unlike the benchmark sections, the application plots require fitted bundle objects rather than only summary CSVs.
 # The next cell reuses the cached raw inputs and re-fits the six application bundles once so the notebook can call the plotting helpers directly and display the figures inline.
 # The main per-application visual is now a single **composite diagnostic figure**.
-# For streamflow and NFIP it aligns target stability, the headline median-sliding-FGLS scaling fit, the four-method EI comparison, and the return-level panel.
+# For streamflow and NFIP it aligns target stability, the headline median-sliding-FGLS scaling fit, the four-method EI comparison, and the design-life-level panel.
 # For Houston and Phoenix it becomes an EVI-only diagnostic figure with the raw daily series in place of the EI panel.
 #
 
@@ -597,17 +626,17 @@ plt.show()
 
 
 # %%
-application_return_levels = pd.read_csv(OUT / "application_return_levels.csv")
+application_design_life_levels = pd.read_csv(OUT / "application_design_life_levels.csv")
 application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
 application_ei_seasonal_methods = pd.read_csv(OUT / "application_ei_seasonal_methods.csv")
 
 display(application_summary)
-display(application_return_levels.head(12))
+display(application_design_life_levels.head(12))
 display(application_ei_methods)
 display(application_ei_seasonal_methods)
 
 print((TABLE_DIR / "application_summary_main.tex").read_text())
-print((TABLE_DIR / "application_return_levels_main.tex").read_text())
+print((TABLE_DIR / "application_design_life_levels_main.tex").read_text())
 print((TABLE_DIR / "application_ei_main.tex").read_text())
 
 
@@ -638,10 +667,19 @@ def _screening_row(app_key, analysis_type):
     ].iloc[0]
 
 
-def _return_row(app_key, horizon):
-    return application_return_levels.loc[
-        (application_return_levels["application"] == app_key)
-        & (application_return_levels["horizon_years"] == float(horizon))
+def _design_life_row(app_key, years):
+    return application_design_life_levels.loc[
+        (application_design_life_levels["application"] == app_key)
+        & (application_design_life_levels["tau"] == 0.5)
+        & (application_design_life_levels["design_life_years"] == float(years))
+    ].iloc[0]
+
+
+def _design_life_row_tau(app_key, years, tau):
+    return application_design_life_levels.loc[
+        (application_design_life_levels["application"] == app_key)
+        & (application_design_life_levels["tau"] == float(tau))
+        & (application_design_life_levels["design_life_years"] == float(years))
     ].iloc[0]
 
 
@@ -672,41 +710,37 @@ display(
 
 
 # %% [markdown]
-# **Why EI-adjusted return levels are lower.**
-#
-# For the formal EI applications, UniBM first fits the tail extrapolation on the event scale and then maps that extrapolation back to calendar time.
-# When `theta < 1`, extreme events arrive in clusters rather than as independent daily trials, so the effective number of independent extreme episodes per calendar year is smaller.
-# At a fixed calendar return period, fewer independent extreme episodes means the same annual exceedance target is reached at a lower **single-day** threshold, so the EI-adjusted return level moves downward.
-# That downward shift should not be read as “less dangerous clustering.” It only says that the calendar-time return level for a **single-day maximum** is lower once dependence is acknowledged.
-# The real clustering penalty appears elsewhere: shorter recovery gaps, multi-day flood waves, and multi-day claim waves.
-#
 # **Seasonal-adjusted EI sensitivity.**
 #
 # The main EI workflow is still run on the original prepared EI series for streamflow and NFIP.
 # As an appendix sensitivity, the notebook also reports a monthly empirical-PIT to unit-Frechet transform that strips month-specific marginal seasonality while preserving the daily ordering.
 # Those seasonal-adjusted EI rows are shown below each application and should be read as a robustness check, not as the headline application estimator.
 #
-# **How the scaling, EI, and return-level panels fit together.**
+# **How the scaling, design-life-level, and EI panels fit together.**
 #
-# The return-level panel is **not** a separate annual-maxima fit. It is the same UniBM scaling law shown in the quantile-scaling panel, simply evaluated at larger block sizes.
-# In other words, the quantile-scaling panel works on `log(block size)` versus `log block summary`, while the return-level panel converts those larger block sizes into return horizons on the original physical scale.
-# That is why the two panels are mathematically linked but still use different x-axes: one is a fitting axis (`block size`), the other is an interpretation axis (`return period in years`).
+# The design-life-level panel is **not** a separate annual-maxima or GEV fit.
+# It is the same UniBM scaling law shown in the quantile-scaling panel, simply evaluated at larger block sizes corresponding to longer design-life spans.
+# In other words, the quantile-scaling panel works on `log(block size)` versus `log block summary`, while the design-life-level panel converts those larger block sizes into design-life lengths on the original physical scale.
+# That is why the two panels are mathematically linked but still use different x-axes: one is a fitting axis (`block size`), the other is an interpretation axis (`design-life length in years`).
 #
 # The EVI plateau and the EI stable window also need not coincide.
 # The EVI fit asks where the block-quantile curve is approximately linear on the log-log scale, whereas the EI fit asks where the estimated clustering path is stable enough to support a formal `theta` estimate.
 # Those are different statistical objects, so it is normal for the selected block-size ranges to overlap only partially or even to sit in different parts of the admissible grid.
 #
+# In the current direct BM-quantile workflow, dependence is already built into the fitted block-maximum law because the block maxima are computed from the original dependent series.
+# We therefore read the design-life-level curve directly as a design-life severity curve rather than applying a second BM-side `theta` adjustment.
+# Within the application outputs, `tau = 0.50` is the headline design-life median and the higher curves `0.90 / 0.95 / 0.99` are shared-`xi` companions rather than separately re-estimated `xi_tau` fits.
+#
 # For risk management, the two outputs answer different questions.
-# Use the EVI/return-level panel when the decision is about **severity** on the original scale, such as discharge or payout magnitude at a chosen horizon.
+# Use the design-life-level panel when the decision is about **severity** on the original scale, such as discharge or payout magnitude at a chosen design-life span.
 # Use the EI panel when the decision is about **persistence and recovery**, such as whether extremes arrive as isolated shocks or as multi-day flood waves or claim waves.
-# For the streamflow applications, the EI-adjusted return-level panel is useful because both `xi` and `theta` are defined on the same calendar-day discharge process.
-# For NFIP, the active-day return levels and the calendar-day EI estimates are intentionally kept separate because they live on different clocks.
+# Streamflow therefore combines design-life levels and EI on the same calendar-day process, while NFIP intentionally keeps active-day design-life levels and calendar-day EI on separate clocks.
 #
 # %% [markdown]
 # ## 3. Hydrologic Response Applications: Texas and Florida Streamflow
 #
 # The streamflow applications move one step downstream from weather into hydrologic response.
-# Here the same daily discharge series is used for display, EVI, and EI, so the estimated `xi`, `theta`, and EI-adjusted return levels all describe the same calendar-day river process.
+# Here the same daily discharge series is used for display, EVI, and EI, so the estimated `xi`, `theta`, and design-life levels all describe the same calendar-day river process.
 # This makes the streamflow cases the cleanest bridge from the meteorological Houston case to impact-facing insurance data.
 #
 
@@ -718,8 +752,8 @@ streamflow_screening = application_screening[
 streamflow_summary = application_summary[
     application_summary["application"].isin(["tx_streamflow", "fl_streamflow"])
 ].copy()
-streamflow_return_levels = application_return_levels[
-    application_return_levels["application"].isin(["tx_streamflow", "fl_streamflow"])
+streamflow_design_life_levels = application_design_life_levels[
+    application_design_life_levels["application"].isin(["tx_streamflow", "fl_streamflow"])
 ].copy()
 streamflow_ei = application_ei_methods[
     application_ei_methods["application"].isin(["tx_streamflow", "fl_streamflow"])
@@ -732,7 +766,7 @@ streamflow_methods = application_methods[
 ].copy()
 display(streamflow_screening)
 display(streamflow_summary)
-display(streamflow_return_levels)
+display(streamflow_design_life_levels)
 display(streamflow_ei)
 display(streamflow_seasonal_ei)
 display(streamflow_methods)
@@ -748,10 +782,14 @@ plt.show()
 
 
 # %%
-tx_stream_rl10 = _return_row("tx_streamflow", 10.0)
-fl_stream_rl10 = _return_row("fl_streamflow", 10.0)
-tx_stream_rl50 = _return_row("tx_streamflow", 50.0)
-fl_stream_rl50 = _return_row("fl_streamflow", 50.0)
+tx_stream_design_life_10 = _design_life_row("tx_streamflow", 10.0)
+fl_stream_design_life_10 = _design_life_row("fl_streamflow", 10.0)
+tx_stream_design_life_50 = _design_life_row("tx_streamflow", 50.0)
+fl_stream_design_life_50 = _design_life_row("fl_streamflow", 50.0)
+tx_stream_design_life_10_p95 = _design_life_row_tau("tx_streamflow", 10.0, 0.95)
+fl_stream_design_life_10_p95 = _design_life_row_tau("fl_streamflow", 10.0, 0.95)
+tx_stream_design_life_50_p99 = _design_life_row_tau("tx_streamflow", 50.0, 0.99)
+fl_stream_design_life_50_p99 = _design_life_row_tau("fl_streamflow", 50.0, 0.99)
 tx_stream_northrop = streamflow_ei.loc[
     (streamflow_ei["application"] == "tx_streamflow")
     & (streamflow_ei["method"] == "northrop_sliding_fgls")
@@ -776,7 +814,7 @@ display(
 
 That main pooled-BM story is reinforced rather than contradicted by the other EI estimators: the Northrop pooled-BM fits are `{_fmt_interval(tx_stream_northrop["theta_hat"], tx_stream_northrop["theta_lo"], tx_stream_northrop["theta_hi"], digits=3)}` in Texas and `{_fmt_interval(fl_stream_northrop["theta_hat"], fl_stream_northrop["theta_lo"], fl_stream_northrop["theta_hi"], digits=3)}` in Florida, while Ferro-Segers remains in the same low-theta regime at `{_fmt_interval(tx_stream_ferro["theta_hat"], tx_stream_ferro["theta_lo"], tx_stream_ferro["theta_hi"], digits=3)}` and `{_fmt_interval(fl_stream_ferro["theta_hat"], fl_stream_ferro["theta_lo"], fl_stream_ferro["theta_hi"], digits=3)}`.
 
-That dependence materially changes the extrapolation story. In Texas, the 10-year return level drops from `{_fmt_value(tx_stream_rl10["return_level"])}` to `{_fmt_value(tx_stream_rl10["return_level_ei_adjusted"])}` once EI is accounted for; in Florida, the same adjustment moves the 10-year level from `{_fmt_value(fl_stream_rl10["return_level"])}` to `{_fmt_value(fl_stream_rl10["return_level_ei_adjusted"])}`. The 50-year levels show the same pattern, so these streamflow cases are the clearest demonstration that clustering can dominate return-level interpretation.
+The design-life severity scale is still substantial. The headline median 10-year design-life levels are `{_fmt_value(tx_stream_design_life_10["design_life_level"])}` in Texas and `{_fmt_value(fl_stream_design_life_10["design_life_level"])}` in Florida, while the shared-`xi` `tau = 0.95` 10-year curves rise to `{_fmt_value(tx_stream_design_life_10_p95["design_life_level"])}` and `{_fmt_value(fl_stream_design_life_10_p95["design_life_level"])}`. At the longer and more stress-oriented end, the `tau = 0.99` 50-year design-life levels reach `{_fmt_value(tx_stream_design_life_50_p99["design_life_level"])}` and `{_fmt_value(fl_stream_design_life_50_p99["design_life_level"])}`. Those numbers all describe peak flood severity on the calendar-day discharge scale; the EI results above should be read alongside them to quantify how long one flood episode tends to persist once it starts.
 
 Seasonal adjustment does not erase that conclusion. The monthly-PIT BB sensitivity remains very small at `{_fmt_interval(tx_stream_seasonal_bb["theta_hat"], tx_stream_seasonal_bb["theta_lo"], tx_stream_seasonal_bb["theta_hi"], digits=3)}` in Texas and `{_fmt_interval(fl_stream_seasonal_bb["theta_hat"], fl_stream_seasonal_bb["theta_lo"], fl_stream_seasonal_bb["theta_hi"], digits=3)}` in Florida, so the clustering story is not just a marginal seasonal artifact.
         """
@@ -789,8 +827,8 @@ Seasonal adjustment does not erase that conclusion. The monthly-PIT BB sensitivi
 #
 # The NFIP cases are intentionally constructed differently from the raw physical-hazard series.
 # We keep the **calendar-day zero-filled daily payout totals** for display and EI so the clustering analysis preserves claim-wave timing,
-# but we fit EVI and return levels on the **positive-payout-day** series so the tail extrapolation is not diluted by long runs of structural zeros.
-# The return levels reported here should therefore be read as **claim-active-day return levels**, not calendar-day return levels.
+# but we fit EVI and design-life levels on the **positive-payout-day** series so the tail extrapolation is not diluted by long runs of structural zeros.
+# The design-life levels reported here should therefore be read as **claim-active-day design-life levels**, not calendar-day design-life levels.
 #
 
 # %%
@@ -801,8 +839,8 @@ nfip_screening = application_screening[
 nfip_summary = application_summary[
     application_summary["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
 ].copy()
-nfip_return_levels = application_return_levels[
-    application_return_levels["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
+nfip_design_life_levels = application_design_life_levels[
+    application_design_life_levels["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
 ].copy()
 nfip_ei = application_ei_methods[
     application_ei_methods["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
@@ -819,7 +857,7 @@ nfip_registry = series_registry[
 display(nfip_registry[["application", "role", "series_name", "series_basis", "n_obs"]])
 display(nfip_screening)
 display(nfip_summary)
-display(nfip_return_levels)
+display(nfip_design_life_levels)
 display(nfip_ei)
 display(nfip_seasonal_ei)
 display(nfip_methods)
@@ -839,8 +877,12 @@ tx_nfip_evi_screen = _screening_row("tx_nfip_claims", "evi")
 fl_nfip_evi_screen = _screening_row("fl_nfip_claims", "evi")
 tx_nfip_ei_screen = _screening_row("tx_nfip_claims", "ei")
 fl_nfip_ei_screen = _screening_row("fl_nfip_claims", "ei")
-tx_nfip_rl10 = _return_row("tx_nfip_claims", 10.0)
-fl_nfip_rl10 = _return_row("fl_nfip_claims", 10.0)
+tx_nfip_design_life_10 = _design_life_row("tx_nfip_claims", 10.0)
+fl_nfip_design_life_10 = _design_life_row("fl_nfip_claims", 10.0)
+tx_nfip_design_life_10_p95 = _design_life_row_tau("tx_nfip_claims", 10.0, 0.95)
+fl_nfip_design_life_10_p95 = _design_life_row_tau("fl_nfip_claims", 10.0, 0.95)
+tx_nfip_design_life_50_p99 = _design_life_row_tau("tx_nfip_claims", 50.0, 0.99)
+fl_nfip_design_life_50_p99 = _design_life_row_tau("fl_nfip_claims", 50.0, 0.99)
 tx_nfip_northrop = nfip_ei.loc[
     (nfip_ei["application"] == "tx_nfip_claims") & (nfip_ei["method"] == "northrop_sliding_fgls")
 ].iloc[0]
@@ -863,7 +905,7 @@ display(
 
 The split-series design is also justified by the raw timing structure: only `{100 * tx_nfip_ei_screen["daily_positive_share"]:.1f}%` of Texas calendar days and `{100 * fl_nfip_ei_screen["daily_positive_share"]:.1f}%` of Florida calendar days carry positive payouts, so EI needs the zero-filled daily axis to preserve claim-wave timing. On that calendar scale, BB-sliding-FGLS gives `theta ~ {_fmt_value(nfip_summary.loc[nfip_summary["application"] == "tx_nfip_claims", "theta_hat_bb_sliding_fgls"].iloc[0])}` in Texas and `{_fmt_value(nfip_summary.loc[nfip_summary["application"] == "fl_nfip_claims", "theta_hat_bb_sliding_fgls"].iloc[0])}` in Florida, with Northrop pooled-BM at `{_fmt_interval(tx_nfip_northrop["theta_hat"], tx_nfip_northrop["theta_lo"], tx_nfip_northrop["theta_hi"])}` and `{_fmt_interval(fl_nfip_northrop["theta_hat"], fl_nfip_northrop["theta_lo"], fl_nfip_northrop["theta_hi"])}` and Ferro-Segers at `{_fmt_interval(tx_nfip_ferro["theta_hat"], tx_nfip_ferro["theta_lo"], tx_nfip_ferro["theta_hi"])}` and `{_fmt_interval(fl_nfip_ferro["theta_hat"], fl_nfip_ferro["theta_lo"], fl_nfip_ferro["theta_hi"])}`. Those estimates all point to multi-day claim waves rather than isolated one-day impacts.
 
-The 10-year claim-active-day return levels, `{_fmt_value(tx_nfip_rl10["return_level"])}` in Texas and `{_fmt_value(fl_nfip_rl10["return_level"])}` in Florida, should therefore be read together with the EI evidence for multi-day claim waves. We intentionally do not plot EI-adjusted NFIP return levels on the same axis because the tail extrapolation is fit on **positive claim-active days** whereas the EI analysis is defined on the **zero-filled calendar-day process**. Those are different clocks, so a direct overlay would mix two different estimands rather than sharpen the interpretation.
+The headline 10-year claim-active-day design-life levels, `{_fmt_value(tx_nfip_design_life_10["design_life_level"])}` in Texas and `{_fmt_value(fl_nfip_design_life_10["design_life_level"])}` in Florida, should therefore be read together with the EI evidence for multi-day claim waves. The upper shared-`xi` curves are materially higher: `tau = 0.95` gives `{_fmt_value(tx_nfip_design_life_10_p95["design_life_level"])}` in Texas and `{_fmt_value(fl_nfip_design_life_10_p95["design_life_level"])}` in Florida, while the 50-year `tau = 0.99` stress curves reach `{_fmt_value(tx_nfip_design_life_50_p99["design_life_level"])}` and `{_fmt_value(fl_nfip_design_life_50_p99["design_life_level"])}`. The design-life-level curve is fit on **positive claim-active days**, whereas the EI analysis is defined on the **zero-filled calendar-day process**. Those are different clocks, so they are reported side by side rather than forced onto one axis as if they were the same estimand.
 
 Seasonal adjustment also leaves the qualitative claim-wave story intact. The monthly-PIT BB sensitivity lands at `{_fmt_interval(tx_nfip_seasonal_bb["theta_hat"], tx_nfip_seasonal_bb["theta_lo"], tx_nfip_seasonal_bb["theta_hi"])}` in Texas and `{_fmt_interval(fl_nfip_seasonal_bb["theta_hat"], fl_nfip_seasonal_bb["theta_lo"], fl_nfip_seasonal_bb["theta_hi"])}` in Florida, so the clustering evidence is not an artifact of month-specific payout levels alone.
         """
@@ -900,15 +942,17 @@ houston_summary = application_summary[
 phoenix_summary = application_summary[
     application_summary["application"] == "phoenix_hot_dry_severity"
 ].copy()
-houston_rl10 = _return_row("houston_hobby_precipitation", 10.0)
-phoenix_rl10 = _return_row("phoenix_hot_dry_severity", 10.0)
+houston_design_life_10 = _design_life_row("houston_hobby_precipitation", 10.0)
+phoenix_design_life_10 = _design_life_row("phoenix_hot_dry_severity", 10.0)
+houston_design_life_10_p95 = _design_life_row_tau("houston_hobby_precipitation", 10.0, 0.95)
+phoenix_design_life_10_p95 = _design_life_row_tau("phoenix_hot_dry_severity", 10.0, 0.95)
 
 display(
     Markdown(
         f"""
 **Interpretation.** These two weather-driven series remain useful for illustrating the EVI side of the workflow, but they are not treated as formal EI applications in this notebook.
 Houston retains the heavier weather-side tail (`xi = {_fmt_interval(houston_summary.iloc[0]["xi_hat"], houston_summary.iloc[0]["xi_lo"], houston_summary.iloc[0]["xi_hi"])}`), while Phoenix provides a milder-tail compound-hazard contrast (`xi = {_fmt_interval(phoenix_summary.iloc[0]["xi_hat"], phoenix_summary.iloc[0]["xi_lo"], phoenix_summary.iloc[0]["xi_hi"])}`).
-The 10-year UniBM return levels are `{_fmt_value(houston_rl10["return_level"])}` for Houston wet-season precipitation and `{_fmt_value(phoenix_rl10["return_level"])}` for Phoenix hot-dry severity.
+The headline 10-year UniBM design-life levels are `{_fmt_value(houston_design_life_10["design_life_level"])}` for Houston wet-season precipitation and `{_fmt_value(phoenix_design_life_10["design_life_level"])}` for Phoenix hot-dry severity. The shared-`xi` `tau = 0.95` companion curves push those 10-year values up to `{_fmt_value(houston_design_life_10_p95["design_life_level"])}` and `{_fmt_value(phoenix_design_life_10_p95["design_life_level"])}`.
         """
     )
 )

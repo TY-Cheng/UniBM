@@ -95,8 +95,8 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
             time_series_title="Synthetic NFIP",
             scaling_title="Synthetic NFIP scaling",
             scaling_ylabel="log median positive payouts",
-            return_level_basis="claim_active_day",
-            return_level_label="claim-active-day return period (years)",
+            design_life_level_basis="claim_active_day",
+            design_life_level_label="claim-active-day design-life (years)",
             ei_allow_zeros=True,
         )
 

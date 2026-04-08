@@ -13,7 +13,8 @@ from unibm.models import ScalingFit
 
 APPLICATION_RANDOM_STATE = 7
 APPLICATION_EI_BOOTSTRAP_REPS = 120
-RETURN_LEVEL_HORIZONS = np.asarray([1.0, 10.0, 25.0, 50.0], dtype=float)
+DESIGN_LIFE_LEVEL_HORIZONS = np.asarray([1.0, 10.0, 25.0, 50.0], dtype=float)
+APPLICATION_DESIGN_LIFE_TAUS = (0.5, 0.9, 0.95, 0.99)
 APPLICATION_EVI_METHOD_IDS = ("sliding_median_fgls",)
 APPLICATION_EI_METHOD_IDS = (
     "bb_sliding_fgls",
@@ -47,9 +48,11 @@ class ApplicationSpec:
     scaling_ylabel: str
     quantile: float = 0.5
     observations_per_year: float | None = None
-    return_level_basis: str = "calendar_year"
-    return_level_label: str = "return period (years)"
-    return_level_yscale: str = "linear"
+    time_series_display_yscale: str = "linear"
+    time_series_annual_max_yscale: str = "linear"
+    design_life_level_basis: str = "calendar_year"
+    design_life_level_label: str = "design-life (years)"
+    design_life_level_yscale: str = "linear"
     target_stability_title: str | None = None
     secondary_case: bool = False
     formal_ei: bool = True
@@ -109,9 +112,10 @@ APPLICATIONS = (
         raw_key="USW00012918.csv.gz",
         ylabel="precipitation (mm)",
         time_series_title="Houston wet-season daily precipitation and annual maxima",
-        scaling_title="Houston sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum",
+        scaling_title="Houston sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile",
         observations_per_year=183.0,
+        design_life_level_yscale="log",
         target_stability_title="Houston target stability across block sizes",
         formal_ei=False,
     ),
@@ -123,9 +127,10 @@ APPLICATIONS = (
         raw_key="USW00023183.csv.gz",
         ylabel="hot-dry severity",
         time_series_title="Phoenix warm-season hot-dry severity and annual maxima",
-        scaling_title="Phoenix sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum",
+        scaling_title="Phoenix sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile",
         observations_per_year=214.0,
+        design_life_level_yscale="log",
         secondary_case=True,
         target_stability_title="Phoenix target stability across block sizes",
         formal_ei=False,
@@ -138,10 +143,10 @@ APPLICATIONS = (
         raw_key="TX",
         ylabel="discharge (cfs)",
         time_series_title="Texas daily discharge and annual maxima",
-        scaling_title="Texas streamflow sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum",
+        scaling_title="Texas streamflow sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
-        return_level_yscale="log",
+        design_life_level_yscale="log",
         target_stability_title="Texas streamflow target stability across block sizes",
     ),
     ApplicationSpec(
@@ -152,10 +157,10 @@ APPLICATIONS = (
         raw_key="FL",
         ylabel="discharge (cfs)",
         time_series_title="Florida daily discharge and annual maxima",
-        scaling_title="Florida streamflow sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum",
+        scaling_title="Florida streamflow sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
-        return_level_yscale="log",
+        design_life_level_yscale="log",
         target_stability_title="Florida streamflow target stability across block sizes",
     ),
     ApplicationSpec(
@@ -164,13 +169,14 @@ APPLICATIONS = (
         label="Texas NFIP claims",
         figure_stem="tx_nfip_claims",
         raw_key="TX",
-        ylabel="building payouts (2025 USD)",
+        ylabel="building payouts (inflation-adjusted 2025 USD)",
         time_series_title="Texas NFIP daily building payouts and annual maxima",
-        scaling_title="Texas NFIP active-day sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum (positive payout days)",
-        return_level_basis="claim_active_day",
-        return_level_label="claim-active-day return period (years)",
-        return_level_yscale="log",
+        scaling_title="Texas NFIP active-day sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile (positive payout days)",
+        time_series_annual_max_yscale="log",
+        design_life_level_basis="claim_active_day",
+        design_life_level_label="claim-active-day design-life (years)",
+        design_life_level_yscale="log",
         target_stability_title="Texas NFIP target stability across block sizes",
         ei_allow_zeros=True,
     ),
@@ -180,13 +186,14 @@ APPLICATIONS = (
         label="Florida NFIP claims",
         figure_stem="fl_nfip_claims",
         raw_key="FL",
-        ylabel="building payouts (2025 USD)",
+        ylabel="building payouts (inflation-adjusted 2025 USD)",
         time_series_title="Florida NFIP daily building payouts and annual maxima",
-        scaling_title="Florida NFIP active-day sliding-block quantile scaling",
-        scaling_ylabel="log median block maximum (positive payout days)",
-        return_level_basis="claim_active_day",
-        return_level_label="claim-active-day return period (years)",
-        return_level_yscale="log",
+        scaling_title="Florida NFIP active-day sliding block-maxima quantile scaling",
+        scaling_ylabel="log block-maximum quantile (positive payout days)",
+        time_series_annual_max_yscale="log",
+        design_life_level_basis="claim_active_day",
+        design_life_level_label="claim-active-day design-life (years)",
+        design_life_level_yscale="log",
         target_stability_title="Florida NFIP target stability across block sizes",
         ei_allow_zeros=True,
     ),
@@ -202,11 +209,12 @@ __all__ = [
     "APPLICATION_EI_BOOTSTRAP_REPS",
     "APPLICATION_EI_METHOD_IDS",
     "APPLICATION_EVI_METHOD_IDS",
+    "APPLICATION_DESIGN_LIFE_TAUS",
     "APPLICATION_RANDOM_STATE",
     "APPLICATIONS",
     "ApplicationBundle",
     "ApplicationPreparedInputs",
     "ApplicationSpec",
-    "RETURN_LEVEL_HORIZONS",
+    "DESIGN_LIFE_LEVEL_HORIZONS",
     "spec_by_key",
 ]

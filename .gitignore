@@ -1,4 +1,6 @@
 # Project-generated outputs
+scratch*
+/tmp/
 /.python-version
 /doc/
 /docs/_build/
@@ -12,7 +14,6 @@
 !/data/metadata/application/usgs_candidate_sites.json
 !/data/metadata/application/usgs_frozen_sites.json
 /UniBM_manuscript/
-scratch*
 *.pkl
 *.csv.gz
 *.npz

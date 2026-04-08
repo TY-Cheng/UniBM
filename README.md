@@ -4,6 +4,15 @@ UniBM packages reusable statistical code for block-maxima inference under
 serial dependence, with benchmark and application workflows for both the
 extreme value index (`xi`) and the extremal index (`theta`).
 
+The main methodological selling point is not the term *design-life level* by
+itself, but the unified UniBM workflow that starts from dependent block-maxima
+quantile scaling and then carries the same fitted law through to:
+
+- `xi` estimation on short records;
+- `theta` estimation for clustering and episode persistence;
+- decision-facing **design-life levels**, i.e. `T`-year block-maximum
+  `tau`-quantiles on the original physical scale.
+
 ## Quick Start
 
 From the repository root, the standard end-to-end workflow is:
@@ -55,12 +64,24 @@ uv sync --dev
 The main task entrypoints are:
 
 ```bash
+just full
 just rebuild
+just benchmark
+just application
 just qa
 just docs
+just vignette-execute
+just clean-generated
 ```
 
-`just full` expands to `rebuild + qa + docs`.
+`just full` expands to `clean-generated + sync + rebuild + qa + docs`.
+The five commands you mainly need to remember are:
+
+- `just full`: everything
+- `just benchmark`: benchmark rebuild + benchmark reports
+- `just application`: USGS freeze + application rebuild
+- `just qa`: tests + coverage + lint
+- `just docs`: Sphinx docs
 
 Current defaults:
 
@@ -74,7 +95,8 @@ Examples with explicit overrides:
 
 ```bash
 just rebuild 8 40
-just applications 6 40
+just application 6 40
+just benchmark 8
 just freeze-usgs 40
 ```
 
@@ -116,12 +138,20 @@ Notes:
 
 - Prefer `uv sync --dev` over `uv sync -U` for reproducible rebuilds. `-U`
   upgrades dependencies and is better treated as an explicit maintenance step.
-- `just full` expands to `rebuild + qa + docs`; the final
+- `just vignette` syncs `notebooks/vignette.py` into
+  `notebooks/vignette.ipynb`, but it does not execute the notebook.
+  Use `just vignette-execute` when you want the committed notebook outputs
+  refreshed in place.
+- `just full` expands to `clean-generated + sync + rebuild + qa + docs`; the final
   `uvx ruff format ./**/*.py ./**/*.ipynb` remains a separate explicit
   formatting pass in your standard workflow.
 - `uv run python scripts/shared/profile_sliding_windows.py` is optional
   profiling/diagnostics and not required for benchmark, application, vignette,
   or docs outputs.
+- `just clean-generated` removes generated outputs under `out/` while preserving
+  `out/benchmark/cache`, and also removes `UniBM_manuscript/Figure` plus
+  `UniBM_manuscript/Table`. Use it when you want a cold rebuild of all rendered
+  artifacts without deleting the benchmark cache.
 
 ## Workflow-Specific Commands
 
@@ -191,7 +221,8 @@ Main application outputs are written to `out/applications/`:
 - `application_series_registry.csv`
 - `application_screening.csv`
 - `application_summary.csv`
-- `application_return_levels.csv`
+- `application_design_life_levels.csv`
+  design-life-level curves over the application tau grid;
 - `application_methods.csv`
 - `application_ei_methods.csv`
 - `application_ei_seasonal_methods.csv`
@@ -200,7 +231,9 @@ Main application outputs are written to `out/applications/`:
 Application method defaults are now intentionally asymmetric:
 
 - `application_methods.csv` records only the headline EVI fit
-  `sliding_median_fgls`;
+  `sliding_median_fgls`, but expands it over the application tau grid
+  `0.50 / 0.90 / 0.95 / 0.99` by reusing the same plateau and `xi` while
+  estimating only tau-specific intercept shifts;
 - `application_ei_methods.csv` records the four-method EI comparison set
   `bb_sliding_fgls`, `northrop_sliding_fgls`, `k_gaps`, and `ferro_segers`
   only for the formal EI applications (`tx_streamflow`, `fl_streamflow`,
@@ -212,21 +245,31 @@ Application method defaults are now intentionally asymmetric:
 Interpreting the streamflow/NFIP application diagnostics:
 
 - the `quantile scaling` panel is the fitted UniBM log-log block-summary curve;
-- the `return level` panel is not a separate GEV fit, but the same fitted
-  scaling law evaluated at larger block sizes and then mapped to return
-  horizons;
+- the `design-life level` panel is not a separate GEV fit, but the same fitted
+  scaling law evaluated at larger block sizes and then mapped to longer
+  design-life spans;
+- the literature term closest to this output is a **design-life level**, i.e.
+  a `T`-year block-maximum `tau`-quantile;
+- the current manuscript/application default is `tau = 0.50`, so the headline
+  curve is a median design-life level;
+- the application plots and exports now also show `tau = 0.90 / 0.95 / 0.99`
+  as increasingly conservative shared-`xi` companion curves;
 - the EVI plateau and the EI stable window are selected from different
   statistical paths, so they do not need to match;
-- EI-adjusted return levels can be lower than unadjusted single-day return
-  levels because `theta < 1` reduces the effective number of independent
-  extreme episodes per calendar year;
-- for NFIP, active-day return levels and calendar-day EI estimates are kept
-  separate on purpose because they live on different clocks.
+- different `tau` values are conceptually valid and should share the same
+  asymptotic slope `xi` while differing mainly in intercept; in the
+  application workflow those higher-`tau` curves are derived by holding the
+  headline plateau and slope fixed and re-estimating only the intercept;
+- in this direct block-maxima framework, serial dependence is already
+  internalized in the fitted block-maximum law, so there is no second BM-side
+  `theta` adjustment on the design-life-level curve;
+- for NFIP, active-day design-life levels and calendar-day EI estimates are
+  kept separate on purpose because they live on different clocks.
 
 Manuscript-facing application tables are written to `UniBM_manuscript/Table/`:
 
 - `application_summary_main.tex`
-- `application_return_levels_main.tex`
+- `application_design_life_levels_main.tex`
 - `application_ei_main.tex`
 
 Manuscript-facing application figures are written to
@@ -236,21 +279,24 @@ Manuscript-facing application figures are written to
 - `application_evi_<stem>.pdf`
 - `application_target_<stem>.pdf`
 - `application_ei_<stem>.pdf` for the formal EI applications only
-- `application_rl_<stem>.pdf`
+- `application_design_life_<stem>.pdf`
 - `application_composite_<stem>.pdf`
 - `application_overview.pdf`
 
 The composite figure is now the default notebook-facing visual. For streamflow
 and NFIP it combines target stability, the headline median-sliding-FGLS scaling
-fit, the four-method EI comparison, and the return-level panel in one 2x2
-layout. Houston and Phoenix use an EVI-only composite variant where the raw
-daily series replaces the EI panel. The older single-purpose PDFs remain
+fit, the four-method EI comparison, and the design-life-level panel in one 2x2
+layout. The scaling and design-life-level panels now show the application tau grid
+`0.50 / 0.90 / 0.95 / 0.99`, with `tau = 0.50` as the headline design-life
+median and the higher curves as shared-`xi` upper companions. Houston and
+Phoenix use an EVI-only composite variant where the raw daily series replaces
+the EI panel. The older single-purpose PDFs remain
 available as secondary/debug outputs.
 
-Return-level plotting uses a mixed scale convention:
+Design-life-level plotting uses a mixed scale convention:
 
 - Houston precipitation and Phoenix hot-dry severity keep a linear `y` axis.
-- Texas/Florida streamflow and Texas/Florida NFIP return-level plots use a log
+- Texas/Florida streamflow and Texas/Florida NFIP design-life-level plots use a log
   `y` axis so the multi-order-of-magnitude spread remains readable.
 
 ### Vignette
@@ -261,6 +307,14 @@ Sync the notebook artifact from the Jupytext source of truth:
 just vignette
 # or
 uv run jupytext --sync notebooks/vignette.py
+```
+
+Execute the paired notebook in place when you want rendered outputs refreshed:
+
+```bash
+just vignette-execute
+# or
+uv run --with nbconvert --with ipykernel jupyter-nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
 ```
 
 The old generator entrypoint
@@ -297,8 +351,8 @@ Records** section summarizing:
 It also reports an appendix-only **seasonal-adjusted EI sensitivity** based on
 a monthly empirical PIT -> unit-Frechet transform of each prepared EI series
 for the formal EI applications only. Those rows are a robustness check and are
-not used in the main return-level adjustment or in the headline application
-summary tables.
+not used in the main median design-life-level summaries or in the
+headline application summary tables.
 
 `out/benchmark/preview/` is no longer part of the formal workflow. It was used
 only for temporary benchmark figure previews while tuning display limits and has
@@ -383,7 +437,7 @@ comparisons for:
   metadata, and export code.
 - `scripts/shared/` contains shared CLI bootstrap, runtime, and profiling
   helpers.
-- `scripts/vignette/` contains the notebook-facing helper API used by the
+- `scripts/notebook_api/` contains the notebook-facing helper API used by the
   Jupytext vignette.
 - `scripts/data_prep/` contains application-specific preprocessing helpers.
 - `data/metadata/application/` contains frozen USGS site selections and the CPI
