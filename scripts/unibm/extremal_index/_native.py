@@ -110,6 +110,7 @@ def _build_bm_estimate(
     *,
     regression: str,
     bootstrap_result: dict[str, np.ndarray | None] | None = None,
+    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> ExtremalIndexEstimate:
     """Pool one BM path either by OLS or by FGLS on the transformed scale."""
     selected_levels, selected_z = extract_stable_path_window(path)
@@ -128,6 +129,7 @@ def _build_bm_estimate(
     z_hat, se, ci_variant = _pooled_z_fit(
         selected_z,
         covariance=covariance if regression == "FGLS" else None,
+        covariance_shrinkage=covariance_shrinkage,
     )
     theta_hat = float(np.exp(-z_hat))
     if regression == "FGLS" and not used_gls:
@@ -284,6 +286,7 @@ def estimate_pooled_bm_ei(
     sliding: bool,
     regression: str,
     bootstrap_result: dict[str, np.ndarray | None] | None = None,
+    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> ExtremalIndexEstimate:
     """Estimate ``theta`` by pooling a BM reciprocal-EI path over a stable window."""
     path = bundle.paths[(base_path, sliding)]
@@ -293,4 +296,5 @@ def estimate_pooled_bm_ei(
         path,
         regression=regression,
         bootstrap_result=bootstrap_result,
+        covariance_shrinkage=covariance_shrinkage,
     )

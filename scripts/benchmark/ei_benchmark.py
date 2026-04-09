@@ -91,6 +91,14 @@ def _expected_universal_theta(configs: list[SimulationConfig]) -> list[float]:
     return sorted({cfg.theta_true for cfg in configs})
 
 
+def _expected_families(configs: list[SimulationConfig]) -> list[str]:
+    return sorted({str(cfg.family) for cfg in configs})
+
+
+def _expected_universal_n_obs(configs: list[SimulationConfig]) -> list[int]:
+    return sorted({int(cfg.n_obs) for cfg in configs})
+
+
 def _summary_matches_contract(
     summary: pd.DataFrame,
     *,
@@ -101,15 +109,19 @@ def _summary_matches_contract(
     benchmark_sets = (
         set(summary["benchmark_set"].dropna().unique()) if "benchmark_set" in summary else set()
     )
+    families = sorted(summary["family"].dropna().astype(str).unique())
     universal_xi = sorted(summary["xi_true"].dropna().unique())
     universal_theta = sorted(summary["theta_true"].dropna().unique())
+    universal_n_obs = sorted(summary["n_obs"].dropna().astype(int).unique())
     expected_sets = {cfg.benchmark_set for cfg in configs}
     return (
         _EI_SUMMARY_REQUIRED_COLUMNS.issubset(summary.columns)
         and method_names == expected_methods
         and benchmark_sets == expected_sets
+        and families == _expected_families(configs)
         and universal_xi == _expected_universal_xi(configs)
         and universal_theta == _expected_universal_theta(configs)
+        and universal_n_obs == _expected_universal_n_obs(configs)
     )
 
 

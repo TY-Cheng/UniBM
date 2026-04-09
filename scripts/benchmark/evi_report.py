@@ -47,6 +47,7 @@ from benchmark.common import (
     IQR_LOWER,
     IQR_UPPER,
     format_median_iqr,
+    interval_score,
     quantile_agg,
     render_latex_table,
     wilson_interval,
@@ -73,6 +74,17 @@ from shared.runtime import status
 # ---------------------------------------------------------------------------
 # Aggregation helpers
 # ---------------------------------------------------------------------------
+
+EVI_SHRINKAGE_GRID = (0.00, 0.15, 0.35, 0.55, 0.75, 1.00)
+_EVI_SHRINKAGE_REQUIRED_COLUMNS = {
+    "benchmark_set",
+    "family",
+    "n_obs",
+    "delta",
+    "median_ape",
+    "median_coverage",
+    "median_interval_score",
+}
 
 
 def benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -290,6 +302,246 @@ def benchmark_story_latex(
     """Render the compact benchmark story table without depending on notebook tooling."""
     table = benchmark_story_table(summary, methods=methods, benchmark_set=benchmark_set)
     return render_latex_table(table, caption=caption, label=label)
+
+
+def _shrinkage_sensitivity_output_path(out_dir: Path) -> Path:
+    """Return the canonical appendix CSV for EVI shrinkage sensitivity."""
+    return out_dir / "benchmark_shrinkage_sensitivity.csv"
+
+
+def _contains(interval: tuple[float, float], value: float) -> bool:
+    """Check whether a nominal interval covers the truth."""
+    return bool(interval[0] <= value <= interval[1])
+
+
+def _shrinkage_sensitivity_contract_ok(
+    summary: pd.DataFrame,
+    *,
+    configs: Iterable[object],
+    deltas: tuple[float, ...],
+) -> bool:
+    """Validate a cached shrinkage-sensitivity summary against the requested design."""
+    if not _EVI_SHRINKAGE_REQUIRED_COLUMNS.issubset(summary.columns):
+        return False
+    expected_families = sorted({str(cfg.family) for cfg in configs})
+    expected_sets = sorted({str(cfg.benchmark_set) for cfg in configs})
+    expected_n_obs = sorted({int(cfg.n_obs) for cfg in configs})
+    observed_deltas = sorted(float(value) for value in summary["delta"].dropna().unique())
+    observed_families = sorted(str(value) for value in summary["family"].dropna().unique())
+    observed_sets = sorted(str(value) for value in summary["benchmark_set"].dropna().unique())
+    observed_n_obs = sorted(int(value) for value in summary["n_obs"].dropna().unique())
+    return (
+        observed_deltas == list(deltas)
+        and observed_families == expected_families
+        and observed_sets == expected_sets
+        and observed_n_obs == expected_n_obs
+    )
+
+
+def build_evi_shrinkage_sensitivity_summary(
+    root: Path | str = ".",
+    *,
+    configs: list[object] | None = None,
+    deltas: Iterable[float] = EVI_SHRINKAGE_GRID,
+    max_workers: int | None = None,
+    force: bool = False,
+) -> tuple[pd.DataFrame, Path]:
+    """Materialize the appendix EVI shrinkage-sensitivity CSV.
+
+    The sensitivity run reuses the existing benchmark scenario cache and the
+    original sample's bootstrap backbone. Only the covariance-shrinkage value is
+    varied, and only for the headline sliding-median-FGLS severity workflow.
+    """
+    from benchmark.design import (
+        default_evi_simulation_configs,
+        fit_methods_for_series,
+        load_or_simulate_series_bank,
+        resolve_benchmark_workers,
+        scenario_random_state,
+    )
+    from benchmark.evi_benchmark import BENCHMARK_ALPHA, BENCHMARK_RANDOM_STATE
+    from config import resolve_repo_dirs
+    from unibm.core import estimate_target_scaling
+
+    dirs = resolve_repo_dirs(root)
+    out_dir = dirs["DIR_OUT_BENCHMARK"]
+    cache_dir = dirs["DIR_OUT_BENCHMARK_CACHE"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    output_path = _shrinkage_sensitivity_output_path(out_dir)
+
+    resolved_configs = default_evi_simulation_configs() if configs is None else list(configs)
+    shrinkage_values = tuple(float(delta) for delta in deltas)
+    if not force and output_path.exists():
+        cached = pd.read_csv(output_path)
+        if _shrinkage_sensitivity_contract_ok(
+            cached,
+            configs=resolved_configs,
+            deltas=shrinkage_values,
+        ):
+            status("evi_report", "reusing cached EVI shrinkage-sensitivity CSV")
+            return cached, output_path
+
+    status(
+        "evi_report",
+        "building appendix EVI shrinkage sensitivity from cached scenario series",
+    )
+    detail_rows: list[dict[str, float | int | str]] = []
+    workers = resolve_benchmark_workers(len(resolved_configs), max_workers=max_workers)
+    _ = workers  # Sensitivity reuses scenario caches sequentially to maximize reuse.
+    for cfg in resolved_configs:
+        scenario_seed = scenario_random_state(cfg, master_seed=BENCHMARK_RANDOM_STATE)
+        series_bank = load_or_simulate_series_bank(
+            cfg,
+            random_state=scenario_seed,
+            cache_dir=cache_dir,
+        )
+        for rep, vec in enumerate(series_bank):
+            headline_fit = fit_methods_for_series(
+                vec,
+                quantile=cfg.quantile,
+                random_state=rep,
+                method_ids=["sliding_median_fgls"],
+                cache_dir=cache_dir,
+                cache_key=f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}",
+            )["sliding_median_fgls"]
+            for delta in shrinkage_values:
+                if np.isclose(delta, 0.35):
+                    fit = headline_fit
+                else:
+                    fit = estimate_target_scaling(
+                        vec,
+                        target="quantile",
+                        quantile=cfg.quantile,
+                        sliding=True,
+                        bootstrap_reps=0,
+                        random_state=rep,
+                        curve=headline_fit.curve,
+                        plateau=headline_fit.plateau,
+                        bootstrap_result=headline_fit.bootstrap,
+                        covariance_shrinkage=delta,
+                    )
+                ci_lo, ci_hi = fit.confidence_interval
+                detail_rows.append(
+                    {
+                        "benchmark_set": cfg.benchmark_set,
+                        "family": cfg.family,
+                        "n_obs": int(cfg.n_obs),
+                        "xi_true": float(cfg.xi_true),
+                        "theta_true": float(cfg.theta_true),
+                        "phi": float(cfg.phi),
+                        "rep": int(rep),
+                        "delta": float(delta),
+                        "ape": float(abs(fit.slope - cfg.xi_true) / abs(cfg.xi_true)),
+                        "interval_score": float(
+                            interval_score(
+                                cfg.xi_true,
+                                ci_lo,
+                                ci_hi,
+                                alpha=BENCHMARK_ALPHA,
+                            )
+                        ),
+                        "covered": float(_contains((ci_lo, ci_hi), cfg.xi_true)),
+                    }
+                )
+    detail = pd.DataFrame(detail_rows)
+    scenario_summary = (
+        detail.groupby(
+            ["benchmark_set", "family", "n_obs", "xi_true", "theta_true", "phi", "delta"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            ape_median=("ape", "median"),
+            interval_score_median=("interval_score", "median"),
+            coverage=("covered", "mean"),
+        )
+        .reset_index(drop=True)
+    )
+    summary = (
+        scenario_summary.groupby(
+            ["benchmark_set", "family", "n_obs", "delta"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            median_ape=("ape_median", "median"),
+            median_coverage=("coverage", "median"),
+            median_interval_score=("interval_score_median", "median"),
+        )
+        .reset_index(drop=True)
+    )
+    summary = sort_by_family_order(summary, sort_columns=["delta"])
+    summary.to_csv(output_path, index=False)
+    return summary, output_path
+
+
+def plot_evi_shrinkage_sensitivity(
+    summary: pd.DataFrame,
+    *,
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+    file_path: Path | None = None,
+    dpi: int = 600,
+    title: str | None = None,
+    save: bool = False,
+) -> None:
+    """Plot appendix EVI shrinkage sensitivity against the fixed delta grid."""
+    subset = summary.loc[summary["benchmark_set"] == benchmark_set].copy()
+    if subset.empty:
+        raise ValueError(
+            f"No shrinkage-sensitivity rows found for benchmark_set={benchmark_set!r}."
+        )
+    families = ordered_families(subset["family"].drop_duplicates().tolist())
+    metrics = [
+        ("median_ape", "median APE"),
+        ("median_coverage", "median coverage"),
+        ("median_interval_score", "median Winkler interval score"),
+    ]
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["tab:blue"])
+    fig, axes = plt.subplots(
+        nrows=1,
+        ncols=len(metrics),
+        figsize=(5.2 * len(metrics), 3.7),
+        dpi=dpi,
+        sharex=True,
+    )
+    axes = np.asarray(axes, dtype=object).reshape(-1)
+    for idx, (metric, ylabel) in enumerate(metrics):
+        ax = axes[idx]
+        for family_idx, family in enumerate(families):
+            family_frame = subset.loc[subset["family"] == family].sort_values("delta")
+            if family_frame.empty:
+                continue
+            ax.plot(
+                family_frame["delta"].to_numpy(dtype=float),
+                family_frame[metric].to_numpy(dtype=float),
+                marker="o",
+                lw=1.8,
+                color=color_cycle[family_idx % len(color_cycle)],
+                label=family_label(family),
+            )
+        if metric == "median_coverage":
+            ax.axhline(0.95, color="0.4", linestyle="--", linewidth=1.0)
+            ax.set_ylim(0.0, 1.02)
+        else:
+            values = subset[metric].to_numpy(dtype=float)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                ax.set_ylim(0.0, float(np.max(finite) * 1.08))
+        ax.set_xlabel(r"FGLS shrinkage $\delta$")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(EVI_SHRINKAGE_GRID)
+        ax.grid(alpha=0.2, linewidth=0.6)
+    axes[0].legend(frameon=False, fontsize=9, loc="best")
+    if title:
+        fig.suptitle(title, fontsize=13, y=0.98)
+    fig.tight_layout(rect=(0, 0, 1, 0.97 if title else 1))
+    if save:
+        if file_path is None:
+            raise ValueError("file_path must be supplied when save=True.")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(file_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -576,10 +828,10 @@ def plot_benchmark_panels(
 
 
 def _main_evi_benchmark_n_obs(summary: pd.DataFrame) -> int:
-    """Infer the EVI benchmark sample size from the universal summary rows."""
+    """Infer the EVI benchmark sample size from the projected-suite summary rows."""
     rows = summary.loc[summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET, "n_obs"].dropna()
     if rows.empty:
-        raise ValueError("Benchmark summary does not contain any universal-benchmark rows.")
+        raise ValueError("Benchmark summary does not contain any projected-suite rows.")
     return int(round(float(rows.median())))
 
 
@@ -587,6 +839,7 @@ def write_evi_benchmark_manuscript_artifacts(
     benchmark_summary_df: pd.DataFrame,
     external_benchmark_summary: pd.DataFrame,
     *,
+    shrinkage_sensitivity_summary: pd.DataFrame | None = None,
     fig_dir: Path,
     table_dir: Path,
 ) -> None:
@@ -606,9 +859,10 @@ def write_evi_benchmark_manuscript_artifacts(
             methods=CORE_METHODS,
             benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Necessary-components EVI benchmark on the Universal grid across the xi grid "
-                f"0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
-                f"with n_obs={n_obs}. "
+                f"Necessary-components EVI benchmark on the projected short-record severity suite "
+                f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05)."
@@ -622,9 +876,10 @@ def write_evi_benchmark_manuscript_artifacts(
             external_benchmark_summary,
             benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Target-comparison EVI benchmark on the Universal grid across the xi grid "
-                f"0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
-                f"with n_obs={n_obs}. "
+                f"Target-comparison EVI benchmark on the projected short-record severity suite "
+                f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05)."
@@ -638,9 +893,10 @@ def write_evi_benchmark_manuscript_artifacts(
             external_benchmark_summary,
             benchmark_set=UNIVERSAL_BENCHMARK_SET,
             caption=(
-                f"Appendix interval sharpness-versus-calibration summary on the Universal xi "
-                f"grid 0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
-                f"with n_obs={n_obs}. Cells report median 95\\% interval width / "
+                f"Appendix interval sharpness-versus-calibration summary on the projected EVI suite "
+                f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n_obs={n_obs}. Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
             ),
             label="tab:benchmark-interval-main",
@@ -650,8 +906,9 @@ def write_evi_benchmark_manuscript_artifacts(
         render_latex_table(
             benchmark_table(benchmark_summary_df, benchmark_set=UNIVERSAL_BENCHMARK_SET),
             caption=(
-                f"Appendix full EVI benchmark overview on the Universal grid across the xi "
-                f"grid 0.01 to 10.00 at fixed theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.00}} "
+                f"Appendix full EVI benchmark overview on the projected EVI suite with xi in "
+                f"{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, theta in {{0.01, 0.10, 0.50, 1.0}}, "
+                f"and the Frechet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
                 f"with n_obs={n_obs}."
             ),
             label="tab:benchmark-overview-main",
@@ -693,6 +950,14 @@ def write_evi_benchmark_manuscript_artifacts(
         file_path=fig_dir / "benchmark_interval_sharpness.pdf",
         save=True,
     )
+    if shrinkage_sensitivity_summary is not None:
+        plot_evi_shrinkage_sensitivity(
+            shrinkage_sensitivity_summary,
+            benchmark_set=UNIVERSAL_BENCHMARK_SET,
+            title="Appendix: EVI shrinkage sensitivity for sliding-median-FGLS",
+            file_path=fig_dir / "benchmark_shrinkage_sensitivity.pdf",
+            save=True,
+        )
 
 
 def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, Path]:
@@ -704,21 +969,29 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
     dirs = resolve_repo_dirs(root)
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
     table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
+    out_dir = dirs["DIR_OUT_BENCHMARK"]
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     status("evi_report", "loading benchmark summaries")
     benchmark_outputs = load_or_materialize_evi_benchmark_outputs(root, force=False)
+    status("evi_report", "building shrinkage sensitivity summary")
+    shrinkage_sensitivity_summary, shrinkage_sensitivity_path = (
+        build_evi_shrinkage_sensitivity_summary(root, force=False)
+    )
     status("evi_report", "writing manuscript figures and LaTeX tables")
     write_evi_benchmark_manuscript_artifacts(
         benchmark_outputs.summary,
         benchmark_outputs.external_summary,
+        shrinkage_sensitivity_summary=shrinkage_sensitivity_summary,
         fig_dir=fig_dir,
         table_dir=table_dir,
     )
     return {
         "benchmark_summary": benchmark_outputs.summary_path,
         "external_benchmark_summary": benchmark_outputs.external_summary_path,
+        "benchmark_shrinkage_sensitivity_data": shrinkage_sensitivity_path,
         "benchmark_core_main": table_dir / "benchmark_core_main.tex",
         "benchmark_targets_main": table_dir / "benchmark_targets_main.tex",
         "benchmark_interval_main": table_dir / "benchmark_interval_main.tex",
@@ -727,6 +1000,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
         "benchmark_overview_figure": fig_dir / "benchmark_overview.pdf",
         "benchmark_targets_figure": fig_dir / "benchmark_targets.pdf",
         "benchmark_interval_sharpness_figure": fig_dir / "benchmark_interval_sharpness.pdf",
+        "benchmark_shrinkage_sensitivity_figure": fig_dir / "benchmark_shrinkage_sensitivity.pdf",
     }
 
 
@@ -746,7 +1020,9 @@ __all__ = [
     "benchmark_story_table",
     "benchmark_summary",
     "benchmark_table",
+    "build_evi_shrinkage_sensitivity_summary",
     "build_evi_benchmark_manuscript_outputs",
+    "plot_evi_shrinkage_sensitivity",
     "plot_benchmark_panels",
     "write_evi_benchmark_manuscript_artifacts",
 ]

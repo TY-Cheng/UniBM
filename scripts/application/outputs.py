@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import sys
@@ -46,9 +46,29 @@ from application.specs import (
 )
 from shared.runtime import status
 from benchmark.common import render_latex_table
+from benchmark.common import latex_escape
 from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
-from unibm.core import block_summary_curve
+from unibm.core import (
+    DEFAULT_CURVATURE_PENALTY,
+    block_summary_curve,
+    estimate_design_life_level,
+    estimate_target_scaling,
+)
+from unibm.bootstrap import draw_circular_block_bootstrap_samples
+from unibm.extremal_index import (
+    EiStableWindow,
+    bootstrap_bm_ei_path_draws,
+    estimate_pooled_bm_ei,
+)
 from unibm.models import ScalingFit
+
+
+_MANUSCRIPT_APPLICATION_KEYS = (
+    "tx_streamflow",
+    "fl_streamflow",
+    "tx_nfip_claims",
+    "fl_nfip_claims",
+)
 
 
 @dataclass(frozen=True)
@@ -462,6 +482,367 @@ def _application_design_life_level_rows(bundle: ApplicationBundle) -> list[dict[
                 }
             )
     return rows
+
+
+def _manuscript_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBundle]:
+    """Return the curated four-case manuscript subset in a stable order."""
+    selected = [bundle for bundle in bundles if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS]
+    order = {key: idx for idx, key in enumerate(_MANUSCRIPT_APPLICATION_KEYS)}
+    return sorted(selected, key=lambda bundle: order[bundle.spec.key])
+
+
+def _application_record_span_years(bundle: ApplicationBundle) -> float:
+    """Return the approximate observed record span in years for one application."""
+    index = bundle.prepared.display.series.index
+    span_days = max((index.max() - index.min()).days, 1)
+    return float(span_days / 365.25)
+
+
+def _application_clock_text(bundle: ApplicationBundle) -> str:
+    """Render the severity/persistence observation clocks for one application."""
+    if bundle.spec.provider == "fema":
+        return "severity: active-day; persistence: calendar-day"
+    return "severity: calendar-day; persistence: calendar-day"
+
+
+def _application_preprocessing_text(bundle: ApplicationBundle) -> str:
+    """Render a compact preprocessing summary for one application."""
+    if bundle.spec.provider == "usgs":
+        return "daily discharge, minimal QC/filtering, no model-based detrending"
+    return "inflation-adjusted daily building payouts, active-day severity split"
+
+
+def _application_normalization_text(bundle: ApplicationBundle) -> str:
+    """Render what is and is not normalized for one application."""
+    if bundle.spec.provider == "usgs":
+        return "not exposure-normalized; raw discharge scale"
+    return "inflation-adjusted only; not exposure-normalized portfolio risk"
+
+
+def _application_stationarity_text(bundle: ApplicationBundle) -> str:
+    """Render the main stationarity caveat for one application."""
+    if bundle.spec.provider == "usgs":
+        return "working stationarity after minimal preprocessing"
+    return "working stationarity after inflation adjustment and clock split"
+
+
+def _render_wrapped_latex_table(
+    table: pd.DataFrame,
+    *,
+    caption: str,
+    label: str,
+    alignments: str,
+    size: str = r"\scriptsize",
+) -> str:
+    """Render a wider LaTeX table with caller-supplied column widths."""
+    columns = [str(col) for col in table.columns]
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        size,
+        rf"\caption{{{latex_escape(caption)}}}",
+        rf"\label{{{label}}}",
+        rf"\begin{{tabular}}{{{alignments}}}",
+        r"\hline",
+        " & ".join(latex_escape(col) for col in columns) + r" \\",
+        r"\hline",
+    ]
+    for row in table.itertuples(index=False, name=None):
+        lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
+    lines.extend([r"\hline", r"\end{tabular}", r"\end{table}"])
+    return "\n".join(lines)
+
+
+def application_case_audit_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build the manuscript appendix audit table for the curated four applications."""
+    rows: list[dict[str, object]] = []
+    for bundle in _manuscript_bundles(bundles):
+        rows.append(
+            {
+                "Application": bundle.spec.label,
+                "Observation clock": _application_clock_text(bundle),
+                "Record span": f"{_application_record_span_years(bundle):.1f} years",
+                "Preprocessing": _application_preprocessing_text(bundle),
+                "Normalization": _application_normalization_text(bundle),
+                "Stationarity caveat": _application_stationarity_text(bundle),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _top_penultimate_windows(
+    fit: ScalingFit,
+    *,
+    top_k: int = 3,
+    min_points: int = 5,
+    trim_fraction: float = 0.15,
+    curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
+) -> list[object]:
+    """Return the top scoring plateau windows for one fitted EVI curve."""
+    from unibm.models import PlateauWindow
+
+    x = np.asarray(fit.log_block_sizes, dtype=float)
+    y = np.asarray(fit.log_values, dtype=float)
+    n = x.size
+    lo = int(np.floor(n * trim_fraction))
+    hi = n - lo
+    lo = min(lo, max(n - min_points, 0))
+    if hi - lo < min_points:
+        lo = 0
+        hi = n
+    candidates: list[tuple[float, int, int]] = []
+    for start in range(lo, hi - min_points + 1):
+        for stop in range(start + min_points, hi + 1):
+            window_x = x[start:stop]
+            window_y = y[start:stop]
+            slope, intercept = np.polyfit(window_x, window_y, 1)
+            fitted = intercept + slope * window_x
+            resid = window_y - fitted
+            mse = float(np.mean(resid**2))
+            local_slopes = np.diff(window_y) / np.diff(window_x)
+            curvature = (
+                float(np.mean(np.abs(np.diff(local_slopes)))) if local_slopes.size > 1 else 0.0
+            )
+            score = (mse + float(curvature_penalty) * curvature) / np.sqrt(stop - start)
+            candidates.append((score, start, stop))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    windows: list[PlateauWindow] = []
+    seen: set[tuple[int, int]] = set()
+    for score, start, stop in candidates:
+        key = (start, stop)
+        if key in seen:
+            continue
+        seen.add(key)
+        mask = np.zeros(n, dtype=bool)
+        mask[start:stop] = True
+        windows.append(
+            PlateauWindow(
+                start=start,
+                stop=stop,
+                score=float(score),
+                mask=mask,
+                x=x[start:stop],
+                y=y[start:stop],
+            )
+        )
+        if len(windows) >= top_k:
+            break
+    return windows
+
+
+def _fit_evi_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> list[ScalingFit]:
+    """Refit the headline EVI workflow across the top scoring plateau windows."""
+    windows = _top_penultimate_windows(bundle.evi_fit, top_k=top_k)
+    fits: list[ScalingFit] = []
+    for plateau in windows:
+        fits.append(
+            estimate_target_scaling(
+                bundle.prepared.evi.series.values,
+                target="quantile",
+                quantile=bundle.spec.quantile,
+                sliding=True,
+                bootstrap_reps=0,
+                curve=bundle.evi_fit.curve,
+                plateau=plateau,
+                bootstrap_result=bundle.evi_fit.bootstrap,
+            )
+        )
+    return fits
+
+
+def _top_ei_windows(
+    path,
+    *,
+    top_k: int = 3,
+    min_points: int = 4,
+    trim_fraction: float = 0.15,
+    roughness_penalty: float = 0.75,
+    curvature_penalty: float = 0.5,
+) -> list[tuple[EiStableWindow, np.ndarray, float]]:
+    """Return the top scoring stable EI windows for one transformed path."""
+    levels = np.asarray(path.block_sizes, dtype=int)
+    z = np.asarray(path.z_path, dtype=float)
+    mask = np.isfinite(z)
+    levels = levels[mask]
+    z = z[mask]
+    lo = int(np.floor(levels.size * trim_fraction))
+    hi = levels.size - lo
+    if hi - lo < min_points:
+        lo = 0
+        hi = levels.size
+    candidates: list[tuple[float, int, int]] = []
+    for start in range(lo, hi - min_points + 1):
+        for stop in range(start + min_points, hi + 1):
+            window = z[start:stop]
+            variance = float(np.mean((window - window.mean()) ** 2))
+            first_diff = np.diff(window)
+            roughness = float(np.mean(np.abs(first_diff))) if first_diff.size else 0.0
+            curvature = float(np.mean(np.abs(np.diff(first_diff)))) if first_diff.size > 1 else 0.0
+            score = (
+                variance
+                + float(roughness_penalty) * roughness
+                + float(curvature_penalty) * curvature
+            ) / np.sqrt(stop - start)
+            candidates.append((score, start, stop))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    windows: list[tuple[EiStableWindow, np.ndarray, float]] = []
+    seen: set[tuple[int, int]] = set()
+    for score, start, stop in candidates:
+        key = (start, stop)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected_levels = levels[start:stop]
+        windows.append(
+            (
+                EiStableWindow(int(selected_levels[0]), int(selected_levels[-1])),
+                selected_levels,
+                float(score),
+            )
+        )
+        if len(windows) >= top_k:
+            break
+    return windows
+
+
+def _bootstrap_ei_path_draws_for_bundle(
+    bundle: ApplicationBundle,
+) -> dict[tuple[str, bool], np.ndarray]:
+    """Bootstrap the four BM EI z-path variants for one application bundle."""
+    assert bundle.ei_bundle is not None
+    sample_bank = draw_circular_block_bootstrap_samples(
+        bundle.prepared.ei.series.to_numpy(dtype=float),
+        reps=120,
+        random_state=APPLICATION_RANDOM_STATE,
+    )
+    return bootstrap_bm_ei_path_draws(
+        sample_bank.samples,
+        block_sizes=bundle.ei_bundle.block_sizes,
+        allow_zeros=bundle.spec.ei_allow_zeros,
+    )
+
+
+def _materialize_application_ei_bootstrap_result(
+    selected_levels: np.ndarray,
+    *,
+    bundle: ApplicationBundle,
+    path_draws: dict[tuple[str, bool], np.ndarray],
+    base_path: str,
+    sliding: bool,
+) -> dict[str, np.ndarray | None]:
+    """Build one pooled-BM covariance bundle aligned to an explicit EI window."""
+    assert bundle.ei_bundle is not None
+    full_levels = np.asarray(bundle.ei_bundle.block_sizes, dtype=int)
+    selected_idx = [int(np.flatnonzero(full_levels == level)[0]) for level in selected_levels]
+    selected_draws = path_draws[(base_path, sliding)][:, selected_idx]
+    valid_draws = selected_draws[np.all(np.isfinite(selected_draws), axis=1)]
+    covariance = None
+    if valid_draws.shape[0] >= 2:
+        covariance = np.atleast_2d(np.cov(valid_draws, rowvar=False))
+    return {
+        "block_sizes": np.asarray(selected_levels, dtype=int),
+        "samples": valid_draws,
+        "covariance": covariance,
+    }
+
+
+def _fit_ei_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> list[object]:
+    """Refit the headline BB-sliding-FGLS EI workflow across the top stable windows."""
+    if bundle.ei_bundle is None or bundle.ei_bb_sliding_fgls is None:
+        return []
+    path = bundle.ei_bundle.paths[("bb", True)]
+    path_draws = _bootstrap_ei_path_draws_for_bundle(bundle)
+    variants = []
+    for window, selected_levels, score in _top_ei_windows(path, top_k=top_k):
+        bootstrap_result = _materialize_application_ei_bootstrap_result(
+            selected_levels,
+            bundle=bundle,
+            path_draws=path_draws,
+            base_path="bb",
+            sliding=True,
+        )
+        updated_path = replace(
+            path,
+            stable_window=window,
+            selected_level=int(selected_levels[0]),
+        )
+        updated_paths = dict(bundle.ei_bundle.paths)
+        updated_paths[("bb", True)] = updated_path
+        updated_bundle = replace(bundle.ei_bundle, paths=updated_paths)
+        estimate = estimate_pooled_bm_ei(
+            updated_bundle,
+            base_path="bb",
+            sliding=True,
+            regression="FGLS",
+            bootstrap_result=bootstrap_result,
+        )
+        variants.append((estimate, float(score)))
+    return variants
+
+
+def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build the manuscript appendix selection-sensitivity summary."""
+    rows: list[dict[str, object]] = []
+    for bundle in _manuscript_bundles(bundles):
+        evi_fits = _fit_evi_window_variants(bundle, top_k=3)
+        evi_xi = np.asarray([fit.slope for fit in evi_fits], dtype=float)
+        evi_10 = np.asarray(
+            [
+                estimate_design_life_level(
+                    fit, 10.0, observations_per_year=_application_observations_per_year(bundle)
+                )
+                for fit in evi_fits
+            ],
+            dtype=float,
+        )
+        evi_50 = np.asarray(
+            [
+                estimate_design_life_level(
+                    fit, 50.0, observations_per_year=_application_observations_per_year(bundle)
+                )
+                for fit in evi_fits
+            ],
+            dtype=float,
+        )
+        ei_variants = _fit_ei_window_variants(bundle, top_k=3)
+        theta_values = (
+            np.asarray([estimate.theta_hat for estimate, _ in ei_variants], dtype=float)
+            if ei_variants
+            else np.asarray([], dtype=float)
+        )
+        theta_headline = (
+            np.nan
+            if bundle.ei_bb_sliding_fgls is None
+            else float(bundle.ei_bb_sliding_fgls.theta_hat)
+        )
+        rows.append(
+            {
+                "Application": bundle.spec.label,
+                "$\\xi$ headline [range]": (
+                    f"{bundle.evi_fit.slope:.2f} [{np.min(evi_xi):.2f}, {np.max(evi_xi):.2f}]"
+                    if evi_xi.size
+                    else "NA"
+                ),
+                "$\\theta$ headline [range]": (
+                    "NA"
+                    if theta_values.size == 0 or not np.isfinite(theta_headline)
+                    else f"{theta_headline:.2f} [{np.min(theta_values):.2f}, {np.max(theta_values):.2f}]"
+                ),
+                "10y median DLL [range]": (
+                    f"{float(estimate_design_life_level(bundle.evi_fit, 10.0, observations_per_year=_application_observations_per_year(bundle))):.2f} "
+                    f"[{np.min(evi_10):.2f}, {np.max(evi_10):.2f}]"
+                    if evi_10.size
+                    else "NA"
+                ),
+                "50y median DLL [range]": (
+                    f"{float(estimate_design_life_level(bundle.evi_fit, 50.0, observations_per_year=_application_observations_per_year(bundle))):.2f} "
+                    f"[{np.min(evi_50):.2f}, {np.max(evi_50):.2f}]"
+                    if evi_50.size
+                    else "NA"
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
@@ -1511,6 +1892,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     inputs = build_application_inputs(dirs, raw_paths=raw_paths)
     status("application", "building application bundles")
     bundles = build_application_bundles_from_inputs(inputs)
+    manuscript_bundles = _manuscript_bundles(bundles)
     series_registry_rows: list[dict[str, object]] = []
     screening_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
@@ -1594,31 +1976,31 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     status("application", "writing application LaTeX summary table")
     (table_dir / "application_summary_main.tex").write_text(
         render_latex_table(
-            application_summary_table(bundles),
+            application_summary_table(manuscript_bundles),
             caption=(
-                "Application-side UniBM summary across the six manuscript case studies. "
-                "Cells report the headline sliding-median-FGLS estimate of $\\xi$. "
-                "Formal EI summaries are only reported for the streamflow and NFIP claim-wave "
-                "applications, where the headline BB-sliding-FGLS estimate of $\\theta$, the "
-                "Northrop-sliding-FGLS pooled-BM comparator, and the implied mean cluster size "
-                "$1/\\theta$ are substantively interpreted."
+                "Application-side UniBM summary across the curated four-case manuscript subset. "
+                "Cells report the headline sliding-median-FGLS estimate of $\\xi$. Formal EI "
+                "summaries are reported for the streamflow and NFIP claim-wave applications, where "
+                "the headline BB-sliding-FGLS estimate of $\\theta$, the Northrop-sliding-FGLS "
+                "pooled-BM comparator, and the implied mean cluster size $1/\\theta$ are "
+                "substantively interpreted."
             ),
-            label="tab:application-summary-main",
+            label="tab:application-summary-generated",
         )
     )
     status("application", "writing application LaTeX design-life-level table")
     (table_dir / "application_design_life_levels_main.tex").write_text(
         render_latex_table(
-            application_design_life_level_table(bundles),
+            application_design_life_level_table(manuscript_bundles),
             caption=(
-                "Application-side UniBM design-life-level summary across the manuscript case studies. "
-                "Rows show the shared-$\\xi$ application tau grid "
+                "Application-side UniBM design-life-level summary across the curated four-case "
+                "manuscript subset. Rows show the shared-$\\xi$ application tau grid "
                 "(`tau = 0.50, 0.90, 0.95, 0.99`) obtained by evaluating the fitted block-maximum "
-                "quantile scaling law at 1-, 10-, and 50-year design-life spans. The `tau = 0.50` row is the "
-                "headline median design-life level, while higher-tau rows are increasingly conservative "
-                "upper design-life levels derived by reusing the same plateau and slope with tau-specific "
-                "intercept shifts. Streamflow rows are on the calendar-day basis, while NFIP rows are "
-                "on the claim-active-day basis."
+                "quantile scaling law at 1-, 10-, and 50-year design-life spans. The `tau = 0.50` "
+                "row is the headline median design-life level, while higher-tau rows are "
+                "increasingly conservative upper design-life levels derived by reusing the same "
+                "plateau and slope with tau-specific intercept shifts. Streamflow rows are on the "
+                "calendar-day basis, while NFIP rows are on the claim-active-day basis."
             ),
             label="tab:application-design-life-levels-main",
         )
@@ -1626,7 +2008,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     status("application", "writing application LaTeX EI comparison table")
     (table_dir / "application_ei_main.tex").write_text(
         render_latex_table(
-            application_ei_table(bundles),
+            application_ei_table(manuscript_bundles),
             caption=(
                 "Application-side extremal-index summary for the formal EI applications only. "
                 "Cells report the BB-sliding-FGLS and Northrop-sliding-FGLS pooled-BM estimates "
@@ -1635,6 +2017,37 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "two pooled-BM paths."
             ),
             label="tab:application-ei-main",
+        )
+    )
+    status("application", "writing application appendix audit table")
+    (table_dir / "application_case_audit_main.tex").write_text(
+        _render_wrapped_latex_table(
+            application_case_audit_table(bundles),
+            caption=(
+                "Appendix audit table for the curated four-case manuscript subset. Columns record "
+                "the observation clock, approximate record span, preprocessing summary, what is "
+                "and is not normalized, and the main stationarity caveat carried into the "
+                "applications discussion."
+            ),
+            label="tab:application-case-audit-main",
+            alignments=(
+                "p{0.13\\textwidth}p{0.18\\textwidth}p{0.10\\textwidth}"
+                "p{0.18\\textwidth}p{0.18\\textwidth}p{0.16\\textwidth}"
+            ),
+        )
+    )
+    status("application", "writing application appendix selection-sensitivity table")
+    (table_dir / "application_selection_sensitivity_main.tex").write_text(
+        render_latex_table(
+            application_selection_sensitivity_table(bundles),
+            caption=(
+                "Appendix local selection-sensitivity summary for the curated four-case manuscript "
+                "subset. Each cell reports the headline estimate together with the min--max range "
+                "over the top three scoring EVI plateau windows or EI stable windows for the same "
+                "application. This is a bounded robustness check rather than full post-selection "
+                "inference."
+            ),
+            label="tab:application-selection-sensitivity-main",
         )
     )
     return {
@@ -1650,14 +2063,20 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_design_life_levels_main": table_dir
         / "application_design_life_levels_main.tex",
         "application_ei_main": table_dir / "application_ei_main.tex",
+        "application_case_audit_main": table_dir / "application_case_audit_main.tex",
+        "application_selection_sensitivity_main": (
+            table_dir / "application_selection_sensitivity_main.tex"
+        ),
     }
 
 
 __all__ = [
     "application_ei_table",
     "application_ei_method_rows",
+    "application_case_audit_table",
     "application_method_rows",
     "application_design_life_level_table",
+    "application_selection_sensitivity_table",
     "application_summary_record",
     "application_summary_table",
     "build_application_outputs",

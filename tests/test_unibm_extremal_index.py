@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from scripts.unibm.extremal_index import (
     EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    EiPreparedBundle,
     ThresholdCandidate,
     _bb_wald_fit,
     _build_bm_estimate,
@@ -60,14 +62,28 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         lo, hi = _central_wald_interval(0.6, 0.1, bounded_unit_interval=True)
         self.assertGreaterEqual(lo, 0.0)
         self.assertLessEqual(hi, 1.0)
+        raw_lo, raw_hi = _central_wald_interval(0.6, 0.1)
+        self.assertLess(raw_lo, 0.6)
+        self.assertGreater(raw_hi, 0.6)
         theta_lo, theta_hi = _log_scale_theta_interval(np.log(2.0), 0.1)
         self.assertGreater(theta_hi, theta_lo)
+        invalid_theta_interval = _log_scale_theta_interval(np.nan, 0.1)
+        self.assertTrue(np.isnan(invalid_theta_interval[0]))
         self.assertTrue(_intervals_overlap((0.1, 0.4), (0.3, 0.8)))
         self.assertFalse(_intervals_overlap((0.1, 0.2), (0.3, 0.4)))
+        self.assertFalse(_intervals_overlap((np.nan, 0.2), (0.3, 0.4)))
 
         preferred = ThresholdCandidate(0.9, 1.0, 0.4, (0.3, 0.5), 0.1, "wald", "default")
         alternative = ThresholdCandidate(0.95, 2.0, 0.7, (0.35, 0.9), 0.2, "wald", "default")
         self.assertIs(_select_between_candidates(preferred, alternative), preferred)
+        invalid_preferred = ThresholdCandidate(
+            0.9, 1.0, np.nan, (np.nan, np.nan), np.nan, "wald", "default"
+        )
+        invalid_alternative = ThresholdCandidate(
+            0.95, 2.0, np.nan, (np.nan, np.nan), np.nan, "wald", "default"
+        )
+        self.assertIs(_select_between_candidates(invalid_preferred, alternative), alternative)
+        self.assertIs(_select_between_candidates(preferred, invalid_alternative), preferred)
 
     def test_profile_likelihood_helpers(self) -> None:
         def loglik(theta: float) -> float:
@@ -84,6 +100,28 @@ class UniBmExtremalIndexTests(unittest.TestCase):
             scale_1d_pseudo_likelihood(loglik, mle=0.4, hessian=0.0, empirical_variance=1.0)
         with self.assertRaisesRegex(ValueError, "strictly positive"):
             scale_1d_pseudo_likelihood(loglik, mle=0.4, hessian=-1.0, empirical_variance=0.0)
+
+        flat_interval = find_1d_profile_likelihood_intervals(
+            lambda theta: 0.0,
+            mle=0.4,
+            lower_bound_search=0.1,
+            upper_bound_search=0.9,
+        )
+        self.assertEqual(flat_interval, (0.1, 0.9))
+
+        def edge_raising_loglik(theta: float) -> float:
+            if np.isclose(theta, 0.1) or np.isclose(theta, 0.9):
+                raise OverflowError("edge")
+            return -50.0 * (theta - 0.4) ** 2
+
+        edge_interval = find_1d_profile_likelihood_intervals(
+            edge_raising_loglik,
+            mle=0.4,
+            lower_bound_search=0.1,
+            upper_bound_search=0.9,
+        )
+        self.assertLess(edge_interval[0], 0.4)
+        self.assertGreater(edge_interval[1], 0.4)
 
     def test_series_filters_and_window_minima(self) -> None:
         positive = _finite_positive_series(np.arange(1.0, 40.0, dtype=float))
@@ -189,6 +227,7 @@ class UniBmExtremalIndexTests(unittest.TestCase):
             sliding=True,
             regression="FGLS",
             bootstrap_result=bootstrap_result,
+            covariance_shrinkage=1.0,
         )
         self.assertTrue(np.isfinite(pooled.theta_hat))
         native_bb = estimate_native_bm_ei(bundle, base_path="bb", sliding=True)
@@ -225,13 +264,38 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         times_large = np.array([3.0, 4.0, 2.0, 5.0], dtype=float)
         self.assertTrue(np.isfinite(_ferro_segers_from_times(times_small)[0]))
         self.assertTrue(np.isfinite(_ferro_segers_from_times(times_large)[0]))
+        self.assertEqual(_inter_exceedance_times(np.array([5], dtype=int)).size, 0)
         np.testing.assert_allclose(
             _inter_exceedance_times(np.array([1, 4, 10], dtype=int)), np.array([3.0, 6.0])
         )
+        with self.assertRaisesRegex(ValueError, "at least two inter-exceedance times"):
+            _ferro_segers_from_times(np.array([1.0], dtype=float))
 
         candidate = _kgaps_profile_fit(np.array([2.0, 4.0, 3.0]), run_k=1, exceedance_rate=0.1)
         self.assertTrue(np.isfinite(candidate.theta_hat))
         self.assertEqual(candidate.run_k, 1)
+        with self.assertRaisesRegex(ValueError, "at least two finite gap observations"):
+            _kgaps_profile_fit(np.array([2.0]), run_k=1, exceedance_rate=0.1)
+
+        invalid_theta_checks: list[float] = []
+
+        def fake_interval(loglik_func, mle, lower_bound_search, upper_bound_search, *, alpha):
+            invalid_theta_checks.extend(
+                [float(loglik_func(0.0)), float(loglik_func(1.0)), float(loglik_func(0.5))]
+            )
+            return (0.2, 0.4)
+
+        with patch(
+            "scripts.unibm.extremal_index._threshold.find_1d_profile_likelihood_intervals",
+            side_effect=fake_interval,
+        ):
+            zero_gap_candidate = _kgaps_profile_fit(
+                np.array([1.0, 1.0, 1.0]),
+                run_k=5,
+                exceedance_rate=0.1,
+            )
+        self.assertEqual(invalid_theta_checks[:2], [-np.inf, -np.inf])
+        self.assertTrue(np.isfinite(zero_gap_candidate.theta_hat))
 
         bundle = prepare_ei_bundle(
             self._positive_sample(seed=707), block_sizes=np.array([4, 8, 16, 32], dtype=int)
@@ -240,6 +304,38 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         kgaps = estimate_k_gaps(bundle)
         self.assertTrue(np.isfinite(ferro.theta_hat))
         self.assertTrue(np.isfinite(kgaps.theta_hat))
+
+        sparse_bundle = EiPreparedBundle(
+            values=np.linspace(1.0, 50.0, 50),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            paths={},
+            threshold_candidates={
+                0.9: np.array([1, 4], dtype=int),
+                0.95: np.array([10, 15], dtype=int),
+            },
+        )
+        with self.assertRaisesRegex(
+            ValueError, "could not find a threshold with enough exceedances"
+        ):
+            estimate_ferro_segers(sparse_bundle)
+        with self.assertRaisesRegex(
+            ValueError, "could not find a threshold with enough exceedances"
+        ):
+            estimate_k_gaps(sparse_bundle)
+
+        mixed_bundle = EiPreparedBundle(
+            values=np.linspace(1.0, 100.0, 100),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            paths={},
+            threshold_candidates={
+                0.9: np.array([1, 4], dtype=int),
+                0.95: np.array([10, 20, 35, 60], dtype=int),
+            },
+        )
+        ferro_mixed = estimate_ferro_segers(mixed_bundle)
+        kgaps_mixed = estimate_k_gaps(mixed_bundle)
+        self.assertEqual(ferro_mixed.selected_threshold_quantile, 0.95)
+        self.assertEqual(kgaps_mixed.selected_threshold_quantile, 0.95)
 
 
 if __name__ == "__main__":

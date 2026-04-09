@@ -50,14 +50,16 @@ UNIVERSAL_XI_VALUES = (0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0)
 UNIVERSAL_THETA_VALUES = (0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0)
 EVI_DEFAULT_THETA_VALUES = (0.01, 0.10, 0.50, 1.0)
 EI_DEFAULT_XI_VALUES = (0.01, 0.50, 1.0, 5.0)
+MOVING_MAXIMA_Q = 99
+MOVING_MAXIMA_FAMILY = f"moving_maxima_q{MOVING_MAXIMA_Q}"
 UNIVERSAL_FAMILIES = (
     "frechet_max_ar",
-    "moving_maxima_q9",
+    MOVING_MAXIMA_FAMILY,
     "pareto_additive_ar1",
 )
 EVI_DEFAULT_FAMILIES = (
     "frechet_max_ar",
-    "moving_maxima_q99",
+    MOVING_MAXIMA_FAMILY,
     "pareto_additive_ar1",
 )
 EI_DEFAULT_FAMILIES = UNIVERSAL_FAMILIES
@@ -154,19 +156,16 @@ REGRESSION_MARKERS = {
 }
 FAMILY_LABELS = {
     "frechet_max_ar": "Frechet max-AR",
-    "moving_maxima_q2": "Moving Maxima (q=2)",
-    "moving_maxima_q9": "Moving Maxima (q=9)",
-    "moving_maxima_q99": "Moving Maxima (q=99)",
+    MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
     "pareto_additive_ar1": "Pareto additive AR1",
 }
 FAMILY_ORDER = (
     "frechet_max_ar",
-    "moving_maxima_q9",
-    "moving_maxima_q99",
+    MOVING_MAXIMA_FAMILY,
     "pareto_additive_ar1",
 )
 BENCHMARK_SET_LABELS = {
-    UNIVERSAL_BENCHMARK_SET: "Universal grid",
+    UNIVERSAL_BENCHMARK_SET: "Projected short-record suite",
 }
 CORE_METHODS = (
     "disjoint_mean_ols",
@@ -219,7 +218,12 @@ def parse_moving_maxima_q(family: str) -> int | None:
     match = MOVING_MAXIMA_FAMILY_PATTERN.fullmatch(str(family))
     if match is None:
         return None
-    return int(match.group("q"))
+    q = int(match.group("q"))
+    if q != MOVING_MAXIMA_Q:
+        raise ValueError(
+            f"Only {MOVING_MAXIMA_FAMILY} is supported in the benchmark design, got {family!r}."
+        )
+    return q
 
 
 def family_label(family: str) -> str:
@@ -429,7 +433,7 @@ def simulate_moving_maxima_series(
     n_obs: int,
     rng: np.random.Generator,
     *,
-    q: int = 2,
+    q: int = MOVING_MAXIMA_Q,
     burn_in: int = SIMULATION_BURN_IN,
 ) -> np.ndarray:
     """Simulate a moving maxima process of order q."""
@@ -439,20 +443,6 @@ def simulate_moving_maxima_series(
     reversed_weights = weights[::-1]
     series = np.max(windows * reversed_weights, axis=-1)
     return series[burn_in : burn_in + n_obs]
-
-
-def simulate_moving_maxima_q2_series(
-    xi: float,
-    phi: float,
-    n_obs: int,
-    rng: np.random.Generator,
-    *,
-    burn_in: int = SIMULATION_BURN_IN,
-) -> np.ndarray:
-    """Simulate a moving maxima process of order 2."""
-    return simulate_moving_maxima_series(
-        xi=xi, phi=phi, n_obs=n_obs, rng=rng, q=2, burn_in=burn_in
-    )
 
 
 def simulate_pareto_additive_ar1_series(
@@ -604,7 +594,7 @@ def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:
         joined = ", ".join(unsupported_legacy)
         raise TypeError(
             "default_simulation_configs no longer accepts "
-            f"{joined}. The benchmark now uses one universal (xi_true, theta_true) grid. "
+            f"{joined}. The benchmark now uses projected branch-specific short-record suites. "
             "Use default_evi_simulation_configs(xi_values=..., theta_values=...) or "
             "default_ei_simulation_configs(xi_values=..., theta_values=...)."
         )
