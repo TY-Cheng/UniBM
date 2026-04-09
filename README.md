@@ -5,13 +5,14 @@ serial dependence, with benchmark and application workflows for both the
 extreme value index (`xi`) and the extremal index (`theta`).
 
 The main methodological selling point is not the term *design-life level* by
-itself, but the unified UniBM workflow that starts from dependent block-maxima
-quantile scaling and then carries the same fitted law through to:
+itself, but the paired UniBM workflow that starts from dependent block-maxima
+quantile scaling and then reports:
 
-- `xi` estimation on short records;
-- `theta` estimation for clustering and episode persistence;
-- decision-facing **design-life levels**, i.e. `T`-year block-maximum
-  `tau`-quantiles on the original physical scale.
+- one **severity branch** for `xi` estimation on short records;
+- one **persistence branch** for `theta` estimation for clustering and episode
+  persistence;
+- one decision-facing **design-life** output derived from the severity branch,
+  i.e. `T`-year block-maximum `tau`-quantiles on the original physical scale.
 
 ## Quick Start
 
@@ -23,7 +24,8 @@ just full
 uvx ruff format ./**/*.py ./**/*.ipynb
 ```
 
-This covers:
+This is the standard **code-repo full rebuild**, not the manuscript-snapshot
+build. It covers:
 
 - benchmark rebuilds;
 - benchmark report generation;
@@ -32,16 +34,20 @@ This covers:
 - unit tests, `scripts/unibm` coverage, and `ruff check`;
 - Sphinx docs build for the reusable statistical core.
 
+If you also want to refresh the sibling manuscript repo's paper-facing
+`Figure/`, `Table/`, and LaTeX build, run `just manuscript` separately.
+
 If you only want the scientific outputs and not the QA/docs pass, use:
 
 ```bash
 uv sync --dev
 just rebuild
+just manuscript
 ```
 
 Optional: install [`just`](https://github.com/casey/just) if you want short
 task aliases. Without `just`, all commands below can still be run directly with
-`uv run python ...` and `uv run jupytext ...`.
+`uv run python ...` and `uv run python -m jupytext ...`.
 
 ## Setup
 
@@ -52,7 +58,8 @@ task aliases. Without `just`, all commands below can still be run directly with
 cp .env.example .env
 ```
 
-3. Edit `.env` and set `DIR_WORK` to your local clone path.
+3. Edit `.env` and set `DIR_WORK` to your local code-repo clone path.
+   If the manuscript lives in a separate repo, also set `DIR_MANUSCRIPT`.
 4. Sync the environment:
 
 ```bash
@@ -68,18 +75,21 @@ just full
 just rebuild
 just benchmark
 just application
+just manuscript
 just qa
 just docs
 just vignette-execute
 just clean-generated
 ```
 
-`just full` expands to `clean-generated + sync + rebuild + qa + docs`.
+`just full` expands to `clean-generated + sync + rebuild + qa + docs` for the
+code repo. It does **not** include the separate manuscript-snapshot build.
 The five commands you mainly need to remember are:
 
-- `just full`: everything
+- `just full`: code-repo full rebuild + QA + docs
 - `just benchmark`: benchmark rebuild + benchmark reports
 - `just application`: USGS freeze + application rebuild
+- `just manuscript`: materialize the paper-facing figure/table subset and compile the LaTeX manuscript
 - `just qa`: tests + coverage + lint
 - `just docs`: Sphinx docs
 
@@ -97,12 +107,13 @@ Examples with explicit overrides:
 just rebuild 8 40
 just application 6 40
 just benchmark 8
+just manuscript 6 40
 just freeze-usgs 40
 ```
 
 ## Canonical Rebuild Order
 
-Your standard full workflow is:
+Your standard code-repo full workflow is:
 
 ```bash
 uv sync --dev
@@ -110,8 +121,8 @@ just full
 uvx ruff format ./**/*.py ./**/*.ipynb
 ```
 
-If you prefer the raw commands instead of `just`, the workflow behind `just full`
-plus the final formatting pass is:
+If you prefer the raw commands instead of `just`, the workflow behind
+`just full` plus the final formatting pass is:
 
 ```bash
 uv sync --dev
@@ -125,7 +136,7 @@ uv run python scripts/benchmark/ei_report.py
 UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/application/freeze_usgs.py
 UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 
-uv run jupytext --sync notebooks/vignette.py
+uv run python -m jupytext --sync notebooks/vignette.py
 uv run python -m unittest discover -s tests -p 'test_*.py'
 uv run coverage run -m unittest discover -s tests -p 'test_*.py'
 uv run coverage report -m
@@ -149,8 +160,8 @@ Notes:
   profiling/diagnostics and not required for benchmark, application, vignette,
   or docs outputs.
 - `just clean-generated` removes generated outputs under `out/` while preserving
-  `out/benchmark/cache`, and also removes `UniBM_manuscript/Figure` plus
-  `UniBM_manuscript/Table`. Use it when you want a cold rebuild of all rendered
+  `out/benchmark/cache`, and also removes the manuscript repo's `Figure/` plus
+  `Table/` directories. Use it when you want a cold rebuild of all rendered
   artifacts without deleting the benchmark cache.
 
 ## Workflow-Specific Commands
@@ -182,7 +193,7 @@ UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/application/freeze_usgs.
 UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 ```
 
-The current `SERRA`-oriented application package uses six application-facing
+The current manuscript-facing application package uses six application-facing
 series across three environmental-risk layers:
 
 - Houston wet-season precipitation as a secondary EVI-only weather case;
@@ -266,14 +277,17 @@ Interpreting the streamflow/NFIP application diagnostics:
 - for NFIP, active-day design-life levels and calendar-day EI estimates are
   kept separate on purpose because they live on different clocks.
 
-Manuscript-facing application tables are written to `UniBM_manuscript/Table/`:
+Manuscript-facing application tables are written to the manuscript repo's
+`Table/` directory (typically `../UniBM_manuscript/Table/`):
 
 - `application_summary_main.tex`
 - `application_design_life_levels_main.tex`
 - `application_ei_main.tex`
+- `application_case_audit_main.tex`
+- `application_selection_sensitivity_main.tex`
 
-Manuscript-facing application figures are written to
-`UniBM_manuscript/Figure/`, including:
+Manuscript-facing application figures are written to the manuscript repo's
+`Figure/` directory (typically `../UniBM_manuscript/Figure/`), including:
 
 - `application_ts_<stem>.pdf`
 - `application_evi_<stem>.pdf`
@@ -282,6 +296,12 @@ Manuscript-facing application figures are written to
 - `application_design_life_<stem>.pdf`
 - `application_composite_<stem>.pdf`
 - `application_overview.pdf`
+
+The submission-facing manuscript subset is intentionally narrower than the full
+application workflow. The dedicated `just manuscript` target rebuilds the
+benchmark/application report artifacts, writes the manuscript repo's
+`paper_subset_manifest.json` (typically `../UniBM_manuscript/paper_subset_manifest.json`),
+and then compiles the LaTeX paper against that curated figure/table subset.
 
 The composite figure is now the default notebook-facing visual. For streamflow
 and NFIP it combines target stability, the headline median-sliding-FGLS scaling
@@ -306,7 +326,7 @@ Sync the notebook artifact from the Jupytext source of truth:
 ```bash
 just vignette
 # or
-uv run jupytext --sync notebooks/vignette.py
+uv run python -m jupytext --sync notebooks/vignette.py
 ```
 
 Execute the paired notebook in place when you want rendered outputs refreshed:
@@ -314,7 +334,7 @@ Execute the paired notebook in place when you want rendered outputs refreshed:
 ```bash
 just vignette-execute
 # or
-uv run --with nbconvert --with ipykernel jupyter-nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
+uv run --with nbconvert --with ipykernel python -m nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
 ```
 
 The old generator entrypoint
@@ -444,5 +464,5 @@ comparisons for:
   deflator table used by the NFIP workflow.
 - `docs/` contains Sphinx docs for the reusable statistical layer.
 - `notebooks/vignette.py` is the Jupytext source of truth for the research
-  notebook, and `uv run jupytext --sync notebooks/vignette.py` regenerates the
+  notebook, and `uv run python -m jupytext --sync notebooks/vignette.py` regenerates the
   paired `notebooks/vignette.ipynb`.

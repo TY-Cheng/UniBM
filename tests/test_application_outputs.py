@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,9 +31,11 @@ from application.outputs import (
     _draw_ei_ax,
     _draw_design_life_levels_ax,
     _seasonal_adjusted_ei_method_rows,
+    application_case_audit_table,
     application_ei_method_rows,
     application_design_life_level_table,
     application_method_rows,
+    application_selection_sensitivity_table,
     seasonal_monthly_pit_unit_frechet,
     write_application_figures,
 )
@@ -214,6 +217,60 @@ class ApplicationOutputTests(unittest.TestCase):
         bundle = _make_evi_only_bundle()
 
         self.assertEqual(_seasonal_adjusted_ei_method_rows(bundle), [])
+
+    def test_application_case_audit_table_tracks_curated_subset(self) -> None:
+        base_stream_bundle = _make_standard_bundle()
+        stream_bundle = replace(
+            base_stream_bundle,
+            spec=replace(base_stream_bundle.spec, key="tx_streamflow", label="Texas streamflow"),
+        )
+        base_nfip_bundle = _make_nfip_bundle()
+        nfip_bundle = replace(
+            base_nfip_bundle,
+            spec=replace(base_nfip_bundle.spec, key="tx_nfip_claims", label="Texas NFIP claims"),
+        )
+
+        table = application_case_audit_table([nfip_bundle, stream_bundle])
+
+        self.assertEqual(
+            table.columns.tolist(),
+            [
+                "Application",
+                "Observation clock",
+                "Record span",
+                "Preprocessing",
+                "Normalization",
+                "Stationarity caveat",
+            ],
+        )
+        self.assertEqual(table["Application"].tolist(), ["Texas streamflow", "Texas NFIP claims"])
+        self.assertIn("calendar-day", table.iloc[0]["Observation clock"])
+        self.assertIn("not exposure-normalized portfolio risk", table.iloc[1]["Normalization"])
+
+    def test_application_selection_sensitivity_table_formats_headline_ranges(self) -> None:
+        base_nfip_bundle = _make_nfip_bundle()
+        nfip_bundle = replace(
+            base_nfip_bundle,
+            spec=replace(base_nfip_bundle.spec, key="tx_nfip_claims", label="Texas NFIP claims"),
+        )
+        fake_ei_variants = [(nfip_bundle.ei_bb_sliding_fgls, 0.1)] * 3
+        with (
+            mock.patch(
+                "application.outputs._fit_evi_window_variants",
+                return_value=[nfip_bundle.evi_fit, nfip_bundle.evi_fit, nfip_bundle.evi_fit],
+            ),
+            mock.patch(
+                "application.outputs._fit_ei_window_variants",
+                return_value=fake_ei_variants,
+            ),
+        ):
+            table = application_selection_sensitivity_table([nfip_bundle])
+
+        self.assertEqual(table.shape[0], 1)
+        self.assertEqual(table.iloc[0]["Application"], "Texas NFIP claims")
+        self.assertIn("[", table.iloc[0]["$\\xi$ headline [range]"])
+        self.assertIn("[", table.iloc[0]["$\\theta$ headline [range]"])
+        self.assertIn("10y median DLL", table.columns.tolist()[3])
 
     def test_tau_scaling_views_for_fit(self) -> None:
         bundle = _make_standard_bundle()

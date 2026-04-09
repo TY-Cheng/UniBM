@@ -1,4 +1,4 @@
-"""Default application metadata assets for the SERRA-facing workflow."""
+"""Default application metadata assets for the manuscript-facing workflow."""
 
 from __future__ import annotations
 
