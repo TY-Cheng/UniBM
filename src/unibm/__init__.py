@@ -5,6 +5,7 @@ screening, and manuscript orchestration code lives under `scripts/benchmark`,
 `scripts/application`, `scripts/shared`, and `scripts/notebook_api`.
 """
 
+from .__about__ import __version__
 from .bootstrap import (
     BlockSummaryBootstrapBackbone,
     CircularBootstrapSampleBank,
@@ -52,6 +53,7 @@ __all__ = [
     "ScalingFit",
     "SelectionWindow",
     "ThresholdWindow",
+    "__version__",
     "block_maxima",
     "block_summary_curve",
     "build_block_summary_bootstrap_backbone",

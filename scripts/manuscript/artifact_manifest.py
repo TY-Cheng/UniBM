@@ -125,16 +125,12 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             ],
             root=workspace_root,
         ),
-        _figure_entry(
-            label="fig:design-life-main",
-            placement="main",
-            generated_by="scripts/application/build.py",
-            paths=[
-                figure_dir / "application_design_life_tx_streamflow.pdf",
-                figure_dir / "application_design_life_fl_streamflow.pdf",
-                figure_dir / "application_design_life_tx_nfip_claims.pdf",
-                figure_dir / "application_design_life_fl_nfip_claims.pdf",
-            ],
+        _table_entry(
+            label="tab:application-case-context-main",
+            placement="main-supporting",
+            generated_by="manuscript source",
+            path=manuscript_dir / "Snippet" / "application_case_context_main.tex",
+            note="Compact main-text context table for the curated four-case subset.",
             root=workspace_root,
         ),
         _table_entry(

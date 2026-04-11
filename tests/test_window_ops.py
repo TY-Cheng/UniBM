@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from scripts.unibm.window_ops import (
+from unibm.window_ops import (
     circular_sliding_window_maximum,
     sliding_window_extreme_valid,
 )

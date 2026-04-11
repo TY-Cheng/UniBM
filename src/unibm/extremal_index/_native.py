@@ -247,7 +247,39 @@ def estimate_native_bm_ei(
     sliding: bool,
     use_adjusted_chandwich: bool = False,
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` with a native single-block-size BM estimator."""
+    """Estimate ``theta`` with a native single-block-size BM estimator.
+
+    Parameters
+    ----------
+    bundle
+        Prepared observed-data bundle returned by
+        :func:`unibm.extremal_index.prepare_ei_bundle`.
+    base_path
+        BM path family to use. ``"northrop"`` applies the Northrop
+        pseudo-likelihood on the selected block size; ``"bb"`` applies the BB
+        fixed-``b`` Wald fit.
+    sliding
+        If ``True``, use the sliding-block path prepared in ``bundle``.
+        Otherwise use the disjoint-block path.
+    use_adjusted_chandwich
+        If ``True`` and ``base_path="northrop"``, use the Chandler-Bate
+        scale-adjusted profile likelihood when building the confidence interval.
+        This flag has no effect for ``base_path="bb"``.
+
+    Returns
+    -------
+    unibm.extremal_index.ExtremalIndexEstimate
+        Native fixed-``b`` EI estimate. The headline fields are ``theta_hat``,
+        ``confidence_interval``, ``selected_level``, and ``stable_window``.
+        ``path_level`` and ``path_theta`` are included only as supporting path
+        diagnostics.
+
+    Notes
+    -----
+    This native fit uses one selected block size from the observed BM path. If
+    you want to pool several stable block sizes together instead, use
+    :func:`estimate_pooled_bm_ei`.
+    """
     path = bundle.paths[(base_path, sliding)]
     selected_level = path.selected_level
     statistics = path.sample_statistics[selected_level]
@@ -288,7 +320,48 @@ def estimate_pooled_bm_ei(
     bootstrap_result: dict[str, np.ndarray | None] | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` by pooling a BM reciprocal-EI path over a stable window."""
+    """Estimate ``theta`` by pooling an observed BM path over a stable window.
+
+    Parameters
+    ----------
+    bundle
+        Prepared observed-data bundle returned by
+        :func:`unibm.extremal_index.prepare_ei_bundle`.
+    base_path
+        BM path family to pool. ``"northrop"`` uses the
+        ``-log(Fhat(X_t))``-based path and ``"bb"`` uses the ``1 - Fhat(X_t)``
+        path.
+    sliding
+        If ``True``, pool the sliding-block path prepared in ``bundle``.
+        Otherwise pool the disjoint-block path.
+    regression
+        Pooling rule on the transformed stable-window path. Use ``"OLS"`` to
+        ignore cross-block covariance and ``"FGLS"`` to use a covariance matrix
+        estimated from bootstrap path draws.
+    bootstrap_result
+        Optional bootstrap output aligned to the same stable block-size levels.
+        When supplied with ``regression="FGLS"``, its covariance matrix is used
+        for the FGLS fit. The observed path itself is still the quantity being
+        pooled; bootstrap draws only provide covariance information.
+    covariance_shrinkage
+        Diagonal shrinkage applied when regularizing the bootstrap covariance
+        before FGLS fitting.
+
+    Returns
+    -------
+    unibm.extremal_index.ExtremalIndexEstimate
+        Pooled formal EI estimate. The headline fields are ``theta_hat``,
+        ``confidence_interval``, ``stable_window``, ``regression``, and
+        ``base_path``. ``path_level`` and ``path_theta`` remain available for
+        diagnostic inspection of the observed path.
+
+    Notes
+    -----
+    Pooling is performed on the observed transformed path inside the selected
+    stable window. Bootstrap paths do not replace that observed path; they are
+    used only to estimate the cross-block covariance needed by the FGLS
+    weighting step.
+    """
     path = bundle.paths[(base_path, sliding)]
     method = f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}"
     return _build_bm_estimate(

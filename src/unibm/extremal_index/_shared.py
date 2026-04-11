@@ -91,7 +91,14 @@ class EiStableWindow:
 
 @dataclass(frozen=True)
 class EiPathBundle:
-    """Shared block-size path ingredients for one BM-EI base estimator."""
+    """Observed BM-EI path ingredients for one base-path and block scheme.
+
+    ``theta_path`` and ``z_path`` are computed from the observed series over the
+    candidate block-size grid. ``stable_window`` and ``selected_level`` record
+    where that observed path is judged stable, while ``sample_statistics``
+    preserves the per-block-size window statistics reused by native fixed-``b``
+    estimators.
+    """
 
     base_path: str
     sliding: bool
@@ -107,7 +114,14 @@ class EiPathBundle:
 
 @dataclass(frozen=True)
 class ExtremalIndexEstimate:
-    """Unified extremal-index benchmark result container."""
+    """Unified formal-EI result container.
+
+    Most users should read ``theta_hat`` and ``confidence_interval`` first, then
+    inspect ``stable_window``, ``regression``, and ``base_path`` to understand
+    which formal estimator produced the headline result. ``path_level``,
+    ``path_theta``, and ``path_eir`` are retained for path diagnostics and
+    plotting rather than for headline reporting.
+    """
 
     method: str
     theta_hat: float
@@ -145,7 +159,13 @@ class ThresholdCandidate:
 
 @dataclass(frozen=True)
 class EiPreparedBundle:
-    """All per-replicate ingredients reused across EI methods."""
+    """Reusable EI preparation outputs derived from one observed series.
+
+    The bundle stores the cleaned observed values, the candidate block-size
+    grid, all BM path variants, and threshold-side exceedance candidates so the
+    native BM, pooled BM, and threshold estimators can all reuse the same
+    preparation step.
+    """
 
     values: np.ndarray
     block_sizes: np.ndarray

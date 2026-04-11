@@ -5,9 +5,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts.unibm.extremal_index import (
+from unibm.extremal_index import (
     EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    EiPathBundle,
     EiPreparedBundle,
+    EiStableWindow,
     ThresholdCandidate,
     _bb_wald_fit,
     _build_bm_estimate,
@@ -143,6 +145,7 @@ class UniBmExtremalIndexTests(unittest.TestCase):
             _rolling_window_minima(scores, 2, sliding=False), np.array([2.0, 3.0])
         )
         self.assertEqual(_rolling_window_minima(scores, 10, sliding=True).size, 0)
+        self.assertEqual(_rolling_window_minima(scores, 1, sliding=False).size, 0)
 
     def test_path_builders_and_stable_window_selection(self) -> None:
         block_sizes = np.array([4, 8, 16, 32], dtype=int)
@@ -150,6 +153,14 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         window, mask = _select_stable_ei_window(block_sizes, z_path, min_points=3)
         self.assertLessEqual(window.lo, window.hi)
         self.assertGreater(mask.sum(), 0)
+        fallback_window, fallback_mask = _select_stable_ei_window(
+            block_sizes,
+            z_path,
+            min_points=4,
+            trim_fraction=0.4,
+        )
+        self.assertLessEqual(fallback_window.lo, fallback_window.hi)
+        self.assertEqual(fallback_mask.sum(), 4)
         with self.assertRaisesRegex(ValueError, "Not enough finite EI path values"):
             _select_stable_ei_window(block_sizes[:2], np.array([np.nan, 0.1]), min_points=3)
 
@@ -158,12 +169,41 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         self.assertEqual(
             set(paths), {("northrop", True), ("northrop", False), ("bb", True), ("bb", False)}
         )
+        path_with_gap = _build_path_from_scores(
+            "bb",
+            np.linspace(0.1, 0.9, sample.size),
+            np.array([4, 8, 16, 32, sample.size + 1], dtype=int),
+            sliding=True,
+        )
+        self.assertEqual(path_with_gap.sample_counts[-1], 0)
+        self.assertTrue(np.isnan(path_with_gap.theta_path[-1]))
         path = _build_path_from_scores(
             "bb", np.linspace(0.1, 0.9, sample.size), block_sizes, sliding=True
         )
         levels, z_values = extract_stable_path_window(path)
         self.assertGreater(levels.size, 0)
         self.assertEqual(levels.shape, z_values.shape)
+        with self.assertRaisesRegex(ValueError, "Unknown BM EI base path"):
+            _build_path_from_scores(
+                "mystery",
+                np.linspace(0.1, 0.9, sample.size),
+                block_sizes,
+                sliding=True,
+            )
+        bad_path = EiPathBundle(
+            base_path=path.base_path,
+            sliding=path.sliding,
+            block_sizes=path.block_sizes,
+            theta_path=path.theta_path,
+            eir_path=path.eir_path,
+            z_path=path.z_path,
+            sample_counts=path.sample_counts,
+            sample_statistics=path.sample_statistics,
+            stable_window=EiStableWindow(999, 1001),
+            selected_level=path.selected_level,
+        )
+        with self.assertRaisesRegex(ValueError, "Stable EI window did not retain any finite"):
+            extract_stable_path_window(bad_path)
 
     def test_prepare_bundle_and_bootstrap_draws(self) -> None:
         values = self._zero_inflated_sample()
@@ -286,7 +326,7 @@ class UniBmExtremalIndexTests(unittest.TestCase):
             return (0.2, 0.4)
 
         with patch(
-            "scripts.unibm.extremal_index._threshold.find_1d_profile_likelihood_intervals",
+            "unibm.extremal_index._threshold.find_1d_profile_likelihood_intervals",
             side_effect=fake_interval,
         ):
             zero_gap_candidate = _kgaps_profile_fit(

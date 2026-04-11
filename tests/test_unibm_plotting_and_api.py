@@ -9,26 +9,26 @@ from unittest import mock
 import matplotlib.pyplot as plt
 import numpy as np
 
-import scripts.unibm as unibm
-from scripts.unibm.models import (
+import unibm
+from unibm.models import (
     BlockSummaryCurve,
     ExtremalIndexReciprocalFit,
     PlateauWindow,
     ScalingFit,
 )
-from scripts.unibm.plotting import (
+from unibm.plotting import (
     _resolved_file_path,
     _save_figure_outputs,
     _should_close_figure,
     plot_extremal_index_reciprocal,
     plot_scaling_fit,
 )
-from scripts.unibm._runtime import (
+from unibm._runtime import (
     _env_path_is_writable,
     _runtime_cache_suffix,
     prepare_matplotlib_env,
 )
-from scripts.unibm.window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
+from unibm.window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
 
 
 def _make_scaling_fit() -> ScalingFit:
@@ -81,7 +81,7 @@ def _make_ei_fit() -> ExtremalIndexReciprocalFit:
 class UniBmPlottingAndApiTests(unittest.TestCase):
     def test_runtime_helpers_and_window_ops_cover_remaining_branches(self) -> None:
         fake_os = types.SimpleNamespace(environ={"USERNAME": "alice"})
-        with mock.patch("scripts.unibm._runtime.os", fake_os):
+        with mock.patch("unibm._runtime.os", fake_os):
             self.assertEqual(_runtime_cache_suffix(), "alice")
 
         self.assertFalse(_env_path_is_writable(None))

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from scripts.unibm.external import (
+from unibm.external import (
     _dedh_moment_path,
     _finite_positive,
     _hill_path,

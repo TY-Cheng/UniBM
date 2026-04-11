@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from scripts.unibm.diagnostics import (
+from unibm.diagnostics import (
     _as_finite_1d,
     _kernel_bandwidth,
     _quantile_summary_label,

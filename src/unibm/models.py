@@ -52,7 +52,14 @@ class PlateauWindow:
 
 @dataclass(frozen=True)
 class ScalingFit:
-    """Full output of the log-log scaling regression."""
+    """Full output of a UniBM log-log block-summary regression.
+
+    Most users should start with ``slope`` as the headline ``xi`` estimate,
+    ``confidence_interval`` for uncertainty, ``plateau_bounds`` for the selected
+    regression window, and ``bootstrap`` for any covariance-aware fit metadata.
+    The remaining fields retain the full observed curve and fitted window for
+    plotting, diagnostics, and workflow-side reuse.
+    """
 
     target: str
     quantile: float

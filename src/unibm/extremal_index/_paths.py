@@ -174,7 +174,42 @@ def prepare_ei_bundle(
     threshold_quantiles: tuple[float, ...] = (0.90, 0.95),
     allow_zeros: bool = False,
 ) -> EiPreparedBundle:
-    """Build all reusable EI ingredients for one series."""
+    """Prepare the observed-data ingredients reused across formal EI estimators.
+
+    Parameters
+    ----------
+    vec
+        One-dimensional raw series. If ``allow_zeros`` is ``False``, the
+        function keeps only finite strictly positive values and requires at
+        least 32 such observations. If ``allow_zeros`` is ``True``, finite
+        non-negative values are accepted instead, which is useful for
+        calendar-day impact series such as zero-filled NFIP totals.
+    block_sizes
+        Optional explicit block-size grid. If omitted, the function constructs
+        one from :func:`unibm.core.generate_block_sizes` using the cleaned
+        observed sample size.
+    threshold_quantiles
+        Exceedance quantiles used to prepare threshold-side candidate events for
+        :func:`unibm.extremal_index.estimate_k_gaps` and
+        :func:`unibm.extremal_index.estimate_ferro_segers`.
+    allow_zeros
+        If ``True``, permit zero-valued observations in the cleaned EI series.
+        Leave this as ``False`` for positive-only severity series.
+
+    Returns
+    -------
+    unibm.extremal_index.EiPreparedBundle
+        Reusable bundle containing the cleaned observed values, BM path variants
+        over the candidate block-size grid, and threshold-side exceedance
+        candidates.
+
+    Notes
+    -----
+    The BM paths are built from the observed series itself: the function first
+    applies the full-sample empirical CDF, then constructs Northrop and BB
+    paths over the candidate block-size grid. Those observed paths are later
+    reused by both native fixed-``b`` estimators and pooled OLS/FGLS fits.
+    """
     values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
     if block_sizes is None:
         block_sizes = generate_block_sizes(values.size)

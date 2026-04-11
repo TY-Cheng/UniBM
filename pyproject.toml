@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "unibm"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Block-maxima inference methods for heavy-tailed time series under serial dependence."
 requires-python = ">=3.11"
 authors = [{ name = "Tuoyuan Cheng", email = "tuoyuan.cheng@nus.edu.sg" }]
@@ -33,20 +33,24 @@ dependencies = [
     "matplotlib>=3.8",
     "numpy>=2",
     "pandas>=2",
-    "python-dotenv",
     "scipy>=1.13",
 ]
 
 [project.urls]
-Repository = "https://github.com/TY-Cheng/UniBM"
+Homepage = "https://github.com/TY-Cheng/UniBM/"
+Repository = "https://github.com/TY-Cheng/UniBM/"
+Documentation = "https://github.com/TY-Cheng/UniBM/tree/main/docs"
+Issues = "https://github.com/TY-Cheng/UniBM/issues"
+Changelog = "https://github.com/TY-Cheng/UniBM/releases"
 
 [dependency-groups]
 dev = [
     "coverage",
+    "furo",
     "ipykernel",
     "jupytext",
-    "missingno",
-    "requests",
+    "nbconvert",
+    "python-dotenv",
     "ruff",
     "sphinx>=8",
 ]
@@ -54,27 +58,18 @@ dev = [
 [tool.hatch.build]
 exclude = ["/**/__pycache__", "/**/.DS_Store"]
 
+[tool.hatch.version]
+path = "src/unibm/__about__.py"
+
 [tool.hatch.build.targets.wheel]
-packages = ["scripts/unibm"]
+packages = ["src/unibm"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/.env.example",
-    "/justfile",
     "/LICENSE",
     "/README.md",
-    "/data/metadata/application",
-    "/docs",
-    "/notebooks",
     "/pyproject.toml",
-    "/scripts/application",
-    "/scripts/benchmark",
-    "/scripts/config.py",
-    "/scripts/data_prep",
-    "/scripts/shared",
-    "/scripts/unibm",
-    "/scripts/notebook_api",
-    "/tests",
+    "/src/unibm",
 ]
 
 [tool.uv]
@@ -114,7 +109,7 @@ skip-ignore = false
 
 [tool.coverage.run]
 branch = true
-source = ["scripts/unibm"]
+source = ["src/unibm"]
 
 [tool.coverage.report]
 show_missing = true
