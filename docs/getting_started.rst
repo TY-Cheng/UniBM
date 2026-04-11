@@ -1,18 +1,34 @@
 Getting Started
 ===============
 
-The reusable statistical package lives in ``scripts/unibm`` and is importable
-as ``unibm`` once the repository environment has been synced.
+The reusable statistical package lives in ``src/unibm`` and is importable
+as ``unibm`` once the repository environment has been synced. This site focuses
+on the reusable package layer, not on the full repo orchestration under
+``scripts/benchmark`` and ``scripts/application``.
 
-Install the development environment
------------------------------------
+Repo workflow
+-------------
 
 .. code-block:: bash
 
+   cp .env.example .env
+   just verify
+
+Top-level ``just`` tasks load ``.env`` automatically and sync the development
+environment before they run. If you prefer raw ``uv`` commands instead, load
+``.env`` into your shell first and then sync:
+
+.. code-block:: bash
+
+   set -a; source .env; set +a
    uv sync --dev
 
-Typical imports
----------------
+The repo-level workflow details still live in the repository ``README.md`` and
+``justfile``. Use this documentation site when you want the reusable
+``unibm`` package API itself.
+
+Package usage
+-------------
 
 .. code-block:: python
 
@@ -26,6 +42,18 @@ Typical imports
        years=np.array([10.0]),
        observations_per_year=365.25,
    )
+
+The shortest formal-EI package workflow is:
+
+.. code-block:: python
+
+   from unibm.extremal_index import prepare_ei_bundle, estimate_pooled_bm_ei
+
+   bundle = prepare_ei_bundle(sample)
+   ei_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
+
+For a quick guide to which returned fields matter most, see
+``Reading Returned Objects`` in the Guide navigation.
 
 Package boundaries
 ------------------

@@ -6,7 +6,7 @@ from unittest import mock
 
 import numpy as np
 
-from scripts.unibm.bootstrap import (
+from unibm.bootstrap import (
     BlockSummaryBootstrapBackbone,
     _disjoint_block_maxima,
     _segment_block_maxima,
@@ -19,7 +19,7 @@ from scripts.unibm.bootstrap import (
     draw_circular_block_bootstrap_samples,
     evaluate_block_summary_bootstrap_backbone,
 )
-from scripts.unibm.summaries import summarize_block_maxima
+from unibm.summaries import summarize_block_maxima
 
 
 class UniBmBootstrapTests(unittest.TestCase):
@@ -58,8 +58,19 @@ class UniBmBootstrapTests(unittest.TestCase):
             draw_circular_block_bootstrap_sample(
                 [np.nan, np.nan], block_size=2, rng=np.random.default_rng(1)
             )
+        with self.assertRaisesRegex(
+            ValueError, "Cannot bootstrap a series without any finite observations"
+        ):
+            draw_circular_block_bootstrap_samples([np.nan, np.nan], reps=1)
         with self.assertRaisesRegex(ValueError, "reps must be at least 1"):
             draw_circular_block_bootstrap_samples(self._positive_sample(), reps=0)
+        bank = draw_circular_block_bootstrap_samples(
+            self._positive_sample(size=32),
+            reps=2,
+            block_size=5,
+            random_state=7,
+        )
+        self.assertEqual(bank.block_size, 5)
 
     def test_sliding_disjoint_and_segment_block_maxima(self) -> None:
         segment = np.array([1.0, 3.0, 2.0, 5.0], dtype=float)
@@ -67,6 +78,7 @@ class UniBmBootstrapTests(unittest.TestCase):
             _sliding_block_maxima(segment, 2), np.array([3.0, 3.0, 5.0, 5.0])
         )
         np.testing.assert_allclose(_disjoint_block_maxima(segment, 2), np.array([3.0, 5.0]))
+        self.assertEqual(_disjoint_block_maxima(segment, 10).size, 0)
         np.testing.assert_allclose(
             _segment_block_maxima(segment, 2, sliding=True),
             _sliding_block_maxima(segment, 2),
@@ -146,7 +158,7 @@ class UniBmBootstrapTests(unittest.TestCase):
         )
         assert backbone is not None
 
-        with mock.patch("scripts.unibm.bootstrap.summarize_block_maxima") as mocked_summary:
+        with mock.patch("unibm.bootstrap.summarize_block_maxima") as mocked_summary:
             mocked_summary.return_value = 1.0
             evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target="mode")
 
@@ -172,6 +184,45 @@ class UniBmBootstrapTests(unittest.TestCase):
         self.assertTrue(
             any("non-positive bootstrap block summaries" in str(w.message) for w in caught)
         )
+
+    def test_backbone_none_and_invalid_target_paths(self) -> None:
+        sample = self._positive_sample(size=69, seed=222)
+        block_sizes = np.array([40], dtype=int)
+        self.assertIsNone(
+            build_block_summary_bootstrap_backbone(
+                sample,
+                block_sizes,
+                sliding=True,
+                reps=4,
+                super_block_size=60,
+                random_state=3,
+            )
+        )
+        empty_eval = evaluate_block_summary_bootstrap_backbone(None)
+        self.assertEqual(empty_eval["samples"].shape, (0, 0))
+        self.assertIsNone(empty_eval["covariance"])
+
+        backbone = build_block_summary_bootstrap_backbone(
+            self._positive_sample(size=256, seed=223),
+            np.array([4, 8], dtype=int),
+            sliding=True,
+            reps=4,
+            super_block_size=64,
+            random_state=8,
+        )
+        assert backbone is not None
+        with self.assertRaisesRegex(ValueError, "Unsupported target"):
+            evaluate_block_summary_bootstrap_backbone(backbone, target="median-ish")
+
+        empty_single = circular_block_summary_bootstrap(
+            sample,
+            block_sizes,
+            reps=4,
+            super_block_size=60,
+            random_state=3,
+        )
+        self.assertEqual(empty_single["samples"].shape, (0, 1))
+        self.assertIsNone(empty_single["covariance"])
 
     def test_multi_target_and_single_target_bootstrap_helpers(self) -> None:
         sample = self._positive_sample(size=256, seed=9)

@@ -12,6 +12,8 @@ The core EVI path is:
 4. Fit a regression slope on the selected window to estimate ``xi``.
 5. Map the fitted scaling law to design-life levels.
 
+.. graphviz:: _static/evi_workflow.dot
+
 In this package, the design-life-level step is not a separate annual-maxima
 fit. UniBM reuses the same block-quantile scaling law and simply evaluates it
 at larger block sizes that correspond to longer design-life spans. The fitting
@@ -47,6 +49,16 @@ The formal EI path is distinct from the lighter reciprocal diagnostic plots:
 3. Fit the preferred formal estimator, currently the manuscript headline
    ``BB-sliding-FGLS`` path.
 4. Compare against reference estimators such as ``K-gaps``.
+
+.. graphviz:: _static/ei_workflow.dot
+
+The important separation is that the observed path and the bootstrap paths play
+different roles:
+
+- the **observed path** is what gets pooled and turned into the headline
+  ``theta`` estimate;
+- the **bootstrap paths** are not averaged into a replacement path; they are
+  used only to estimate the cross-block covariance for the FGLS weighting step.
 
 In code, the main entrypoints are:
 

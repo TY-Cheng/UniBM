@@ -38,6 +38,7 @@
 from pathlib import Path
 import importlib.util
 import json
+import subprocess
 
 
 def _load_import_bootstrap(start: Path):
@@ -78,7 +79,7 @@ prepare_matplotlib_env("unibm-notebook")
 import matplotlib.pyplot as plt
 import pandas as pd
 from config import resolve_repo_dirs
-from IPython.display import Markdown, display
+from IPython.display import Markdown, SVG, display
 from data_prep.fema import OPENFEMA_NFIP_CLAIMS_ENDPOINT
 from data_prep.usgs import USGS_DV_ENDPOINT
 
@@ -117,6 +118,16 @@ BENCH = DIRS["DIR_OUT_BENCHMARK"]
 FIG_DIR = DIRS["DIR_MANUSCRIPT_FIGURE"]
 TABLE_DIR = DIRS["DIR_MANUSCRIPT_TABLE"]
 BENCHMARK_SET = UNIVERSAL_BENCHMARK_SET
+
+
+def _display_workflow_svg(path: Path) -> None:
+    rendered = subprocess.run(
+        ["dot", "-Tsvg", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    display(SVG(data=rendered.stdout))
 
 
 # %%
@@ -200,6 +211,18 @@ application_series_registry = pd.read_csv(OUT / "application_series_registry.csv
 # 5. report an estimator-specific Gaussian/Wald confidence interval.
 #
 # The key distinction is that the internal UniBM bootstrap estimates the covariance structure of the regression inputs across block sizes, whereas the external baselines default to their own asymptotic Gaussian/Wald inference. A raw-series bootstrap percentile interval remains available only as an optional sensitivity analysis for those external estimators.
+
+# %% [markdown]
+# ### Workflow Diagrams
+#
+# The two diagrams below are shared with the package documentation so the
+# notebook and the docs describe the same EVI and formal-EI flow.
+
+# %%
+display(Markdown("#### EVI workflow"))
+_display_workflow_svg(ROOT / "docs" / "_static" / "evi_workflow.dot")
+display(Markdown("#### Formal EI workflow"))
+_display_workflow_svg(ROOT / "docs" / "_static" / "ei_workflow.dot")
 #
 # %% [markdown]
 # ## Definitions: Return Period, Design-Life Level, and `T`-Year Block-Maximum `\tau`-Quantiles
@@ -227,46 +250,6 @@ application_series_registry = pd.read_csv(OUT / "application_series_registry.csv
 #
 # - [100-Year Flood—It's All About Chance](https://pubs.usgs.gov/gip/106/)
 # - [Guidelines for determining flood flow frequency — Bulletin 17C](https://www.usgs.gov/publications/guidelines-determining-flood-flow-frequency-bulletin-17c)
-#
-# ```mermaid
-# flowchart TD
-#     A["Simulated or observed univariate time series"] --> B["Point-estimation layer"]
-#
-#     B --> C["Internal UniBM path"]
-#     B --> D["External published-estimator path"]
-#
-#     C --> C1["Choose block-size grid<br/>generate_block_sizes()"]
-#     C1 --> C2["For each block size b:<br/>compute block maxima<br/>sliding or disjoint"]
-#     C2 --> C3["For each b:<br/>compute block summary T_b<br/>median (main), mean, or mode"]
-#     C3 --> C4["Build scaling curve<br/>log(T_b) vs log(b)"]
-#     C4 --> C5["Select plateau window<br/>linear fit error + curvature penalty"]
-#     C5 --> C6["Estimate xi from slope<br/>OLS or FGLS"]
-#
-#     D --> D1["Fit published xi estimators<br/>Hill / max-spectrum / Pickands / DEdH-moment"]
-#
-#     C6 --> E["Internal uncertainty layer"]
-#     D1 --> F["External uncertainty layer"]
-#
-#     E --> E1["Split original series into long super-block segments"]
-#     E1 --> E2["For each segment and each b:<br/>precompute segment-level block maxima"]
-#     E2 --> E3["Bootstrap replicate:<br/>resample segments with replacement"]
-#     E3 --> E4["For each b:<br/>pool maxima from resampled segments"]
-#     E4 --> E5["Recompute summary vector across b<br/>(log T_b1*, ..., log T_bK*)"]
-#     E5 --> E6["Estimate covariance matrix of the log-summary curve"]
-#     E6 --> E7["Fit final FGLS on the original full-data curve"]
-#     E7 --> E8["Report bootstrap-assisted Wald/FGLS CI"]
-#
-#     F --> F1["Use estimator-specific asymptotic variance formulas"]
-#     F1 --> F2["Compute standard error at the selected tuning level"]
-#     F2 --> F3["Apply Gaussian/Wald approximation"]
-#     F3 --> F4["Report native asymptotic CI"]
-#
-#     E8 --> G["Compare xi estimation and uncertainty"]
-#     F4 --> G
-#
-#     C6 --> H["Design-life-level extrapolation<br/>estimate_design_life_level()"]
-#     G --> I["Simulation metrics:<br/>APE, coverage, Winkler interval score"]
-# ```
 #
 # The benchmark is now organized around the truth pair `(xi, theta)`, with `phi` retained only as a derived construction parameter for the simulation families.
 # The notebook reads the currently materialized benchmark CSVs and reports the active universal grid directly from those files, so the vignette stays in sync if the benchmark design changes.

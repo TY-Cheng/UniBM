@@ -1,0 +1,21 @@
+digraph EIWorkflow {
+    rankdir=LR;
+    graph [fontsize=10];
+    node [shape=box, style="rounded,filled", fillcolor="#eef5fb", color="#1d4ed8", fontname="Helvetica"];
+    edge [color="#1d4ed8"];
+
+    raw [label="Observed raw series"];
+    cdf [label="Full-sample empirical CDF\nFhat(X_t) over the whole series"];
+    scores [label="Observed score sequence\nNorthrop: -log(Fhat)\nBB: 1 - Fhat"];
+    path [label="Observed BM path over block sizes\nstatistics -> theta_b -> z_b"];
+    stable [label="Observed stable-window selection"];
+    pooled [label="Observed pooled EI fit\nOLS or FGLS on the selected window"];
+    theta [label="Headline theta estimate"];
+
+    bootraw [label="Bootstrap raw-series resamples"];
+    bootpath [label="Bootstrap z-path draws\nrecomputed from each resample"];
+    bootcov [label="Stable-window covariance\nestimated from bootstrap paths"];
+
+    raw -> cdf -> scores -> path -> stable -> pooled -> theta;
+    raw -> bootraw -> bootpath -> bootcov -> pooled;
+}

@@ -34,6 +34,10 @@ class VignetteSourceTests(unittest.TestCase):
             "Definitions: Return Period, Design-Life Level, and `T`-Year Block-Maximum",
             text,
         )
+        self.assertIn(
+            '_display_workflow_svg(ROOT / "docs" / "_static" / "evi_workflow.dot")', text
+        )
+        self.assertIn('_display_workflow_svg(ROOT / "docs" / "_static" / "ei_workflow.dot")', text)
         self.assertIn("application_design_life_levels.csv", text)
         self.assertIn("_load_notebook_api", text)
         self.assertIn('"notebook_api" / "api.py"', text)

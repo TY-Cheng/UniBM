@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 
-from scripts.unibm.core import (
+from unibm.core import (
     _aligned_bootstrap_covariance,
     _fit_linear_model,
     _fit_scaling_model,
@@ -18,7 +18,7 @@ from scripts.unibm.core import (
     predict_block_quantile,
     select_penultimate_window,
 )
-from scripts.unibm.models import BlockSummaryCurve, PlateauWindow
+from unibm.models import BlockSummaryCurve, PlateauWindow
 
 
 class UniBmCoreTests(unittest.TestCase):

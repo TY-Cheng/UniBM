@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from scripts.unibm.extremal_index import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
+from unibm.extremal_index import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
 
 
 class ExtremalIndexAllowZerosTests(unittest.TestCase):

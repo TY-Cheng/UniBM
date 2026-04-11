@@ -11,9 +11,11 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
 SCRIPTS_DIR = ROOT / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+for path in (SCRIPTS_DIR, SRC_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from manuscript.artifact_manifest import build_paper_subset_manifest
 
@@ -33,6 +35,7 @@ class ManuscriptManifestTests(unittest.TestCase):
             labels = {entry["label"] for entry in payload["entries"]}
             self.assertIn("fig:benchmark-evi-targets", labels)
             self.assertIn("fig:benchmark-ei-targets", labels)
+            self.assertIn("tab:application-case-context-main", labels)
             self.assertIn("tab:application-case-audit-main", labels)
             self.assertIn("tab:application-selection-sensitivity-main", labels)
             self.assertIn("tab:application-summary-main", labels)

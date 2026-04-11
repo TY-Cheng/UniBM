@@ -1,1 +1,1 @@
-"""Small shared helpers for CLI bootstrap, runtime status, and profiling."""
+"""Small shared helpers for CLI bootstrap and workflow runtime."""
