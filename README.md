@@ -292,11 +292,11 @@ Application method defaults are now intentionally asymmetric:
   estimating only tau-specific intercept shifts;
 - `application_ei_methods.csv` records the four-method EI comparison set
   `bb_sliding_fgls`, `northrop_sliding_fgls`, `k_gaps`, and `ferro_segers`
-  only for the formal EI applications (`tx_streamflow`, `fl_streamflow`,
+  only for the EI applications (`tx_streamflow`, `fl_streamflow`,
   `tx_nfip_claims`, and `fl_nfip_claims`);
 - `application_ei_seasonal_methods.csv` stores the appendix-only monthly
   empirical-PIT to unit-Frechet seasonal sensitivity for those same four EI
-  methods and the same formal EI applications.
+  methods and the same EI applications.
 
 Interpreting the streamflow/NFIP application diagnostics:
 
@@ -337,7 +337,7 @@ Manuscript-facing application figures are written to the manuscript repo's
 - `application_ts_<stem>.pdf`
 - `application_evi_<stem>.pdf`
 - `application_target_<stem>.pdf`
-- `application_ei_<stem>.pdf` for the formal EI applications only
+- `application_ei_<stem>.pdf` for the EI applications only
 - `application_design_life_<stem>.pdf`
 - `application_composite_<stem>.pdf`
 - `application_overview.pdf`
@@ -395,7 +395,7 @@ benchmark sections:
 
 Application sections now use `plot_application_composite(...)` as the main
 visual. The notebook still shows the raw time series separately, but the
-headline formal-EI application comparison is carried by the composite figure
+headline EI application comparison is carried by the composite figure
 plus the CSV/LaTeX tables for streamflow and NFIP. Houston and Phoenix appear
 later in the notebook only as secondary EVI-only weather plots.
 
@@ -409,7 +409,7 @@ Records** section summarizing:
 
 It also reports an appendix-only **seasonal-adjusted EI sensitivity** based on
 a monthly empirical PIT -> unit-Frechet transform of each prepared EI series
-for the formal EI applications only. Those rows are a robustness check and are
+for the EI applications only. Those rows are a robustness check and are
 not used in the main median design-life-level summaries or in the
 headline application summary tables.
 
@@ -430,9 +430,9 @@ The docs include:
   and `unibm.ei` packages;
 - an `EVI and EI Workflow Guide` overview page;
 - a `Worked Examples` page with small runnable examples for EVI, bootstrap
-  backbones, and formal EI estimation;
+  backbones, and EI estimation;
 - a `Reading Returned Objects` page showing which result fields to inspect
-  first for EVI and formal EI fits.
+  first for EVI and EI fits.
 
 ## Testing and Coverage
 
