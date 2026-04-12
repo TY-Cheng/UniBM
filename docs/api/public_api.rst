@@ -16,7 +16,7 @@ Use:
 - :mod:`unibm.ei` for the grouped EI namespace, with canonical submodules such
   as :mod:`unibm.ei.preparation`, :mod:`unibm.ei.paths`, :mod:`unibm.ei.bm`,
   and :mod:`unibm.ei.threshold`
-- :mod:`unibm.cdf` as the standalone public CDF module
+- :mod:`unibm.cdf` as the standalone public empirical CDF helper
 - :mod:`unibm.plotting` as the standalone plotting module
 
 .. automodule:: unibm

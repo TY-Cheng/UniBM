@@ -87,6 +87,10 @@ class EiBmTests(unittest.TestCase):
         northrop_adjusted = _northrop_profile_fit(stats, adjusted=True)
         self.assertTrue(np.isfinite(northrop_plain[0]))
         self.assertTrue(np.isfinite(northrop_adjusted[0]))
+        with self.assertRaisesRegex(ValueError, "at least two finite positive statistics"):
+            _bb_wald_fit(np.array([1.0]), block_size=8)
+        with self.assertRaisesRegex(ValueError, "at least two finite positive statistics"):
+            _northrop_profile_fit(np.array([1.0]), adjusted=False)
 
 
 if __name__ == "__main__":

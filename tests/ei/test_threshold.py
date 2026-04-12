@@ -42,11 +42,25 @@ class EiThresholdTests(unittest.TestCase):
         self.assertGreater(raw_hi, 0.6)
         theta_lo, theta_hi = _log_scale_theta_interval(np.log(2.0), 0.1)
         self.assertGreater(theta_hi, theta_lo)
+        invalid_theta_interval = _log_scale_theta_interval(np.nan, 0.1)
+        self.assertTrue(np.isnan(invalid_theta_interval[0]))
         self.assertTrue(_intervals_overlap((0.1, 0.4), (0.3, 0.8)))
+        self.assertFalse(_intervals_overlap((np.nan, 0.4), (0.3, 0.8)))
 
         preferred = ThresholdCandidate(0.9, 1.0, 0.4, (0.3, 0.5), 0.1, "wald", "default")
         alternative = ThresholdCandidate(0.95, 2.0, 0.7, (0.35, 0.9), 0.2, "wald", "default")
         self.assertIs(_select_between_candidates(preferred, alternative), preferred)
+        nan_preferred = ThresholdCandidate(
+            0.9,
+            1.0,
+            float("nan"),
+            (float("nan"), float("nan")),
+            float("nan"),
+            "wald",
+            "default",
+        )
+        self.assertIs(_select_between_candidates(nan_preferred, alternative), alternative)
+        self.assertIs(_select_between_candidates(preferred, nan_preferred), preferred)
 
     def test_profile_likelihood_helpers(self) -> None:
         def loglik(theta: float) -> float:
@@ -59,19 +73,40 @@ class EiThresholdTests(unittest.TestCase):
         interval = find_1d_profile_likelihood_intervals(loglik, 0.4, 0.01, 0.99)
         self.assertLess(interval[0], 0.4)
         self.assertGreater(interval[1], 0.4)
+        with self.assertRaisesRegex(ValueError, "strictly negative"):
+            scale_1d_pseudo_likelihood(loglik, mle=0.4, hessian=0.0, empirical_variance=25.0)
+        with self.assertRaisesRegex(ValueError, "strictly positive"):
+            scale_1d_pseudo_likelihood(loglik, mle=0.4, hessian=-100.0, empirical_variance=0.0)
+
+        flat_interval = find_1d_profile_likelihood_intervals(lambda theta: 1.0, 0.4, 0.01, 0.99)
+        self.assertEqual(flat_interval, (0.01, 0.99))
+
+        def unstable_loglik(theta: float) -> float:
+            if theta < 0.1:
+                raise OverflowError("outside support")
+            return -50.0 * (theta - 0.4) ** 2
+
+        guarded_interval = find_1d_profile_likelihood_intervals(unstable_loglik, 0.4, 0.01, 0.99)
+        self.assertLessEqual(guarded_interval[0], 0.4)
+        self.assertGreaterEqual(guarded_interval[1], 0.4)
 
     def test_threshold_estimators_and_helpers(self) -> None:
         times_small = np.array([1.0, 2.0, 2.0, 1.0], dtype=float)
         times_large = np.array([3.0, 4.0, 2.0, 5.0], dtype=float)
         self.assertTrue(np.isfinite(_ferro_segers_from_times(times_small)[0]))
         self.assertTrue(np.isfinite(_ferro_segers_from_times(times_large)[0]))
+        self.assertEqual(_inter_exceedance_times(np.array([1], dtype=int)).size, 0)
         np.testing.assert_allclose(
             _inter_exceedance_times(np.array([1, 4, 10], dtype=int)), np.array([3.0, 6.0])
         )
+        with self.assertRaisesRegex(ValueError, "at least two inter-exceedance times"):
+            _ferro_segers_from_times(np.array([1.0]))
 
         candidate = _kgaps_profile_fit(np.array([2.0, 4.0, 3.0]), run_k=1, exceedance_rate=0.1)
         self.assertTrue(np.isfinite(candidate.theta_hat))
         self.assertEqual(candidate.run_k, 1)
+        with self.assertRaisesRegex(ValueError, "at least two finite gap observations"):
+            _kgaps_profile_fit(np.array([1.0]), run_k=1, exceedance_rate=0.1)
 
         invalid_theta_checks: list[float] = []
 

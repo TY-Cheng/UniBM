@@ -31,10 +31,10 @@ Read the result in this order:
 The remaining fields such as ``curve`` and ``plateau`` are mainly for plotting,
 diagnostics, and workflow-side reuse.
 
-Formal EI fits
---------------
+EI fits
+-------
 
-For a minimal formal-EI workflow:
+For a minimal EI workflow:
 
 .. code-block:: python
 
@@ -48,7 +48,7 @@ For a minimal formal-EI workflow:
 
 Read the result in this order:
 
-- ``fit.theta_hat`` is the headline formal extremal-index estimate.
+- ``fit.theta_hat`` is the headline extremal-index estimate.
 - ``fit.confidence_interval`` gives the uncertainty interval for ``theta``.
 - ``fit.stable_window`` shows which block-size region was pooled.
 - ``fit.base_path`` and ``fit.regression`` record which BM path and pooling rule

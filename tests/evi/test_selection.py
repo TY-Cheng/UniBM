@@ -71,6 +71,14 @@ class EviSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
             select_penultimate_window(np.array([1.0, 2.0]), np.array([1.0, 2.0]), min_points=3)
 
+    def test_select_penultimate_window_supports_two_point_window(self) -> None:
+        plateau = select_penultimate_window(
+            np.array([1.0, 2.0], dtype=float),
+            np.array([3.0, 4.0], dtype=float),
+            min_points=2,
+        )
+        self.assertEqual((plateau.start, plateau.stop), (0, 2))
+
 
 if __name__ == "__main__":
     unittest.main()
