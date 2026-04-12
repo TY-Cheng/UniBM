@@ -144,6 +144,19 @@ class EviEstimationTests(unittest.TestCase):
                 ),
                 10.0,
             )
+        with self.assertRaisesRegex(ValueError, "quantile-based ScalingFit"):
+            estimate_design_life_level(
+                estimate_target_scaling(
+                    values,
+                    target="mean",
+                    block_sizes=np.array([4, 8, 16, 32, 64], dtype=int),
+                    bootstrap_reps=0,
+                    plateau_points=3,
+                ),
+                10.0,
+            )
+        with self.assertRaisesRegex(ValueError, "same tau"):
+            estimate_design_life_level(fit, 10.0, tau=0.9)
         with self.assertRaisesRegex(ValueError, "Block size must be positive"):
             predict_block_quantile(fit, 0.0)
 

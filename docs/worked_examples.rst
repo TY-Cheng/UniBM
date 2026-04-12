@@ -43,7 +43,7 @@ The most useful outputs here are ``quantile_boot["block_sizes"]``,
 ``quantile_boot["samples"]``, and ``quantile_boot["covariance"]``. They feed
 covariance-aware EVI fits without redoing the resampling step.
 
-Example 3: Formal extremal-index fit
+Example 3: Pooled extremal-index fit
 ------------------------------------
 
 .. code-block:: python
@@ -56,7 +56,7 @@ Example 3: Formal extremal-index fit
    bundle = prepare_ei_bundle(sample)
    fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
 
-Read ``fit.theta_hat`` as the headline formal-EI estimate and
+Read ``fit.theta_hat`` as the headline EI estimate and
 ``fit.confidence_interval`` for its uncertainty. ``fit.stable_window`` shows
 which block-size region was pooled. If you later supply a bootstrap covariance
 result and switch to ``regression="FGLS"``, the observed path is still what
