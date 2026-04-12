@@ -59,6 +59,7 @@ from unibm.evi import (
     block_summary_curve,
     estimate_design_life_level,
     estimate_target_scaling,
+    target_stability_summary,
 )
 from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
 
@@ -1170,8 +1171,6 @@ def _plot_daily_and_annual(
 
 def _target_stability_frame(bundle: ApplicationBundle) -> pd.DataFrame:
     """Return target-stability summaries on the fitted block-size grid."""
-    from unibm.diagnostics import target_stability_summary
-
     return target_stability_summary(
         bundle.prepared.evi.series.values,
         block_sizes=bundle.evi_fit.block_sizes,

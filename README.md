@@ -468,7 +468,7 @@ artifacts. The current coverage gate is `90%` for `src/unibm/`.
 - `scripts/application/` contains real-data application build, screening,
   metadata, and export code.
 - `scripts/shared/` contains shared CLI bootstrap and runtime helpers.
-- `scripts/notebook_api/` contains the notebook-facing helper API used by the
+- `scripts/notebook_api.py` contains the notebook-facing helper API used by the
   Jupytext vignette.
 - `scripts/data_prep/` contains application-specific preprocessing helpers.
 - `data/metadata/application/` contains frozen USGS site selections and the CPI

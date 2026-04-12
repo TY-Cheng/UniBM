@@ -47,7 +47,8 @@ The shortest formal-EI package workflow is:
 
 .. code-block:: python
 
-   from unibm.ei import prepare_ei_bundle, estimate_pooled_bm_ei
+   from unibm.ei.preparation import prepare_ei_bundle
+   from unibm.ei.bm import estimate_pooled_bm_ei
 
    bundle = prepare_ei_bundle(sample)
    ei_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
@@ -58,8 +59,15 @@ For a quick guide to which returned fields matter most, see
 Package boundaries
 ------------------
 
-- ``unibm.evi`` contains the full block-maxima EVI workflow, reusable bootstrap
-  backbones, published EVI comparator estimators, and EVI result types.
-- ``unibm.ei`` contains formal EI estimation and EI result types.
-- ``unibm.diagnostics`` contains exploratory reciprocal-EI diagnostics and CDF helpers.
+- ``unibm.evi.blocks`` and ``unibm.evi.summaries`` own block extraction and
+  block-summary functionals.
+- ``unibm.evi.targets`` owns cross-target EVI stability summaries on a fixed
+  block grid.
+- ``unibm.evi.selection``, ``unibm.evi.estimation``, and ``unibm.evi.design``
+  own the main xi/severity workflow.
+- ``unibm.evi.bootstrap`` and ``unibm.evi.baselines`` own covariance-aware
+  resampling and comparator estimators.
+- ``unibm.ei.preparation``, ``unibm.ei.paths``, ``unibm.ei.bm``, and
+  ``unibm.ei.threshold`` own the formal theta/persistence workflow.
+- ``unibm.cdf`` contains the public empirical CDF helper used by EI path preparation.
 - ``unibm.plotting`` contains plotting helpers for notebook and manuscript use.

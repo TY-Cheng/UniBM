@@ -12,7 +12,6 @@ prepare_matplotlib_env()
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ._diagnostic_models import ExtremalIndexReciprocalFit
 from .evi.models import ScalingFit
 
 
@@ -112,90 +111,5 @@ def plot_scaling_fit(
     file_path = _resolved_file_path(file_path)
     if save and file_path is not None:
         _save_figure_outputs(fig, file_path)
-    if _should_close_figure(close):
-        plt.close(fig)
-
-
-def plot_extremal_index_reciprocal(
-    fit: ExtremalIndexReciprocalFit,
-    *,
-    file_path: Path | str | None = None,
-    dpi: int = 1200,
-    title: str | None = None,
-    save: bool = False,
-    close: bool | None = None,
-    xlabel: str = "log(block size)",
-    ylabel: str = "1 / extremal index",
-) -> None:
-    """Plot reciprocal-EI diagnostic paths over the block-size grid.
-
-    Parameters
-    ----------
-    fit
-        Diagnostic reciprocal-EI object returned by
-        :func:`unibm.diagnostics.estimate_extremal_index_reciprocal`.
-    file_path
-        Optional output path used when ``save=True``.
-    dpi
-        Figure DPI.
-    title
-        Optional plot title.
-    save
-        If ``True``, save the figure to ``file_path``.
-    close
-        Whether to close the figure after rendering.
-    xlabel, ylabel
-        Axis labels.
-
-    Returns
-    -------
-    None
-        The function draws a Matplotlib figure and optionally writes it to disk.
-    """
-    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6, 4), dpi=dpi)
-    ax.scatter(
-        fit.log_block_sizes,
-        fit.northrop_values,
-        label=f"Northrop = {fit.northrop_estimate:.3f}",
-        s=12,
-        facecolors="none",
-        color="tab:blue",
-    )
-    ax.scatter(
-        fit.log_block_sizes,
-        fit.northrop_standard_deviations,
-        label="sd Northrop",
-        s=10,
-        facecolors="none",
-        color="tab:cyan",
-    )
-    ax.scatter(
-        fit.log_block_sizes,
-        fit.bb_values,
-        label=f"BB = {fit.bb_estimate:.3f}",
-        s=12,
-        facecolors="none",
-        color="tab:red",
-    )
-    ax.scatter(
-        fit.log_block_sizes,
-        fit.bb_standard_deviations,
-        label="sd BB",
-        s=10,
-        facecolors="none",
-        color="tab:orange",
-    )
-    ax.axvline(np.log(fit.northrop_block_size), color="tab:blue", linestyle=":", lw=1)
-    ax.axvline(np.log(fit.bb_block_size), color="tab:red", linestyle=":", lw=1)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    file_path = _resolved_file_path(file_path)
-    if save and file_path is not None:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(file_path)
     if _should_close_figure(close):
         plt.close(fig)

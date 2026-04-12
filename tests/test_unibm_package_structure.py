@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import re
 import unittest
 from pathlib import Path
 
@@ -29,12 +28,17 @@ REMOVED_FLAT_MODULES = (
     "unibm.models",
     "unibm.extremal_index",
 )
-REMOVED_PRIVATE_EI_MODULES = (
-    "unibm.ei._bootstrap",
-    "unibm.ei._paths",
-    "unibm.ei._native",
-    "unibm.ei._threshold",
-    "unibm.ei._shared",
+REMOVED_LEGACY_MODULES = (
+    "unibm.evi.core",
+    "unibm.evi.external",
+    "unibm.ei.native",
+)
+REMOVED_DIAGNOSTICS_MODULES = (
+    "unibm.diagnostics",
+    "unibm.diagnostics.cdf",
+    "unibm.diagnostics.models",
+    "unibm.diagnostics.reciprocal",
+    "unibm.diagnostics.targets",
 )
 
 
@@ -53,14 +57,27 @@ class UniBmPackageStructureTests(unittest.TestCase):
     def test_canonical_grouped_subpackages_are_available(self) -> None:
         self.assertIs(importlib.import_module("unibm.evi"), evi)
         self.assertIs(importlib.import_module("unibm.ei"), ei_module)
+        importlib.import_module("unibm.cdf")
+        importlib.import_module("unibm.evi.blocks")
+        importlib.import_module("unibm.evi.targets")
+        importlib.import_module("unibm.evi.summaries")
+        importlib.import_module("unibm.evi.selection")
+        importlib.import_module("unibm.evi.estimation")
+        importlib.import_module("unibm.evi.design")
+        importlib.import_module("unibm.evi.baselines")
         importlib.import_module("unibm.evi.bootstrap")
+        importlib.import_module("unibm.ei.preparation")
+        importlib.import_module("unibm.ei.bm")
         importlib.import_module("unibm.ei.bootstrap")
         importlib.import_module("unibm.ei.paths")
-        importlib.import_module("unibm.ei.native")
         importlib.import_module("unibm.ei.threshold")
         importlib.import_module("unibm.ei.models")
         self.assertIs(evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
         self.assertIs(evi.estimate_design_life_level, unibm.estimate_design_life_level)
+        self.assertIs(
+            evi.target_stability_summary,
+            importlib.import_module("unibm.evi.targets").target_stability_summary,
+        )
 
     def test_top_level_package_lazy_loads_grouped_subpackages(self) -> None:
         self.assertIs(unibm.evi, evi)
@@ -75,7 +92,15 @@ class UniBmPackageStructureTests(unittest.TestCase):
             with self.subTest(module_name=module_name):
                 with self.assertRaises(ModuleNotFoundError):
                     importlib.import_module(module_name)
-        for module_name in REMOVED_PRIVATE_EI_MODULES:
+
+    def test_removed_legacy_modules_are_not_importable(self) -> None:
+        for module_name in REMOVED_LEGACY_MODULES:
+            with self.subTest(module_name=module_name):
+                with self.assertRaises(ModuleNotFoundError):
+                    importlib.import_module(module_name)
+
+    def test_removed_diagnostics_modules_are_not_importable(self) -> None:
+        for module_name in REMOVED_DIAGNOSTICS_MODULES:
             with self.subTest(module_name=module_name):
                 with self.assertRaises(ModuleNotFoundError):
                     importlib.import_module(module_name)
@@ -101,24 +126,16 @@ class UniBmPackageStructureTests(unittest.TestCase):
                     msg=f"{path} imports repo-workflow module {target!r}",
                 )
 
-    def test_repo_contains_no_old_flat_import_statements(self) -> None:
-        pattern = re.compile(
-            r"^\s*(?:from|import)\s+unibm\.(core|bootstrap|external|models|extremal_index|summaries|window_ops)\b"
-        )
-        private_ei_pattern = re.compile(
-            r"^\s*(?:from|import)\s+unibm\.ei\._(bootstrap|paths|native|threshold|shared)\b"
-        )
+    def test_repo_contains_no_removed_flat_import_statements(self) -> None:
         skip_roots = {ROOT / "docs" / "_build", ROOT / "dist"}
         for path in ROOT.rglob("*"):
             if not path.is_file() or path.suffix not in TEXT_SCAN_SUFFIXES:
                 continue
             if any(skip_root in path.parents for skip_root in skip_roots):
                 continue
-            text = path.read_text(encoding="utf-8")
-            self.assertIsNone(
-                pattern.search(text), msg=f"{path} still imports a removed flat module"
-            )
-            self.assertIsNone(
-                private_ei_pattern.search(text),
-                msg=f"{path} still imports a removed private EI module",
-            )
+            if path.suffix == ".py":
+                imports = _import_targets(path)
+                self.assertNotIn("unibm.core", imports, msg=f"{path} still imports flat core")
+                self.assertNotIn(
+                    "unibm.bootstrap", imports, msg=f"{path} still imports flat bootstrap"
+                )

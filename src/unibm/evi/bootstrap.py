@@ -1,12 +1,4 @@
-"""Bootstrap helpers for covariance-aware block-summary regression.
-
-This module focuses on reusable block-summary bootstrap backbones for the
-log block-summary curve used by UniBM's FGLS regression.
-
-The benchmark now reuses one super-block backbone per block scheme
-(`sliding`/`disjoint`) so median/mean/mode FGLS fits can share the same
-resampling work instead of rebuilding it target-by-target.
-"""
+"""Bootstrap helpers for covariance-aware EVI block-summary regression."""
 
 from __future__ import annotations
 
@@ -18,7 +10,6 @@ import numpy as np
 
 from .._validation import warn_on_negative_values
 from .._window_ops import circular_sliding_window_maximum
-from ._summaries import summarize_block_maxima
 
 
 def _sliding_block_maxima(segment: np.ndarray, block_size: int) -> np.ndarray:
@@ -41,6 +32,7 @@ def _segment_block_maxima(
     *,
     sliding: bool,
 ) -> np.ndarray:
+    """Return the requested block-maxima scheme inside one super-block segment."""
     if sliding:
         return _sliding_block_maxima(segment, block_size)
     return _disjoint_block_maxima(segment, block_size)
@@ -48,96 +40,13 @@ def _segment_block_maxima(
 
 @dataclass(frozen=True)
 class BlockSummaryBootstrapBackbone:
-    """Reusable super-block bootstrap state for multiple block-summary targets.
-
-    `segment_draws` stores which super-blocks were resampled on each bootstrap
-    replicate. `maxima_by_block` stores the per-segment block maxima for every
-    requested block size. Median/mean/mode summaries can then be evaluated from
-    the same backbone without regenerating the dependence-preserving resamples.
-    """
+    """Reusable super-block bootstrap state for multiple block-summary targets."""
 
     block_sizes: np.ndarray
     sliding: bool
     super_block_size: int
     segment_draws: np.ndarray
     maxima_by_block: dict[int, np.ndarray]
-
-
-def build_block_summary_bootstrap_backbone(
-    vec: np.ndarray | list[float],
-    block_sizes: np.ndarray,
-    *,
-    sliding: bool = True,
-    reps: int = 200,
-    super_block_size: int | None = None,
-    random_state: int | None = 0,
-) -> BlockSummaryBootstrapBackbone | None:
-    """Precompute the reusable super-block state for UniBM bootstrap fitting.
-
-    Parameters
-    ----------
-    vec
-        One-dimensional raw series.
-    block_sizes
-        Candidate block-size grid.
-    sliding
-        If ``True``, store sliding-block maxima within each super-block.
-        Otherwise store disjoint maxima.
-    reps
-        Number of bootstrap replicates to prepare.
-    super_block_size
-        Optional super-block size. If omitted, the function chooses a size large
-        enough to preserve local dependence while retaining multiple segments.
-    random_state
-        Optional random seed.
-
-    Returns
-    -------
-    BlockSummaryBootstrapBackbone or None
-        Reusable backbone object if the sample is large enough; otherwise
-        ``None``.
-
-    Notes
-    -----
-    The backbone can be evaluated repeatedly for different block-summary
-    targets such as the median, mean, or mode without resampling the time
-    series from scratch. This is the main benchmark speed-up path.
-    """
-    warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
-    arr = np.asarray(vec, dtype=float).reshape(-1)
-    block_sizes = np.asarray(block_sizes, dtype=int)
-    if np.sum(np.isfinite(arr)) < 64 or block_sizes.size == 0 or reps < 2:
-        return None
-    max_block_size = int(block_sizes.max())
-    if super_block_size is None:
-        super_block_size = max(max_block_size * 4, int(np.sqrt(arr.size)))
-    super_block_size = min(max(super_block_size, max_block_size + 1), arr.size)
-    n_super = arr.size // super_block_size
-    if n_super < 4:
-        super_block_size = max(max_block_size + 1, arr.size // 4)
-        n_super = arr.size // super_block_size
-    if n_super < 2:
-        return None
-    trimmed = arr[: n_super * super_block_size]
-    segments = trimmed.reshape(n_super, super_block_size)
-    rng = np.random.default_rng(random_state)
-    maxima_by_block: dict[int, np.ndarray] = {}
-    for block_size in block_sizes:
-        maxima_by_block[int(block_size)] = np.stack(
-            [
-                _segment_block_maxima(segment, int(block_size), sliding=sliding)
-                for segment in segments
-            ],
-            axis=0,
-        )
-    segment_draws = rng.integers(0, n_super, size=(reps, n_super))
-    return BlockSummaryBootstrapBackbone(
-        block_sizes=block_sizes.copy(),
-        sliding=bool(sliding),
-        super_block_size=int(super_block_size),
-        segment_draws=segment_draws,
-        maxima_by_block=maxima_by_block,
-    )
 
 
 def _selected_bootstrap_maxima(
@@ -271,6 +180,7 @@ def _evaluate_mode_bootstrap_column(
     quantile: float,
 ) -> np.ndarray:
     """Evaluate one mode bootstrap column with an exact batched surrogate."""
+    del quantile
     selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
     return _evaluate_mode_bootstrap_column_batched(selected)
 
@@ -281,29 +191,7 @@ def evaluate_block_summary_bootstrap_backbone(
     target: str = "quantile",
     quantile: float = 0.5,
 ) -> dict[str, Any]:
-    """Evaluate one block-summary target on a reusable bootstrap backbone.
-
-    Parameters
-    ----------
-    backbone
-        Reusable backbone returned by
-        :func:`build_block_summary_bootstrap_backbone`.
-    target
-        Block-summary functional to evaluate on each bootstrap replicate.
-    quantile
-        Quantile level used only when ``target="quantile"``.
-
-    Returns
-    -------
-    dict[str, Any]
-        Dictionary containing the block-size grid, valid log-summary samples,
-        covariance matrix, and bookkeeping metadata.
-
-    Notes
-    -----
-    The returned covariance matrix is aligned to the full positive block-size
-    grid and is later subset to the selected plateau window by the EVI fit.
-    """
+    """Evaluate one block-summary target on a reusable bootstrap backbone."""
     if backbone is None:
         return {
             "block_sizes": np.asarray([], dtype=int),
@@ -363,6 +251,53 @@ def evaluate_block_summary_bootstrap_backbone(
     }
 
 
+def build_block_summary_bootstrap_backbone(
+    vec: np.ndarray | list[float],
+    block_sizes: np.ndarray,
+    *,
+    sliding: bool = True,
+    reps: int = 200,
+    super_block_size: int | None = None,
+    random_state: int | None = 0,
+) -> BlockSummaryBootstrapBackbone | None:
+    """Precompute the reusable super-block state for UniBM bootstrap fitting."""
+    warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
+    arr = np.asarray(vec, dtype=float).reshape(-1)
+    block_sizes = np.asarray(block_sizes, dtype=int)
+    if np.sum(np.isfinite(arr)) < 64 or block_sizes.size == 0 or reps < 2:
+        return None
+    max_block_size = int(block_sizes.max())
+    if super_block_size is None:
+        super_block_size = max(max_block_size * 4, int(np.sqrt(arr.size)))
+    super_block_size = min(max(super_block_size, max_block_size + 1), arr.size)
+    n_super = arr.size // super_block_size
+    if n_super < 4:
+        super_block_size = max(max_block_size + 1, arr.size // 4)
+        n_super = arr.size // super_block_size
+    if n_super < 2:
+        return None
+    trimmed = arr[: n_super * super_block_size]
+    segments = trimmed.reshape(n_super, super_block_size)
+    rng = np.random.default_rng(random_state)
+    maxima_by_block: dict[int, np.ndarray] = {}
+    for block_size in block_sizes:
+        maxima_by_block[int(block_size)] = np.stack(
+            [
+                _segment_block_maxima(segment, int(block_size), sliding=sliding)
+                for segment in segments
+            ],
+            axis=0,
+        )
+    segment_draws = rng.integers(0, n_super, size=(reps, n_super))
+    return BlockSummaryBootstrapBackbone(
+        block_sizes=block_sizes.copy(),
+        sliding=bool(sliding),
+        super_block_size=int(super_block_size),
+        segment_draws=segment_draws,
+        maxima_by_block=maxima_by_block,
+    )
+
+
 def circular_block_summary_bootstrap_multi_target(
     vec: np.ndarray | list[float],
     block_sizes: np.ndarray,
@@ -374,34 +309,7 @@ def circular_block_summary_bootstrap_multi_target(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> dict[str, dict[str, Any]]:
-    """Bootstrap multiple block-summary targets from one shared backbone.
-
-    Parameters
-    ----------
-    vec
-        One-dimensional raw series.
-    block_sizes
-        Candidate block-size grid.
-    targets
-        Block-summary targets to evaluate, for example ``("quantile", "mean",
-        "mode")``.
-    quantile
-        Quantile level used when one of the requested targets is
-        ``"quantile"``.
-    sliding
-        If ``True``, use sliding blocks; otherwise use disjoint blocks.
-    reps
-        Number of bootstrap replicates.
-    super_block_size
-        Optional super-block size.
-    random_state
-        Optional random seed.
-
-    Returns
-    -------
-    dict[str, dict[str, Any]]
-        Mapping from target name to the evaluated bootstrap result dictionary.
-    """
+    """Bootstrap multiple block-summary targets from one shared backbone."""
     backbone = build_block_summary_bootstrap_backbone(
         vec=vec,
         block_sizes=block_sizes,
@@ -431,40 +339,7 @@ def circular_block_summary_bootstrap(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> dict[str, Any]:
-    """Bootstrap one block-summary target by resampling time-series super-blocks.
-
-    Parameters
-    ----------
-    vec
-        One-dimensional raw series.
-    block_sizes
-        Candidate block-size grid.
-    target
-        Block-summary target to evaluate on each replicate.
-    quantile
-        Quantile level used only when ``target="quantile"``.
-    sliding
-        If ``True``, use sliding blocks; otherwise use disjoint blocks.
-    reps
-        Number of bootstrap replicates.
-    super_block_size
-        Optional super-block size.
-    random_state
-        Optional random seed.
-
-    Returns
-    -------
-    dict[str, Any]
-        Bootstrap result dictionary with block sizes, valid log-summary draws,
-        and covariance matrix.
-
-    Notes
-    -----
-    The key point is that the bootstrap resamples the original time series in
-    long contiguous chunks and then recomputes the block summaries. This
-    preserves local serial dependence and yields a covariance estimate across
-    block sizes.
-    """
+    """Bootstrap one block-summary target by resampling time-series super-blocks."""
     block_sizes = np.asarray(block_sizes, dtype=int)
     if block_sizes.size == 0 or reps < 2:
         return {
@@ -491,3 +366,13 @@ def circular_block_summary_bootstrap(
         target=target,
         quantile=quantile,
     )
+
+
+__all__ = [
+    "BlockSummaryBootstrapBackbone",
+    "_evaluate_mode_bootstrap_column_batched",
+    "build_block_summary_bootstrap_backbone",
+    "circular_block_summary_bootstrap",
+    "circular_block_summary_bootstrap_multi_target",
+    "evaluate_block_summary_bootstrap_backbone",
+]

@@ -1,23 +1,65 @@
-Formal EI API
-=============
+Canonical EI API
+================
 
-This submodule contains the formal extremal-index layer, distinct from the
-lighter reciprocal diagnostics in :mod:`unibm.diagnostics`.
+The theta/extremal-index branch is organized into canonical modules with
+parallel responsibilities:
 
-The recommended path is to call :func:`prepare_ei_bundle` once on the observed
-series and then fit :func:`estimate_pooled_bm_ei` for the pooled BM headline
-estimate. Use :func:`estimate_native_bm_ei` when you specifically want the
-single-block-size native benchmark estimators.
-
-Canonical public submodules:
-
-- :mod:`unibm.ei.paths`
-- :mod:`unibm.ei.native`
-- :mod:`unibm.ei.threshold`
-- :mod:`unibm.ei.bootstrap`
-- :mod:`unibm.ei.models`
+- :mod:`unibm.ei.preparation` for observed-sample preparation
+- :mod:`unibm.ei.paths` for BM-path construction and stable-window extraction
+- :mod:`unibm.ei.bm` for native and pooled BM-based EI estimators
+- :mod:`unibm.ei.threshold` for threshold-side EI estimators
+- :mod:`unibm.ei.bootstrap` for BM path-bootstrap transforms
+- :mod:`unibm.ei.models` for reusable result dataclasses
 
 .. automodule:: unibm.ei
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Preparation
+-----------
+
+.. automodule:: unibm.ei.preparation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Paths
+-----
+
+.. automodule:: unibm.ei.paths
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+BM Estimators
+-------------
+
+.. automodule:: unibm.ei.bm
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Threshold Estimators
+--------------------
+
+.. automodule:: unibm.ei.threshold
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Bootstrap
+---------
+
+.. automodule:: unibm.ei.bootstrap
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Models
+------
+
+.. automodule:: unibm.ei.models
    :members:
    :undoc-members:
    :show-inheritance:

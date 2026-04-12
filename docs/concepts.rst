@@ -34,15 +34,13 @@ as separate headline EVI fits.
 In code, the main entrypoints are:
 
 - :func:`unibm.evi.generate_block_sizes`
-- :func:`unibm.evi.block_summary_curve`
-- :func:`unibm.evi.estimate_target_scaling`
+- :func:`unibm.evi.blocks.block_summary_curve`
+- :func:`unibm.evi.estimation.estimate_target_scaling`
 - :func:`unibm.estimate_evi_quantile`
 - :func:`unibm.estimate_design_life_level`
 
 EI workflow
 -----------
-
-The formal EI path is distinct from the lighter reciprocal diagnostic plots:
 
 1. Prepare block-size paths from the raw series.
 2. Estimate a stable pooled block-maxima path.
@@ -62,10 +60,10 @@ different roles:
 
 In code, the main entrypoints are:
 
-- :func:`unibm.ei.prepare_ei_bundle`
-- :func:`unibm.ei.estimate_pooled_bm_ei`
-- :func:`unibm.ei.estimate_k_gaps`
-- :func:`unibm.ei.estimate_ferro_segers`
+- :func:`unibm.ei.preparation.prepare_ei_bundle`
+- :func:`unibm.ei.bm.estimate_pooled_bm_ei`
+- :func:`unibm.ei.threshold.estimate_k_gaps`
+- :func:`unibm.ei.threshold.estimate_ferro_segers`
 
 Interpreting EVI vs EI outputs
 ------------------------------
@@ -93,18 +91,20 @@ In practice:
 - use the EVI/design-life-level outputs for severity on the original physical scale;
 - use the EI outputs for persistence, clustering, and recovery burden.
 
-Diagnostic EI vs formal EI
---------------------------
-
-``unibm.diagnostics`` is meant for exploratory stability views, such as
-``1 / theta`` plots. ``unibm.ei`` contains the formal inference
-objects used in benchmark and application pipelines.
-
 Module responsibilities
 -----------------------
 
-- ``evi``: block-maxima summaries, bootstrap backbones, regression, external
-  xi comparators, and design-life-level mapping.
-- ``ei``: formal EI preparation, path construction, and estimators.
-- ``diagnostics``: lighter exploratory summaries and reciprocal plots.
+- ``evi.blocks`` and ``evi.summaries``: block-maxima summaries and summary
+  kernels.
+- ``evi.targets``: cross-target EVI stability summaries on one block grid.
+- ``evi.selection`` and ``evi.estimation``: plateau selection and log-log
+  regression.
+- ``evi.design``: design-life-level mapping from fitted quantile scaling laws.
+- ``evi.bootstrap`` and ``evi.baselines``: covariance estimation and xi
+  comparator estimators.
+- ``ei.preparation`` and ``ei.paths``: observed-sample preparation and BM-path
+  construction.
+- ``ei.bm`` and ``ei.threshold``: formal BM-based and threshold-based EI
+  estimators.
+- ``cdf``: the empirical CDF helper used by EI path preparation.
 - ``plotting``: figures for fitted objects.

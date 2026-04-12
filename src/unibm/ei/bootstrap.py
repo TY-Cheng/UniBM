@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from .._bootstrap_sampling import draw_circular_block_bootstrap_samples
-from ._internal import _finite_nonnegative_series, _finite_positive_series
+from ._validation import _finite_nonnegative_series, _finite_positive_series
 from .paths import BM_PATH_KEYS, _build_bm_z_paths_from_values
 
 

@@ -1,42 +1,11 @@
-"""Canonical EVI-facing UniBM subpackage.
+"""Canonical EVI-facing UniBM subpackage."""
 
-This package groups the block-maxima extreme-value-index workflow:
-
-- block-maxima construction and summary curves;
-- plateau selection and log-log scaling fits;
-- bootstrap covariance backbones for FGLS;
-- external xi-estimator baselines used in benchmark comparisons.
-
-Shared kernels such as validation, rolling-window operations, and generic
-diagnostics remain at the top-level ``unibm`` package because they are used
-across both the EVI and EI layers.
-"""
-
-from .._block_grid import DEFAULT_MIN_DISJOINT_BLOCKS
-from .bootstrap import (
-    BlockSummaryBootstrapBackbone,
-    build_block_summary_bootstrap_backbone,
-    circular_block_summary_bootstrap,
-    circular_block_summary_bootstrap_multi_target,
-    evaluate_block_summary_bootstrap_backbone,
-)
-from .core import (
-    DEFAULT_COVARIANCE_SHRINKAGE,
-    DEFAULT_CURVATURE_PENALTY,
-    Z_CRIT_95,
-    block_maxima,
-    block_summary_curve,
-    estimate_design_life_level,
-    estimate_evi_quantile,
-    estimate_target_scaling,
-    generate_block_sizes,
-    predict_block_quantile,
-    select_penultimate_window,
-)
-from .external import (
+from .._block_grid import DEFAULT_MIN_DISJOINT_BLOCKS, generate_block_sizes
+from .baselines import (
     ExternalXiEstimate,
     SelectionWindow,
     ThresholdWindow,
+    candidate_max_spectrum_scales,
     candidate_tail_counts,
     estimate_dedh_moment_evi,
     estimate_hill_evi,
@@ -46,7 +15,26 @@ from .external import (
     select_stable_tail_window,
     wald_confidence_interval,
 )
+from .blocks import block_maxima, block_summary_curve
+from .bootstrap import (
+    BlockSummaryBootstrapBackbone,
+    build_block_summary_bootstrap_backbone,
+    circular_block_summary_bootstrap,
+    circular_block_summary_bootstrap_multi_target,
+    evaluate_block_summary_bootstrap_backbone,
+)
+from .design import estimate_design_life_level, predict_block_quantile
+from .estimation import (
+    DEFAULT_COVARIANCE_SHRINKAGE,
+    DEFAULT_CURVATURE_PENALTY,
+    Z_CRIT_95,
+    estimate_evi_quantile,
+    estimate_target_scaling,
+)
 from .models import BlockSummaryCurve, PlateauWindow, ScalingFit
+from .selection import select_penultimate_window
+from .summaries import estimate_sample_mode, summarize_block_maxima
+from .targets import target_stability_summary
 
 __all__ = [
     "BlockSummaryBootstrapBackbone",
@@ -63,9 +51,11 @@ __all__ = [
     "block_maxima",
     "block_summary_curve",
     "build_block_summary_bootstrap_backbone",
+    "candidate_max_spectrum_scales",
     "candidate_tail_counts",
     "circular_block_summary_bootstrap",
     "circular_block_summary_bootstrap_multi_target",
+    "estimate_sample_mode",
     "estimate_dedh_moment_evi",
     "estimate_design_life_level",
     "estimate_evi_quantile",
@@ -79,5 +69,7 @@ __all__ = [
     "select_penultimate_window",
     "select_stable_integer_window",
     "select_stable_tail_window",
+    "summarize_block_maxima",
+    "target_stability_summary",
     "wald_confidence_interval",
 ]

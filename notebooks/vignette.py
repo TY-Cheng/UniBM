@@ -64,7 +64,7 @@ _scripts_dir = _bootstrap.bootstrap_notebook_scripts_dir(Path.cwd().resolve())
 
 
 def _load_notebook_api(scripts_dir: Path):
-    api_path = scripts_dir / "notebook_api" / "api.py"
+    api_path = scripts_dir / "notebook_api.py"
     spec = importlib.util.spec_from_file_location("_unibm_notebook_api", api_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load notebook API helper from {api_path}")

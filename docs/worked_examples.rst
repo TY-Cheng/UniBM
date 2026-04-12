@@ -28,10 +28,10 @@ Example 2: Reusable bootstrap backbone
 .. code-block:: python
 
    import numpy as np
-   from unibm.evi import (
+   from unibm.evi import generate_block_sizes
+   from unibm.evi.bootstrap import (
        build_block_summary_bootstrap_backbone,
        evaluate_block_summary_bootstrap_backbone,
-       generate_block_sizes,
    )
 
    sample = np.random.default_rng(13).pareto(2.0, 4096) + 1.0
@@ -49,7 +49,8 @@ Example 3: Formal extremal-index fit
 .. code-block:: python
 
    import numpy as np
-   from unibm.ei import prepare_ei_bundle, estimate_pooled_bm_ei
+   from unibm.ei.preparation import prepare_ei_bundle
+   from unibm.ei.bm import estimate_pooled_bm_ei
 
    sample = np.random.default_rng(21).pareto(2.0, 4096) + 1.0
    bundle = prepare_ei_bundle(sample)

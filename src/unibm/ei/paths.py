@@ -1,19 +1,15 @@
-"""BM-path construction and stable-window routing for EI estimators."""
+"""BM-path construction for canonical extremal-index workflows."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from .._block_grid import generate_block_sizes
+from ..cdf import empirical_cdf
 from .._numeric import prefix_sum
-from ..diagnostics import empirical_cdf
 from .._window_ops import sliding_window_extreme_valid
-from ._internal import (
-    EI_TINY,
-    _finite_nonnegative_series,
-    _finite_positive_series,
-)
-from .models import EiPathBundle, EiPreparedBundle, EiStableWindow
+from ._stats import EI_TINY
+from .models import EiPathBundle, EiStableWindow
+
 
 BM_PATH_KEYS = (
     ("northrop", True),
@@ -21,26 +17,6 @@ BM_PATH_KEYS = (
     ("bb", True),
     ("bb", False),
 )
-
-
-def _rolling_window_minima(
-    scores: np.ndarray,
-    block_size: int,
-    *,
-    sliding: bool,
-) -> np.ndarray:
-    """Return sliding or disjoint window minima for one score series."""
-    scores = np.asarray(scores, dtype=float).reshape(-1)
-    if scores.size < block_size or block_size < 2:
-        return np.asarray([], dtype=float)
-    if sliding:
-        return sliding_window_extreme_valid(scores, block_size, reducer="min")
-    n_block = scores.size // block_size
-    if n_block < 1:
-        return np.asarray([], dtype=float)
-    windows = scores[: n_block * block_size].reshape(n_block, block_size)
-    valid = np.all(np.isfinite(windows), axis=1)
-    return windows.min(axis=1)[valid]
 
 
 def _select_stable_ei_window(
@@ -100,6 +76,26 @@ def _select_stable_ei_window(
     selected_mask[start:stop] = True
     window = EiStableWindow(int(levels[start]), int(levels[stop - 1]))
     return window, selected_mask
+
+
+def _rolling_window_minima(
+    scores: np.ndarray,
+    block_size: int,
+    *,
+    sliding: bool,
+) -> np.ndarray:
+    """Return sliding or disjoint window minima for one score series."""
+    scores = np.asarray(scores, dtype=float).reshape(-1)
+    if scores.size < block_size or block_size < 2:
+        return np.asarray([], dtype=float)
+    if sliding:
+        return sliding_window_extreme_valid(scores, block_size, reducer="min")
+    n_block = scores.size // block_size
+    if n_block < 1:
+        return np.asarray([], dtype=float)
+    windows = scores[: n_block * block_size].reshape(n_block, block_size)
+    valid = np.all(np.isfinite(windows), axis=1)
+    return windows.min(axis=1)[valid]
 
 
 def _path_point_from_statistics(
@@ -249,63 +245,3 @@ def extract_stable_path_window(path: EiPathBundle) -> tuple[np.ndarray, np.ndarr
     if selected_levels.size == 0:
         raise ValueError("Stable EI window did not retain any finite transformed path values.")
     return selected_levels, selected_z
-
-
-def prepare_ei_bundle(
-    vec: np.ndarray | list[float],
-    *,
-    block_sizes: np.ndarray | None = None,
-    threshold_quantiles: tuple[float, ...] = (0.90, 0.95),
-    allow_zeros: bool = False,
-) -> EiPreparedBundle:
-    """Prepare the observed-data ingredients reused across formal EI estimators.
-
-    Parameters
-    ----------
-    vec
-        One-dimensional raw series. If ``allow_zeros`` is ``False``, the
-        function keeps only finite strictly positive values and requires at
-        least 32 such observations. If ``allow_zeros`` is ``True``, finite
-        non-negative values are accepted instead, which is useful for
-        calendar-day impact series such as zero-filled NFIP totals.
-    block_sizes
-        Optional explicit block-size grid. If omitted, the function constructs
-        one from :func:`unibm.evi.generate_block_sizes` using the cleaned
-        observed sample size.
-    threshold_quantiles
-        Exceedance quantiles used to prepare threshold-side candidate events for
-        :func:`unibm.ei.estimate_k_gaps` and
-        :func:`unibm.ei.estimate_ferro_segers`.
-    allow_zeros
-        If ``True``, permit zero-valued observations in the cleaned EI series.
-        Leave this as ``False`` for positive-only severity series.
-
-    Returns
-    -------
-    unibm.ei.EiPreparedBundle
-        Reusable bundle containing the cleaned observed values, BM path variants
-        over the candidate block-size grid, and threshold-side exceedance
-        candidates.
-
-    Notes
-    -----
-    The BM paths are built from the observed series itself: the function first
-    applies the full-sample empirical CDF, then constructs Northrop and BB
-    paths over the candidate block-size grid. Those observed paths are later
-    reused by both native fixed-``b`` estimators and pooled OLS/FGLS fits.
-    """
-    values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
-    if block_sizes is None:
-        block_sizes = generate_block_sizes(values.size)
-    block_sizes = np.asarray(block_sizes, dtype=int)
-    paths = _build_bm_paths_from_values(values, block_sizes)
-    threshold_candidates = {
-        float(q): np.flatnonzero(values > np.quantile(values, float(q)))
-        for q in threshold_quantiles
-    }
-    return EiPreparedBundle(
-        values=values,
-        block_sizes=block_sizes,
-        paths=paths,
-        threshold_candidates=threshold_candidates,
-    )
