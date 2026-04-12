@@ -5,17 +5,15 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from ._shared import (
+from ._internal import (
     EI_ALPHA,
     EI_TINY,
     Z_CRIT_95,
-    ExtremalIndexEstimate,
-    EiPreparedBundle,
-    ThresholdCandidate,
     _central_wald_interval,
     _select_between_candidates,
     find_1d_profile_likelihood_intervals,
 )
+from .models import EiPreparedBundle, ExtremalIndexEstimate, ThresholdCandidate
 
 
 def _inter_exceedance_times(indices: np.ndarray) -> np.ndarray:

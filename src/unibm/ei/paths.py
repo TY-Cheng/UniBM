@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core import generate_block_sizes
+from .._block_grid import generate_block_sizes
+from .._numeric import prefix_sum
 from ..diagnostics import empirical_cdf
-from ..window_ops import sliding_window_extreme_valid
-from ._shared import (
+from .._window_ops import sliding_window_extreme_valid
+from ._internal import (
     EI_TINY,
-    EiPathBundle,
-    EiPreparedBundle,
-    EiStableWindow,
     _finite_nonnegative_series,
     _finite_positive_series,
+)
+from .models import EiPathBundle, EiPreparedBundle, EiStableWindow
+
+BM_PATH_KEYS = (
+    ("northrop", True),
+    ("northrop", False),
+    ("bb", True),
+    ("bb", False),
 )
 
 
@@ -59,14 +65,28 @@ def _select_stable_ei_window(
     if hi - lo < min_points:
         lo = 0
         hi = levels.size
+    prefix_z = prefix_sum(z)
+    prefix_z2 = prefix_sum(z * z)
+    abs_diff1_prefix = prefix_sum(np.abs(np.diff(z)))
+    abs_diff2_prefix = prefix_sum(np.abs(np.diff(np.diff(z))))
     best: tuple[float, int, int] | None = None
     for start in range(lo, hi - min_points + 1):
         for stop in range(start + min_points, hi + 1):
-            window = z[start:stop]
-            variance = float(np.mean((window - window.mean()) ** 2))
-            first_diff = np.diff(window)
-            roughness = float(np.mean(np.abs(first_diff))) if first_diff.size else 0.0
-            curvature = float(np.mean(np.abs(np.diff(first_diff)))) if first_diff.size > 1 else 0.0
+            window_len = stop - start
+            sum_z = prefix_z[stop] - prefix_z[start]
+            sum_z2 = prefix_z2[stop] - prefix_z2[start]
+            mean_z = float(sum_z / window_len)
+            variance = max(float(sum_z2 / window_len - mean_z * mean_z), 0.0)
+            if window_len > 1:
+                roughness_total = abs_diff1_prefix[stop - 1] - abs_diff1_prefix[start]
+                roughness = float(roughness_total / (window_len - 1))
+            else:
+                roughness = 0.0
+            if window_len > 2:
+                curvature_total = abs_diff2_prefix[stop - 2] - abs_diff2_prefix[start]
+                curvature = float(curvature_total / (window_len - 2))
+            else:
+                curvature = 0.0
             score = (
                 variance
                 + float(roughness_penalty) * roughness
@@ -82,6 +102,59 @@ def _select_stable_ei_window(
     return window, selected_mask
 
 
+def _path_point_from_statistics(
+    base_path: str,
+    statistics: np.ndarray,
+    *,
+    block_size: int,
+) -> tuple[float, float, float]:
+    """Convert one block-size statistics sample into theta/eir/z path coordinates."""
+    mean_stat = float(np.mean(statistics))
+    if base_path == "northrop":
+        eir = max(mean_stat, 1.0)
+        theta = float(1.0 / eir)
+    elif base_path == "bb":
+        theta = float(max((1.0 / max(mean_stat, EI_TINY)) - 1.0 / float(block_size), EI_TINY))
+        theta = min(theta, 1.0)
+        eir = float(1.0 / theta)
+    else:
+        raise ValueError(f"Unknown BM EI base path: {base_path}")
+    return theta, eir, float(np.log(eir))
+
+
+def _compute_path_arrays_from_scores(
+    base_path: str,
+    scores: np.ndarray,
+    block_sizes: np.ndarray,
+    *,
+    sliding: bool,
+    collect_statistics: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[int, np.ndarray] | None]:
+    """Compute BM-EI path arrays with optional per-level statistics retention."""
+    theta_path = np.full(block_sizes.size, np.nan, dtype=float)
+    eir_path = np.full(block_sizes.size, np.nan, dtype=float)
+    z_path = np.full(block_sizes.size, np.nan, dtype=float)
+    sample_counts = np.zeros(block_sizes.size, dtype=int)
+    sample_statistics = {} if collect_statistics else None
+    for idx, block_size in enumerate(np.asarray(block_sizes, dtype=int)):
+        minima = _rolling_window_minima(scores, int(block_size), sliding=sliding)
+        if minima.size == 0:
+            continue
+        statistics = float(block_size) * minima
+        if sample_statistics is not None:
+            sample_statistics[int(block_size)] = statistics
+        sample_counts[idx] = statistics.size
+        theta, eir, z = _path_point_from_statistics(
+            base_path,
+            statistics,
+            block_size=int(block_size),
+        )
+        theta_path[idx] = theta
+        eir_path[idx] = eir
+        z_path[idx] = z
+    return theta_path, eir_path, z_path, sample_counts, sample_statistics
+
+
 def _build_path_from_scores(
     base_path: str,
     scores: np.ndarray,
@@ -90,31 +163,15 @@ def _build_path_from_scores(
     sliding: bool,
 ) -> EiPathBundle:
     """Construct the full EI path for one BM base estimator."""
-    theta_path = np.full(block_sizes.size, np.nan, dtype=float)
-    eir_path = np.full(block_sizes.size, np.nan, dtype=float)
-    z_path = np.full(block_sizes.size, np.nan, dtype=float)
-    sample_counts = np.zeros(block_sizes.size, dtype=int)
-    sample_statistics: dict[int, np.ndarray] = {}
-    for idx, block_size in enumerate(np.asarray(block_sizes, dtype=int)):
-        minima = _rolling_window_minima(scores, int(block_size), sliding=sliding)
-        if minima.size == 0:
-            continue
-        statistics = float(block_size) * minima
-        sample_statistics[int(block_size)] = statistics
-        sample_counts[idx] = statistics.size
-        mean_stat = float(np.mean(statistics))
-        if base_path == "northrop":
-            eir = max(mean_stat, 1.0)
-            theta = float(1.0 / eir)
-        elif base_path == "bb":
-            theta = float(max((1.0 / max(mean_stat, EI_TINY)) - 1.0 / float(block_size), EI_TINY))
-            theta = min(theta, 1.0)
-            eir = float(1.0 / theta)
-        else:
-            raise ValueError(f"Unknown BM EI base path: {base_path}")
-        theta_path[idx] = theta
-        eir_path[idx] = eir
-        z_path[idx] = float(np.log(eir))
+    theta_path, eir_path, z_path, sample_counts, sample_statistics = (
+        _compute_path_arrays_from_scores(
+            base_path,
+            np.asarray(scores, dtype=float),
+            np.asarray(block_sizes, dtype=int),
+            sliding=sliding,
+            collect_statistics=True,
+        )
+    )
     stable_window, stable_mask = _select_stable_ei_window(block_sizes, z_path)
     selected_level = int(block_sizes[np.isfinite(z_path)][stable_mask][0])
     return EiPathBundle(
@@ -125,10 +182,36 @@ def _build_path_from_scores(
         eir_path=eir_path,
         z_path=z_path,
         sample_counts=sample_counts,
-        sample_statistics=sample_statistics,
+        sample_statistics=sample_statistics or {},
         stable_window=stable_window,
         selected_level=selected_level,
     )
+
+
+def _build_bm_z_paths_from_values(
+    values: np.ndarray,
+    block_sizes: np.ndarray,
+    *,
+    path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
+) -> dict[tuple[str, bool], np.ndarray]:
+    """Build only the transformed BM z-paths needed by bootstrap workflows."""
+    cdf_values = np.asarray(empirical_cdf(values)(values), dtype=float)
+    cdf_values = np.clip(cdf_values, EI_TINY, 1.0 - EI_TINY)
+    score_lookup = {
+        "northrop": -np.log(cdf_values),
+        "bb": 1.0 - cdf_values,
+    }
+    draws: dict[tuple[str, bool], np.ndarray] = {}
+    for base_path, sliding in path_keys:
+        _, _, z_path, _, _ = _compute_path_arrays_from_scores(
+            base_path,
+            score_lookup[base_path],
+            np.asarray(block_sizes, dtype=int),
+            sliding=sliding,
+            collect_statistics=False,
+        )
+        draws[(base_path, sliding)] = z_path
+    return draws
 
 
 def _build_bm_paths_from_values(
@@ -138,17 +221,18 @@ def _build_bm_paths_from_values(
     """Build the four BM EI paths reused across benchmark methods."""
     cdf_values = np.asarray(empirical_cdf(values)(values), dtype=float)
     cdf_values = np.clip(cdf_values, EI_TINY, 1.0 - EI_TINY)
-    northrop_scores = -np.log(cdf_values)
-    bb_scores = 1.0 - cdf_values
+    score_lookup = {
+        "northrop": -np.log(cdf_values),
+        "bb": 1.0 - cdf_values,
+    }
     return {
-        ("northrop", True): _build_path_from_scores(
-            "northrop", northrop_scores, block_sizes, sliding=True
-        ),
-        ("northrop", False): _build_path_from_scores(
-            "northrop", northrop_scores, block_sizes, sliding=False
-        ),
-        ("bb", True): _build_path_from_scores("bb", bb_scores, block_sizes, sliding=True),
-        ("bb", False): _build_path_from_scores("bb", bb_scores, block_sizes, sliding=False),
+        (base_path, sliding): _build_path_from_scores(
+            base_path,
+            score_lookup[base_path],
+            block_sizes,
+            sliding=sliding,
+        )
+        for base_path, sliding in BM_PATH_KEYS
     }
 
 
@@ -186,19 +270,19 @@ def prepare_ei_bundle(
         calendar-day impact series such as zero-filled NFIP totals.
     block_sizes
         Optional explicit block-size grid. If omitted, the function constructs
-        one from :func:`unibm.core.generate_block_sizes` using the cleaned
+        one from :func:`unibm.evi.generate_block_sizes` using the cleaned
         observed sample size.
     threshold_quantiles
         Exceedance quantiles used to prepare threshold-side candidate events for
-        :func:`unibm.extremal_index.estimate_k_gaps` and
-        :func:`unibm.extremal_index.estimate_ferro_segers`.
+        :func:`unibm.ei.estimate_k_gaps` and
+        :func:`unibm.ei.estimate_ferro_segers`.
     allow_zeros
         If ``True``, permit zero-valued observations in the cleaned EI series.
         Leave this as ``False`` for positive-only severity series.
 
     Returns
     -------
-    unibm.extremal_index.EiPreparedBundle
+    unibm.ei.EiPreparedBundle
         Reusable bundle containing the cleaned observed values, BM path variants
         over the candidate block-size grid, and threshold-side exceedance
         candidates.

@@ -39,7 +39,7 @@ For a minimal formal-EI workflow:
 .. code-block:: python
 
    import numpy as np
-   from unibm.extremal_index import estimate_pooled_bm_ei, prepare_ei_bundle
+   from unibm.ei import estimate_pooled_bm_ei, prepare_ei_bundle
 
    sample = np.random.default_rng(21).pareto(2.0, 4096) + 1.0
    bundle = prepare_ei_bundle(sample)

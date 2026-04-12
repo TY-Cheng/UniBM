@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from unibm.window_ops import (
+from unibm._window_ops import (
     circular_sliding_window_maximum,
     sliding_window_extreme_valid,
 )
@@ -59,6 +59,18 @@ class WindowOpsTests(unittest.TestCase):
 
     def test_circular_sliding_window_maximum_matches_baseline_with_missing_values(self) -> None:
         values = np.array([1.0, np.nan, 2.0, 4.0], dtype=float)
+        observed = circular_sliding_window_maximum(values, 3)
+        expected = _baseline_circular_sliding_window_maximum(values, 3)
+        np.testing.assert_allclose(observed, expected, equal_nan=True)
+
+    def test_sliding_window_extreme_valid_matches_baseline_with_infinities(self) -> None:
+        values = np.array([1.0, np.inf, 2.0, -np.inf, 4.0, 3.0], dtype=float)
+        observed = sliding_window_extreme_valid(values, 2, reducer="max")
+        expected = _baseline_sliding_window_extreme_valid(values, 2, reducer="max")
+        np.testing.assert_allclose(observed, expected, equal_nan=True)
+
+    def test_circular_sliding_window_maximum_preserves_infinite_baseline_semantics(self) -> None:
+        values = np.array([1.0, np.inf, 2.0, 4.0], dtype=float)
         observed = circular_sliding_window_maximum(values, 3)
         expected = _baseline_circular_sliding_window_maximum(values, 3)
         np.testing.assert_allclose(observed, expected, equal_nan=True)

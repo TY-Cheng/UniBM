@@ -2,24 +2,28 @@ from __future__ import annotations
 
 import unittest
 import warnings
-from unittest import mock
 
 import numpy as np
 
-from unibm.bootstrap import (
-    BlockSummaryBootstrapBackbone,
-    _disjoint_block_maxima,
-    _segment_block_maxima,
-    _sliding_block_maxima,
-    build_block_summary_bootstrap_backbone,
-    circular_block_summary_bootstrap,
-    circular_block_summary_bootstrap_multi_target,
+from unibm._bootstrap_sampling import (
     default_circular_bootstrap_block_size,
     draw_circular_block_bootstrap_sample,
     draw_circular_block_bootstrap_samples,
+)
+from unibm.evi import (
+    BlockSummaryBootstrapBackbone,
+    build_block_summary_bootstrap_backbone,
+    circular_block_summary_bootstrap,
+    circular_block_summary_bootstrap_multi_target,
     evaluate_block_summary_bootstrap_backbone,
 )
-from unibm.summaries import summarize_block_maxima
+from unibm.evi._summaries import summarize_block_maxima
+from unibm.evi.bootstrap import (
+    _disjoint_block_maxima,
+    _evaluate_mode_bootstrap_column_batched,
+    _segment_block_maxima,
+    _sliding_block_maxima,
+)
 
 
 class UniBmBootstrapTests(unittest.TestCase):
@@ -158,14 +162,30 @@ class UniBmBootstrapTests(unittest.TestCase):
         )
         assert backbone is not None
 
-        with mock.patch("unibm.bootstrap.summarize_block_maxima") as mocked_summary:
-            mocked_summary.return_value = 1.0
-            evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target="mode")
+        expected_samples, _ = self._loop_reference(backbone, target="mode", quantile=0.5)
+        evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target="mode")
+        valid_rows = np.all(np.isfinite(expected_samples), axis=1)
+        np.testing.assert_allclose(evaluated["samples"], expected_samples[valid_rows])
+        if evaluated["samples"].shape[0] >= 2:
+            expected_cov = np.atleast_2d(np.cov(expected_samples[valid_rows], rowvar=False))
+            np.testing.assert_allclose(evaluated["covariance"], expected_cov)
 
-        self.assertEqual(
-            mocked_summary.call_count, backbone.segment_draws.shape[0] * block_sizes.size
+    def test_batched_mode_column_matches_loop_reference(self) -> None:
+        selected = np.array(
+            [
+                [1.0, 2.0, 2.5, 3.0],
+                [5.0, np.nan, 7.0, 11.0],
+                [4.0, 4.0, 4.0, 4.0],
+                [np.nan, np.nan, np.nan, np.nan],
+            ],
+            dtype=float,
         )
-        self.assertEqual(evaluated["samples"].shape, (4, 3))
+        expected = np.array(
+            [summarize_block_maxima(row, target="mode", quantile=0.5) for row in selected],
+            dtype=float,
+        )
+        observed = _evaluate_mode_bootstrap_column_batched(selected)
+        np.testing.assert_allclose(observed, expected, equal_nan=True)
 
     def test_evaluate_backbone_warns_on_nonpositive_summaries(self) -> None:
         backbone = BlockSummaryBootstrapBackbone(

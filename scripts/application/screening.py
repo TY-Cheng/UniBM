@@ -8,8 +8,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from unibm.core import block_maxima, estimate_evi_quantile
-from unibm.extremal_index import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
+from unibm.ei import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
+from unibm.evi import block_maxima, estimate_evi_quantile
 from shared.runtime import resolve_int_env
 
 

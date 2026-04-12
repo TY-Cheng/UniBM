@@ -5,42 +5,119 @@ from unittest.mock import patch
 
 import numpy as np
 
-from unibm.extremal_index import (
-    EI_DEFAULT_COVARIANCE_SHRINKAGE,
-    EiPathBundle,
-    EiPreparedBundle,
-    EiStableWindow,
-    ThresholdCandidate,
-    _bb_wald_fit,
-    _build_bm_estimate,
-    _build_bm_paths_from_values,
-    _build_path_from_scores,
-    _central_wald_interval,
-    _ferro_segers_from_times,
-    _finite_nonnegative_series,
-    _finite_positive_series,
-    _fit_pooled_z_model,
-    _inter_exceedance_times,
-    _intervals_overlap,
-    _kgaps_profile_fit,
-    _log_scale_theta_interval,
-    _northrop_profile_fit,
-    _pooled_z_fit,
-    _regularize_ei_covariance,
-    _rolling_window_minima,
-    _select_between_candidates,
-    _select_stable_ei_window,
-    bootstrap_bm_ei_path,
-    bootstrap_bm_ei_path_draws,
+from unibm.ei import (
     estimate_ferro_segers,
     estimate_k_gaps,
     estimate_native_bm_ei,
     estimate_pooled_bm_ei,
     extract_stable_path_window,
-    find_1d_profile_likelihood_intervals,
     prepare_ei_bundle,
+)
+from unibm.ei._internal import (
+    _central_wald_interval,
+    _finite_nonnegative_series,
+    _finite_positive_series,
+    _intervals_overlap,
+    _log_scale_theta_interval,
+    _select_between_candidates,
+    find_1d_profile_likelihood_intervals,
     scale_1d_pseudo_likelihood,
 )
+from unibm.ei.bootstrap import bootstrap_bm_ei_path, bootstrap_bm_ei_path_draws
+from unibm.ei.models import EiPathBundle, EiPreparedBundle, EiStableWindow, ThresholdCandidate
+from unibm.ei.native import (
+    EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    _bb_wald_fit,
+    _build_bm_estimate,
+    _fit_pooled_z_model,
+    _northrop_profile_fit,
+    _pooled_z_fit,
+    _regularize_ei_covariance,
+)
+from unibm.ei.paths import (
+    _build_bm_paths_from_values,
+    _build_path_from_scores,
+    _rolling_window_minima,
+    _select_stable_ei_window,
+)
+from unibm.ei.threshold import (
+    _ferro_segers_from_times,
+    _inter_exceedance_times,
+    _kgaps_profile_fit,
+)
+
+
+def _baseline_select_stable_ei_window(
+    block_sizes: np.ndarray,
+    z_path: np.ndarray,
+    *,
+    min_points: int = 4,
+    trim_fraction: float = 0.15,
+    roughness_penalty: float = 0.75,
+    curvature_penalty: float = 0.5,
+) -> tuple[EiStableWindow, np.ndarray]:
+    levels = np.asarray(block_sizes, dtype=int)
+    z = np.asarray(z_path, dtype=float)
+    mask = np.isfinite(z)
+    levels = levels[mask]
+    z = z[mask]
+    if levels.size < min_points:
+        raise ValueError("Not enough finite EI path values to select a stable window.")
+    lo = int(np.floor(levels.size * trim_fraction))
+    hi = levels.size - lo
+    if hi - lo < min_points:
+        lo = 0
+        hi = levels.size
+    best: tuple[float, int, int] | None = None
+    for start in range(lo, hi - min_points + 1):
+        for stop in range(start + min_points, hi + 1):
+            window = z[start:stop]
+            variance = float(np.mean((window - window.mean()) ** 2))
+            first_diff = np.diff(window)
+            roughness = float(np.mean(np.abs(first_diff))) if first_diff.size else 0.0
+            curvature = float(np.mean(np.abs(np.diff(first_diff)))) if first_diff.size > 1 else 0.0
+            score = (
+                variance
+                + float(roughness_penalty) * roughness
+                + float(curvature_penalty) * curvature
+            ) / np.sqrt(stop - start)
+            if best is None or score < best[0]:
+                best = (score, start, stop)
+    assert best is not None
+    _, start, stop = best
+    selected_mask = np.zeros(mask.sum(), dtype=bool)
+    selected_mask[start:stop] = True
+    window = EiStableWindow(int(levels[start]), int(levels[stop - 1]))
+    return window, selected_mask
+
+
+def _baseline_bootstrap_bm_ei_path_draws(
+    bootstrap_samples: np.ndarray,
+    *,
+    block_sizes: np.ndarray,
+    allow_zeros: bool = False,
+) -> dict[tuple[str, bool], np.ndarray]:
+    samples = np.asarray(bootstrap_samples, dtype=float)
+    block_sizes = np.asarray(block_sizes, dtype=int)
+    draws = {
+        ("northrop", True): np.full((samples.shape[0], block_sizes.size), np.nan, dtype=float),
+        ("northrop", False): np.full((samples.shape[0], block_sizes.size), np.nan, dtype=float),
+        ("bb", True): np.full((samples.shape[0], block_sizes.size), np.nan, dtype=float),
+        ("bb", False): np.full((samples.shape[0], block_sizes.size), np.nan, dtype=float),
+    }
+    for rep, sample in enumerate(samples):
+        try:
+            sample_values = (
+                _finite_nonnegative_series(sample)
+                if allow_zeros
+                else _finite_positive_series(sample)
+            )
+            sample_paths = _build_bm_paths_from_values(sample_values, block_sizes)
+        except ValueError:
+            continue
+        for key, path in sample_paths.items():
+            draws[key][rep] = path.z_path
+    return draws
 
 
 class UniBmExtremalIndexTests(unittest.TestCase):
@@ -151,9 +228,22 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         block_sizes = np.array([4, 8, 16, 32], dtype=int)
         z_path = np.array([0.1, 0.11, 0.12, 0.11], dtype=float)
         window, mask = _select_stable_ei_window(block_sizes, z_path, min_points=3)
+        baseline_window, baseline_mask = _baseline_select_stable_ei_window(
+            block_sizes,
+            z_path,
+            min_points=3,
+        )
         self.assertLessEqual(window.lo, window.hi)
         self.assertGreater(mask.sum(), 0)
+        self.assertEqual(window, baseline_window)
+        np.testing.assert_array_equal(mask, baseline_mask)
         fallback_window, fallback_mask = _select_stable_ei_window(
+            block_sizes,
+            z_path,
+            min_points=4,
+            trim_fraction=0.4,
+        )
+        baseline_fallback_window, baseline_fallback_mask = _baseline_select_stable_ei_window(
             block_sizes,
             z_path,
             min_points=4,
@@ -161,6 +251,8 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         )
         self.assertLessEqual(fallback_window.lo, fallback_window.hi)
         self.assertEqual(fallback_mask.sum(), 4)
+        self.assertEqual(fallback_window, baseline_fallback_window)
+        np.testing.assert_array_equal(fallback_mask, baseline_fallback_mask)
         with self.assertRaisesRegex(ValueError, "Not enough finite EI path values"):
             _select_stable_ei_window(block_sizes[:2], np.array([np.nan, 0.1]), min_points=3)
 
@@ -222,8 +314,15 @@ class UniBmExtremalIndexTests(unittest.TestCase):
         draws = bootstrap_bm_ei_path_draws(
             bootstrap_samples, block_sizes=block_sizes, allow_zeros=True
         )
+        baseline_draws = _baseline_bootstrap_bm_ei_path_draws(
+            bootstrap_samples,
+            block_sizes=block_sizes,
+            allow_zeros=True,
+        )
         self.assertEqual(draws[("bb", True)].shape, (3, 4))
         self.assertTrue(np.isnan(draws[("bb", True)][1]).all())
+        for key in draws:
+            np.testing.assert_allclose(draws[key], baseline_draws[key], equal_nan=True)
 
         boot = bootstrap_bm_ei_path(
             values,
@@ -326,7 +425,7 @@ class UniBmExtremalIndexTests(unittest.TestCase):
             return (0.2, 0.4)
 
         with patch(
-            "unibm.extremal_index._threshold.find_1d_profile_likelihood_intervals",
+            "unibm.ei.threshold.find_1d_profile_likelihood_intervals",
             side_effect=fake_interval,
         ):
             zero_gap_candidate = _kgaps_profile_fit(

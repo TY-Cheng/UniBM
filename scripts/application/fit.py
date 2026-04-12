@@ -9,18 +9,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from unibm.bootstrap import draw_circular_block_bootstrap_samples
-from unibm.core import estimate_evi_quantile
-from unibm.extremal_index import (
+from unibm.ei import (
     EiPreparedBundle,
     ExtremalIndexEstimate,
-    bootstrap_bm_ei_path_draws,
     estimate_ferro_segers,
     estimate_k_gaps,
     estimate_pooled_bm_ei,
     extract_stable_path_window,
     prepare_ei_bundle,
 )
+from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
+from unibm.ei.bootstrap import bootstrap_bm_ei_path_draws
+from unibm.evi import estimate_evi_quantile
 from application.specs import (
     APPLICATION_EI_BOOTSTRAP_REPS,
     APPLICATION_RANDOM_STATE,
@@ -62,7 +62,7 @@ def _bootstrap_ei_path_draws(
     reps: int = APPLICATION_EI_BOOTSTRAP_REPS,
     random_state: int = APPLICATION_RANDOM_STATE,
 ) -> dict[tuple[str, bool], np.ndarray]:
-    """Bootstrap all four BM EI z-path variants from one circular sample bank."""
+    """Bootstrap the application EI z-path variants from one circular sample bank."""
     sample_bank = draw_circular_block_bootstrap_samples(
         series.to_numpy(dtype=float),
         reps=reps,
@@ -71,6 +71,7 @@ def _bootstrap_ei_path_draws(
     return bootstrap_bm_ei_path_draws(
         sample_bank.samples,
         block_sizes=ei_bundle.block_sizes,
+        path_keys=(("bb", True), ("northrop", True)),
         allow_zeros=allow_zeros,
     )
 
@@ -213,6 +214,9 @@ def build_application_bundles_from_inputs(
     status(
         "application", f"building {len(tasks)} application bundles with {workers} worker processes"
     )
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
     with ProcessPoolExecutor(max_workers=workers) as executor:
         return list(executor.map(_build_application_bundle_worker, tasks, chunksize=1))
 

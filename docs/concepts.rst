@@ -33,11 +33,11 @@ as separate headline EVI fits.
 
 In code, the main entrypoints are:
 
-- :func:`unibm.core.generate_block_sizes`
-- :func:`unibm.core.block_summary_curve`
-- :func:`unibm.core.estimate_target_scaling`
-- :func:`unibm.core.estimate_evi_quantile`
-- :func:`unibm.core.estimate_design_life_level`
+- :func:`unibm.evi.generate_block_sizes`
+- :func:`unibm.evi.block_summary_curve`
+- :func:`unibm.evi.estimate_target_scaling`
+- :func:`unibm.estimate_evi_quantile`
+- :func:`unibm.estimate_design_life_level`
 
 EI workflow
 -----------
@@ -62,10 +62,10 @@ different roles:
 
 In code, the main entrypoints are:
 
-- :func:`unibm.extremal_index.prepare_ei_bundle`
-- :func:`unibm.extremal_index.estimate_pooled_bm_ei`
-- :func:`unibm.extremal_index.estimate_k_gaps`
-- :func:`unibm.extremal_index.estimate_ferro_segers`
+- :func:`unibm.ei.prepare_ei_bundle`
+- :func:`unibm.ei.estimate_pooled_bm_ei`
+- :func:`unibm.ei.estimate_k_gaps`
+- :func:`unibm.ei.estimate_ferro_segers`
 
 Interpreting EVI vs EI outputs
 ------------------------------
@@ -97,15 +97,14 @@ Diagnostic EI vs formal EI
 --------------------------
 
 ``unibm.diagnostics`` is meant for exploratory stability views, such as
-``1 / theta`` plots. ``unibm.extremal_index`` contains the formal inference
+``1 / theta`` plots. ``unibm.ei`` contains the formal inference
 objects used in benchmark and application pipelines.
 
 Module responsibilities
 -----------------------
 
-- ``core``: block-maxima summaries, regression, and design-life-level mapping.
-- ``bootstrap``: shared bootstrap resampling and covariance backbones.
-- ``extremal_index``: formal EI preparation, path construction, and estimators.
+- ``evi``: block-maxima summaries, bootstrap backbones, regression, external
+  xi comparators, and design-life-level mapping.
+- ``ei``: formal EI preparation, path construction, and estimators.
 - ``diagnostics``: lighter exploratory summaries and reciprocal plots.
-- ``external``: published xi estimators used as comparators.
 - ``plotting``: figures for fitted objects.

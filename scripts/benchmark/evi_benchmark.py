@@ -29,7 +29,7 @@ if __package__ in {None, ""}:
     _module.ensure_scripts_on_path_from_entry(__file__)
 
 from config import resolve_repo_dirs
-from unibm.models import ScalingFit
+from unibm.evi import ScalingFit
 
 from benchmark.design import (
     BENCHMARK_MASTER_SEED,

@@ -12,7 +12,8 @@ prepare_matplotlib_env()
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .models import ExtremalIndexReciprocalFit, ScalingFit
+from ._diagnostic_models import ExtremalIndexReciprocalFit
+from .evi.models import ScalingFit
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
@@ -51,8 +52,8 @@ def plot_scaling_fit(
     Parameters
     ----------
     fit
-        Fitted scaling model returned by :func:`unibm.core.estimate_evi_quantile`
-        or :func:`unibm.core.estimate_target_scaling`.
+        Fitted scaling model returned by :func:`unibm.evi.estimate_evi_quantile`
+        or :func:`unibm.evi.estimate_target_scaling`.
     file_path
         Optional output path used when ``save=True``.
     dpi

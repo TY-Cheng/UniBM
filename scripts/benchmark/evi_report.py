@@ -361,7 +361,7 @@ def build_evi_shrinkage_sensitivity_summary(
     )
     from benchmark.evi_benchmark import BENCHMARK_ALPHA, BENCHMARK_RANDOM_STATE
     from config import resolve_repo_dirs
-    from unibm.core import estimate_target_scaling
+    from unibm.evi import estimate_target_scaling
 
     dirs = resolve_repo_dirs(root)
     out_dir = dirs["DIR_OUT_BENCHMARK"]

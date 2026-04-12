@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from unibm.extremal_index import (
+from unibm.ei import (
     EI_ALPHA,
     ExtremalIndexEstimate,
     bootstrap_bm_ei_path_draws,

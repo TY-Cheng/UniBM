@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from data_prep.ghcn import PreparedSeries
-from unibm.extremal_index import EiPreparedBundle, ExtremalIndexEstimate
-from unibm.models import ScalingFit
+from unibm.ei import EiPreparedBundle, ExtremalIndexEstimate
+from unibm.evi import ScalingFit
 
 
 APPLICATION_RANDOM_STATE = 7

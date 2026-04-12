@@ -46,7 +46,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from unibm.extremal_index import (
+from unibm.ei import (
     EI_ALPHA,
     EI_CI_LEVEL,
     estimate_pooled_bm_ei,

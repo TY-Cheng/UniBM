@@ -31,7 +31,7 @@ vignette:
     just sync-env
     uv run python -m jupytext --sync notebooks/vignette.py
     uv run python -m nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
-    uv run ruff format ./**/*.py ./**/*.ipynb
+    uv run ruff format .
 
 verify:
     just sync-env
@@ -40,16 +40,12 @@ verify:
     uv run coverage report -m
     uv run coverage xml
     uv run coverage html
-    uv run ruff check scripts tests notebooks
+    uv run ruff format .
 
 docs:
     just sync-env
     rm -rf docs/_build
     uv run sphinx-build -b html docs docs/_build/html
-
-format:
-    just sync-env
-    uv run ruff format ./**/*.py ./**/*.ipynb
 
 # Setup
 [private]

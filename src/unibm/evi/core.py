@@ -15,9 +15,11 @@ import numpy as np
 
 from .bootstrap import circular_block_summary_bootstrap
 from .models import BlockSummaryCurve, PlateauWindow, ScalingFit
-from .summaries import summarize_block_maxima
-from ._validation import as_1d_float_array, warn_on_negative_values, warn_on_nonpositive_values
-from .window_ops import sliding_window_extreme_valid
+from .._block_grid import DEFAULT_MIN_DISJOINT_BLOCKS, generate_block_sizes
+from .._numeric import prefix_sum
+from .._validation import as_1d_float_array, warn_on_negative_values, warn_on_nonpositive_values
+from .._window_ops import sliding_window_extreme_valid
+from ._summaries import summarize_block_maxima
 
 Z_CRIT_95 = 1.96
 
@@ -31,48 +33,6 @@ DEFAULT_COVARIANCE_SHRINKAGE = 0.35
 # reject windows that only look linear because a few adjacent block sizes happen
 # to align in very short samples.
 DEFAULT_CURVATURE_PENALTY = 2.0
-
-# Keep the largest candidate block size short enough that the disjoint-block
-# baseline still has a minimally meaningful number of maxima. This matters most
-# in the short-record benchmark (`n_obs` around 365), where very large blocks
-# otherwise leave the right tail of the regression curve dominated by only a
-# handful of disjoint maxima.
-DEFAULT_MIN_DISJOINT_BLOCKS = 15
-
-
-def generate_block_sizes(
-    n_obs: int,
-    num_step: int | None = None,
-    min_block_size: int | None = None,
-    max_block_size: int | None = None,
-    geom: bool = True,
-    min_disjoint_blocks: int = DEFAULT_MIN_DISJOINT_BLOCKS,
-) -> np.ndarray:
-    """Generate an intermediate-range grid of block sizes.
-
-    The default exponents deliberately avoid the smallest blocks, where finite-block
-    behavior is dominated by local dependence, and the largest blocks, where too few
-    maxima remain for stable regression.
-    """
-    if n_obs < 32:
-        raise ValueError("At least 32 observations are required for block-size selection.")
-    if min_block_size is None:
-        min_block_size = max(5, int(np.ceil(n_obs**0.2)))
-    if max_block_size is None:
-        exponent_cap = int(np.floor(n_obs**0.55))
-        disjoint_cap = int(np.floor(n_obs / max(min_disjoint_blocks, 1)))
-        max_block_size = min(exponent_cap, disjoint_cap)
-        max_block_size = max(min_block_size + 4, max_block_size)
-    if max_block_size <= min_block_size:
-        max_block_size = min_block_size + 4
-    if num_step is None:
-        num_step = min(32, max(10, max_block_size - min_block_size + 1))
-    if geom:
-        block_sizes = np.geomspace(min_block_size, max_block_size, num=num_step)
-    else:
-        block_sizes = np.linspace(min_block_size, max_block_size, num=num_step)
-    block_sizes = np.unique(np.clip(np.rint(block_sizes).astype(int), min_block_size, None))
-    return block_sizes[block_sizes > 1]
 
 
 def block_maxima(
@@ -251,16 +211,45 @@ def select_penultimate_window(
     if hi - lo < min_points:
         lo = 0
         hi = n
+    prefix_x = prefix_sum(x)
+    prefix_y = prefix_sum(y)
+    prefix_x2 = prefix_sum(x * x)
+    prefix_xy = prefix_sum(x * y)
+    prefix_y2 = prefix_sum(y * y)
+    local_slopes = np.diff(y) / np.diff(x)
+    slope_curvature_prefix = prefix_sum(np.abs(np.diff(local_slopes)))
     best: tuple[float, int, int] | None = None
     for start in range(lo, hi - min_points + 1):
         for stop in range(start + min_points, hi + 1):
-            model = _fit_linear_model(x[start:stop], y[start:stop])
-            resid = y[start:stop] - model["fitted"]
-            mse = float(np.mean(resid**2))
-            # Penalize windows that are only locally linear because of sharp curvature.
-            slopes = np.diff(y[start:stop]) / np.diff(x[start:stop])
-            curvature = float(np.mean(np.abs(np.diff(slopes)))) if slopes.size > 1 else 0.0
-            score = (mse + float(curvature_penalty) * curvature) / np.sqrt(stop - start)
+            window_len = stop - start
+            sum_x = prefix_x[stop] - prefix_x[start]
+            sum_y = prefix_y[stop] - prefix_y[start]
+            sum_x2 = prefix_x2[stop] - prefix_x2[start]
+            sum_xy = prefix_xy[stop] - prefix_xy[start]
+            sum_y2 = prefix_y2[stop] - prefix_y2[start]
+            denominator = window_len * sum_x2 - sum_x * sum_x
+            if denominator <= 0:
+                model = _fit_linear_model(x[start:stop], y[start:stop])
+                resid = y[start:stop] - model["fitted"]
+                mse = float(np.mean(resid**2))
+            else:
+                slope = (window_len * sum_xy - sum_x * sum_y) / denominator
+                intercept = (sum_y - slope * sum_x) / window_len
+                sse = (
+                    sum_y2
+                    - 2.0 * intercept * sum_y
+                    - 2.0 * slope * sum_xy
+                    + window_len * intercept * intercept
+                    + 2.0 * intercept * slope * sum_x
+                    + slope * slope * sum_x2
+                )
+                mse = max(float(sse) / window_len, 0.0)
+            if window_len > 2:
+                curvature_total = slope_curvature_prefix[stop - 2] - slope_curvature_prefix[start]
+                curvature = float(curvature_total / (window_len - 2))
+            else:
+                curvature = 0.0
+            score = (mse + float(curvature_penalty) * curvature) / np.sqrt(window_len)
             if best is None or score < best[0]:
                 best = (score, start, stop)
     assert best is not None
@@ -443,7 +432,7 @@ def estimate_evi_quantile(
 
     Returns
     -------
-    unibm.models.ScalingFit
+    unibm.evi.ScalingFit
         Immutable result object containing the fitted slope, confidence
         interval, selected plateau, and the underlying block-summary curve.
 
@@ -502,9 +491,8 @@ def estimate_target_scaling(
     vec
         One-dimensional raw series.
     target
-        Block-summary functional. Supported values are those implemented by
-        :func:`unibm.summaries.summarize_block_maxima`, such as ``"quantile"``,
-        ``"mean"``, and ``"mode"``.
+        Block-summary functional. UniBM currently provides
+        ``"quantile"``, ``"mean"``, and ``"mode"``.
     quantile
         Quantile level used only when ``target="quantile"``.
     sliding
@@ -522,7 +510,7 @@ def estimate_target_scaling(
 
     Returns
     -------
-    unibm.models.ScalingFit
+    unibm.evi.ScalingFit
         The fitted scaling model for the requested block-summary target.
 
     Notes
@@ -577,7 +565,7 @@ def estimate_design_life_level(
     Parameters
     ----------
     fit
-        Quantile-based :class:`~unibm.models.ScalingFit`. The fit should usually
+        Quantile-based :class:`~unibm.evi.ScalingFit`. The fit should usually
         come from :func:`estimate_evi_quantile`.
     years
         Design-life lengths in years. May be a scalar or an array.

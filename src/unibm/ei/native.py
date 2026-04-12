@@ -6,19 +6,17 @@ import warnings
 
 import numpy as np
 
-from ._paths import extract_stable_path_window
-from ._shared import (
+from ._internal import (
     EI_ALPHA,
     EI_TINY,
     Z_CRIT_95,
-    ExtremalIndexEstimate,
-    EiPathBundle,
-    EiPreparedBundle,
     _central_wald_interval,
     _log_scale_theta_interval,
     find_1d_profile_likelihood_intervals,
     scale_1d_pseudo_likelihood,
 )
+from .models import EiPathBundle, EiPreparedBundle, ExtremalIndexEstimate
+from .paths import extract_stable_path_window
 
 EI_DEFAULT_COVARIANCE_SHRINKAGE = 0.35
 
@@ -253,7 +251,7 @@ def estimate_native_bm_ei(
     ----------
     bundle
         Prepared observed-data bundle returned by
-        :func:`unibm.extremal_index.prepare_ei_bundle`.
+        :func:`unibm.ei.prepare_ei_bundle`.
     base_path
         BM path family to use. ``"northrop"`` applies the Northrop
         pseudo-likelihood on the selected block size; ``"bb"`` applies the BB
@@ -268,7 +266,7 @@ def estimate_native_bm_ei(
 
     Returns
     -------
-    unibm.extremal_index.ExtremalIndexEstimate
+    unibm.ei.ExtremalIndexEstimate
         Native fixed-``b`` EI estimate. The headline fields are ``theta_hat``,
         ``confidence_interval``, ``selected_level``, and ``stable_window``.
         ``path_level`` and ``path_theta`` are included only as supporting path
@@ -326,7 +324,7 @@ def estimate_pooled_bm_ei(
     ----------
     bundle
         Prepared observed-data bundle returned by
-        :func:`unibm.extremal_index.prepare_ei_bundle`.
+        :func:`unibm.ei.prepare_ei_bundle`.
     base_path
         BM path family to pool. ``"northrop"`` uses the
         ``-log(Fhat(X_t))``-based path and ``"bb"`` uses the ``1 - Fhat(X_t)``
@@ -349,7 +347,7 @@ def estimate_pooled_bm_ei(
 
     Returns
     -------
-    unibm.extremal_index.ExtremalIndexEstimate
+    unibm.ei.ExtremalIndexEstimate
         Pooled formal EI estimate. The headline fields are ``theta_hat``,
         ``confidence_interval``, ``stable_window``, ``regression``, and
         ``base_path``. ``path_level`` and ``path_theta`` remain available for
