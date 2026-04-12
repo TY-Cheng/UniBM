@@ -5,10 +5,10 @@ import warnings
 
 import numpy as np
 
-from unibm.evi._summaries import estimate_sample_mode, summarize_block_maxima
+from unibm.evi.summaries import estimate_sample_mode, summarize_block_maxima
 
 
-class UniBmSummariesTests(unittest.TestCase):
+class EviSummariesTests(unittest.TestCase):
     def test_estimate_sample_mode_warns_and_excludes_nonpositive_values(self) -> None:
         sample = np.array([-1.0, 0.0, 1.0, 1.1, 1.2, 2.5], dtype=float)
         with warnings.catch_warnings(record=True) as caught:

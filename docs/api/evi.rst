@@ -1,21 +1,92 @@
 Canonical EVI API
 =================
 
-This grouped package contains the full block-maxima EVI layer:
+The xi/EVI branch is organized into canonical modules with narrow
+responsibilities:
 
-- headline quantile-scaling estimation and design-life mapping;
-- reusable bootstrap backbones for FGLS;
-- published xi comparators used in benchmark studies;
-- EVI result types such as :class:`ScalingFit`.
-
-Use :mod:`unibm.evi` when you want more than the two headline root functions
-kept under :mod:`unibm`.
-
-Raw circular bootstrap resampling remains internal infrastructure under the
-top-level private shared layer; :mod:`unibm.evi` exposes only the block-summary
-bootstrap/backbone API built on top of that sampling step.
+- :mod:`unibm.evi.blocks` for block extraction and block-summary curves
+- :mod:`unibm.evi.targets` for cross-target block-summary stability tables
+- :mod:`unibm.evi.summaries` for block-summary functionals
+- :mod:`unibm.evi.selection` for plateau-window selection
+- :mod:`unibm.evi.estimation` for canonical EVI fitting entrypoints
+- :mod:`unibm.evi.design` for post-fit block-quantile and design-life mapping
+- :mod:`unibm.evi.bootstrap` for reusable bootstrap backbones and covariance estimation
+- :mod:`unibm.evi.baselines` for comparator xi estimators
+- :mod:`unibm.evi.models` for result dataclasses
 
 .. automodule:: unibm.evi
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Blocks
+------
+
+.. automodule:: unibm.evi.blocks
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Targets
+-------
+
+.. automodule:: unibm.evi.targets
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Summaries
+---------
+
+.. automodule:: unibm.evi.summaries
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Selection
+---------
+
+.. automodule:: unibm.evi.selection
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Estimation
+----------
+
+.. automodule:: unibm.evi.estimation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Design
+------
+
+.. automodule:: unibm.evi.design
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Bootstrap
+---------
+
+.. automodule:: unibm.evi.bootstrap
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Baselines
+---------
+
+.. automodule:: unibm.evi.baselines
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Models
+------
+
+.. automodule:: unibm.evi.models
    :members:
    :undoc-members:
    :show-inheritance:

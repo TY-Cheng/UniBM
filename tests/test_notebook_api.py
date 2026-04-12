@@ -12,7 +12,7 @@ for path in (SCRIPTS_DIR, SRC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import notebook_api.api as notebook_api
+import notebook_api
 
 
 class NotebookApiTests(unittest.TestCase):

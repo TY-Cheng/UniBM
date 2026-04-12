@@ -1,4 +1,4 @@
-"""Block-maxima summary targets used by the EVI scaling estimator."""
+"""Block-maxima summary functionals for the EVI scaling workflow."""
 
 from __future__ import annotations
 
@@ -45,9 +45,6 @@ def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True)
         kernel = np.exp(-0.5 * ((grid[:, None] - chunk[None, :]) / bandwidth) ** 2)
         density += kernel.sum(axis=1)
     density /= log_sample.size
-    # Convert the log-scale KDE surrogate back to the original support by
-    # applying the Jacobian for x = exp(y) - 1, so we maximize an approximate
-    # density on the original scale rather than on the transformed scale.
     density_on_original_scale = density * np.exp(-grid)
     return float(np.expm1(grid[int(np.nanargmax(density_on_original_scale))]))
 

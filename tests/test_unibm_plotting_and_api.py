@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import unibm
-from unibm._diagnostic_models import ExtremalIndexReciprocalFit
 from unibm._window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
 from unibm.evi import (
     BlockSummaryCurve,
@@ -19,9 +18,7 @@ from unibm.evi import (
 )
 from unibm.plotting import (
     _resolved_file_path,
-    _save_figure_outputs,
     _should_close_figure,
-    plot_extremal_index_reciprocal,
     plot_scaling_fit,
 )
 from unibm._runtime import (
@@ -59,22 +56,6 @@ def _make_scaling_fit() -> ScalingFit:
         plateau=plateau,
         cov_beta=np.eye(2),
         bootstrap=None,
-    )
-
-
-def _make_ei_fit() -> ExtremalIndexReciprocalFit:
-    block_sizes = np.array([4, 8, 16], dtype=int)
-    return ExtremalIndexReciprocalFit(
-        block_sizes=block_sizes,
-        log_block_sizes=np.log(block_sizes),
-        northrop_values=np.array([1.5, 1.6, 1.7], dtype=float),
-        northrop_standard_deviations=np.array([0.3, 0.2, 0.25], dtype=float),
-        bb_values=np.array([1.4, 1.45, 1.5], dtype=float),
-        bb_standard_deviations=np.array([0.25, 0.21, 0.22], dtype=float),
-        northrop_block_size=8,
-        northrop_estimate=1.6,
-        bb_block_size=8,
-        bb_estimate=1.45,
     )
 
 
@@ -121,19 +102,6 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertGreater(len(plt.get_fignums()), 0)
             plot_scaling_fit(fit, save=False, close=True)
             plt.close("all")
-
-    def test_plot_extremal_index_reciprocal_saves_pdf(self) -> None:
-        fit = _make_ei_fit()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            out = Path(tmpdir) / "ei.pdf"
-            plot_extremal_index_reciprocal(fit, file_path=out, save=True, close=True, title="EI")
-            self.assertTrue(out.exists())
-            self.assertGreater(out.stat().st_size, 0)
-            fig, ax = plt.subplots()
-            scratch = Path(tmpdir) / "scratch.pdf"
-            _save_figure_outputs(fig, scratch)
-            self.assertTrue(scratch.exists())
-            plt.close(fig)
 
     def test_public_api_exposes_only_slim_facade(self) -> None:
         self.assertEqual(

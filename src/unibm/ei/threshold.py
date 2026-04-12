@@ -5,15 +5,29 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from ._internal import (
+from ._likelihood import find_1d_profile_likelihood_intervals
+from ._stats import (
     EI_ALPHA,
     EI_TINY,
     Z_CRIT_95,
     _central_wald_interval,
-    _select_between_candidates,
-    find_1d_profile_likelihood_intervals,
+    _intervals_overlap,
 )
 from .models import EiPreparedBundle, ExtremalIndexEstimate, ThresholdCandidate
+
+
+def _select_between_candidates(
+    preferred: ThresholdCandidate,
+    alternative: ThresholdCandidate,
+) -> ThresholdCandidate:
+    """Prefer the first candidate when the intervals overlap, else the second."""
+    if not np.isfinite(preferred.theta_hat):
+        return alternative
+    if not np.isfinite(alternative.theta_hat):
+        return preferred
+    if _intervals_overlap(preferred.confidence_interval, alternative.confidence_interval):
+        return preferred
+    return alternative
 
 
 def _inter_exceedance_times(indices: np.ndarray) -> np.ndarray:

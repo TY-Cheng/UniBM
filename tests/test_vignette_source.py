@@ -40,7 +40,7 @@ class VignetteSourceTests(unittest.TestCase):
         self.assertIn('_display_workflow_svg(ROOT / "docs" / "_static" / "ei_workflow.dot")', text)
         self.assertIn("application_design_life_levels.csv", text)
         self.assertIn("_load_notebook_api", text)
-        self.assertIn('"notebook_api" / "api.py"', text)
+        self.assertIn('"notebook_api.py"', text)
         self.assertNotIn("application_return_levels.csv", text)
         self.assertNotIn("EI-adjusted", text)
         self.assertNotIn("houston_ei =", text)
