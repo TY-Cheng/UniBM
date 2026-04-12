@@ -426,7 +426,8 @@ site under `docs/`, and the generated HTML entrypoint is
 
 The docs include:
 
-- API reference pages for the `unibm` public modules;
+- API reference pages for the slim root facade plus the canonical `unibm.evi`
+  and `unibm.ei` packages;
 - an `EVI and EI Workflow Guide` overview page;
 - a `Worked Examples` page with small runnable examples for EVI, bootstrap
   backbones, and formal EI estimation;

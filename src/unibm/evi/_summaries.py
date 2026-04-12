@@ -1,4 +1,4 @@
-"""Block-maxima summary targets used by the scaling estimator."""
+"""Block-maxima summary targets used by the EVI scaling estimator."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import warnings
 
 import numpy as np
 
-from ._validation import as_1d_float_array
+from .._validation import as_1d_float_array
 
 
 def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True) -> float:

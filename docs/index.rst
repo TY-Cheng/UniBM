@@ -21,10 +21,7 @@ package under ``src/unibm``.
    :caption: API Reference
 
    api/public_api
-   api/core
-   api/extremal_index
-   api/bootstrap
-   api/external
+   api/evi
+   api/ei
    api/diagnostics
-   api/models
    api/plotting

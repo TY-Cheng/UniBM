@@ -48,19 +48,19 @@ from shared.runtime import status
 from benchmark.common import render_latex_table
 from benchmark.common import latex_escape
 from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
-from unibm.core import (
+from unibm.ei import (
+    EiStableWindow,
+    estimate_pooled_bm_ei,
+)
+from unibm.ei.bootstrap import bootstrap_bm_ei_path_draws
+from unibm.evi import (
     DEFAULT_CURVATURE_PENALTY,
+    ScalingFit,
     block_summary_curve,
     estimate_design_life_level,
     estimate_target_scaling,
 )
-from unibm.bootstrap import draw_circular_block_bootstrap_samples
-from unibm.extremal_index import (
-    EiStableWindow,
-    bootstrap_bm_ei_path_draws,
-    estimate_pooled_bm_ei,
-)
-from unibm.models import ScalingFit
+from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
 
 
 _MANUSCRIPT_APPLICATION_KEYS = (
@@ -579,7 +579,7 @@ def _top_penultimate_windows(
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
 ) -> list[object]:
     """Return the top scoring plateau windows for one fitted EVI curve."""
-    from unibm.models import PlateauWindow
+    from unibm.evi import PlateauWindow
 
     x = np.asarray(fit.log_block_sizes, dtype=float)
     y = np.asarray(fit.log_values, dtype=float)

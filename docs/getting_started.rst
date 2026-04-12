@@ -47,7 +47,7 @@ The shortest formal-EI package workflow is:
 
 .. code-block:: python
 
-   from unibm.extremal_index import prepare_ei_bundle, estimate_pooled_bm_ei
+   from unibm.ei import prepare_ei_bundle, estimate_pooled_bm_ei
 
    bundle = prepare_ei_bundle(sample)
    ei_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
@@ -58,8 +58,8 @@ For a quick guide to which returned fields matter most, see
 Package boundaries
 ------------------
 
-- ``unibm.core`` contains the main block-maxima EVI machinery.
-- ``unibm.extremal_index`` contains formal EI estimation.
-- ``unibm.bootstrap`` contains reusable bootstrap backbones.
-- ``unibm.external`` contains published EVI comparator estimators.
+- ``unibm.evi`` contains the full block-maxima EVI workflow, reusable bootstrap
+  backbones, published EVI comparator estimators, and EVI result types.
+- ``unibm.ei`` contains formal EI estimation and EI result types.
+- ``unibm.diagnostics`` contains exploratory reciprocal-EI diagnostics and CDF helpers.
 - ``unibm.plotting`` contains plotting helpers for notebook and manuscript use.

@@ -9,7 +9,15 @@ series and then fit :func:`estimate_pooled_bm_ei` for the pooled BM headline
 estimate. Use :func:`estimate_native_bm_ei` when you specifically want the
 single-block-size native benchmark estimators.
 
-.. automodule:: unibm.extremal_index
+Canonical public submodules:
+
+- :mod:`unibm.ei.paths`
+- :mod:`unibm.ei.native`
+- :mod:`unibm.ei.threshold`
+- :mod:`unibm.ei.bootstrap`
+- :mod:`unibm.ei.models`
+
+.. automodule:: unibm.ei
    :members:
    :undoc-members:
    :show-inheritance:

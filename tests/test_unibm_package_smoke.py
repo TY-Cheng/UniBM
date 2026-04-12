@@ -6,7 +6,7 @@ from importlib import resources
 import numpy as np
 
 import unibm
-from unibm.extremal_index import estimate_pooled_bm_ei, prepare_ei_bundle
+from unibm.ei import estimate_pooled_bm_ei, prepare_ei_bundle
 
 
 class UniBmPackageSmokeTests(unittest.TestCase):
@@ -39,6 +39,10 @@ class UniBmPackageSmokeTests(unittest.TestCase):
         self.assertGreater(len(fit.path_level), 0)
         self.assertEqual(len(fit.path_level), len(fit.path_theta))
         self.assertTrue(resources.files("unibm").joinpath("py.typed").is_file())
+
+    def test_top_level_package_keeps_new_grouped_subpackages_available(self) -> None:
+        self.assertIs(unibm.evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
+        self.assertIs(unibm.ei.prepare_ei_bundle, prepare_ei_bundle)
 
 
 if __name__ == "__main__":

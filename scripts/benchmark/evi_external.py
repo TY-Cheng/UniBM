@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from unibm.external import (
+from unibm.evi import (
     ExternalXiEstimate,
     estimate_dedh_moment_evi,
     estimate_hill_evi,

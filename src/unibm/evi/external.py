@@ -23,7 +23,7 @@ from statistics import NormalDist
 
 import numpy as np
 
-from ._validation import positive_finite_values
+from .._validation import positive_finite_values
 
 
 @dataclass(frozen=True)

@@ -9,9 +9,9 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
-from .core import block_summary_curve
-from .models import ExtremalIndexReciprocalFit
 from ._validation import warn_on_negative_values
+from ._diagnostic_models import ExtremalIndexReciprocalFit
+from .evi.core import block_summary_curve
 
 CdfMethod = Literal["kernel", "empirical"]
 KernelName = Literal["gaussian"]
@@ -217,7 +217,7 @@ def estimate_extremal_index_reciprocal(
 
     Returns
     -------
-    unibm.models.ExtremalIndexReciprocalFit
+    ExtremalIndexReciprocalFit
         Diagnostic path object containing Northrop and BB reciprocal-EI curves,
         their empirical standard deviations, and the selected block sizes.
 
@@ -225,7 +225,7 @@ def estimate_extremal_index_reciprocal(
     -----
     This function is exploratory: it returns diagnostic reciprocal-EI curves
     rather than the formal benchmark/application EI estimators. For the formal
-    threshold or pooled block-maxima EI estimators, see :mod:`unibm.extremal_index`.
+    threshold or pooled block-maxima EI estimators, see :mod:`unibm.ei`.
     """
     raw = np.asarray(series.values, dtype=float)
     warn_on_negative_values(raw, context="estimate_extremal_index_reciprocal", stacklevel=3)

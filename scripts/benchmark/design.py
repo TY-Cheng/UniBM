@@ -19,17 +19,17 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
-from unibm.bootstrap import (
-    circular_block_summary_bootstrap_multi_target,
-    draw_circular_block_bootstrap_samples,
-)
-from unibm.core import (
+from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
+from unibm.evi import (
+    BlockSummaryCurve,
+    PlateauWindow,
+    ScalingFit,
     block_summary_curve,
+    circular_block_summary_bootstrap_multi_target,
     estimate_target_scaling,
     generate_block_sizes,
     select_penultimate_window,
 )
-from unibm.models import BlockSummaryCurve, PlateauWindow, ScalingFit
 
 
 # The full 12-method EVI grid is expensive, but the paper-scale benchmark should

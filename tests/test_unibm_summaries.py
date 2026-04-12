@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 
-from unibm.summaries import estimate_sample_mode, summarize_block_maxima
+from unibm.evi._summaries import estimate_sample_mode, summarize_block_maxima
 
 
 class UniBmSummariesTests(unittest.TestCase):

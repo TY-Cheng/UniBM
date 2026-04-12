@@ -10,9 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import unibm
-from unibm.models import (
+from unibm._diagnostic_models import ExtremalIndexReciprocalFit
+from unibm._window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
+from unibm.evi import (
     BlockSummaryCurve,
-    ExtremalIndexReciprocalFit,
     PlateauWindow,
     ScalingFit,
 )
@@ -28,7 +29,6 @@ from unibm._runtime import (
     _runtime_cache_suffix,
     prepare_matplotlib_env,
 )
-from unibm.window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
 
 
 def _make_scaling_fit() -> ScalingFit:
@@ -135,17 +135,15 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertTrue(scratch.exists())
             plt.close(fig)
 
-    def test_public_api_reexports_lazy_plotting_helpers(self) -> None:
-        expected = {
-            "estimate_evi_quantile",
-            "estimate_hill_evi",
-            "estimate_extremal_index_reciprocal",
-            "plot_scaling_fit",
-            "plot_extremal_index_reciprocal",
-        }
-        self.assertTrue(expected.issubset(set(unibm.__all__)))
-        self.assertIs(unibm.plot_scaling_fit, plot_scaling_fit)
-        self.assertIs(unibm.plot_extremal_index_reciprocal, plot_extremal_index_reciprocal)
+    def test_public_api_exposes_only_slim_facade(self) -> None:
+        self.assertEqual(
+            set(unibm.__all__),
+            {"__version__", "ei", "evi", "estimate_design_life_level", "estimate_evi_quantile"},
+        )
+        self.assertIs(unibm.evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
+        self.assertEqual(unibm.ei.__name__, "unibm.ei")
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            getattr(unibm, "plot_scaling_fit")
         with self.assertRaisesRegex(AttributeError, "has no attribute"):
             getattr(unibm, "definitely_missing")
 

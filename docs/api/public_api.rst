@@ -1,14 +1,18 @@
 Public API
 ==========
 
-The top-level :mod:`unibm` namespace is the recommended entrypoint for most
-users. Start here if you want the package-wide EVI, bootstrap, diagnostics,
-plotting, and published-comparator helpers without importing submodules
-directly.
+The top-level :mod:`unibm` namespace is intentionally small. It keeps only the
+two headline EVI entrypoints together with the grouped :mod:`unibm.evi` and
+:mod:`unibm.ei` namespaces.
 
-Formal EI estimation also remains available under
-:mod:`unibm.extremal_index` when you need the dedicated BM and threshold
-estimators.
+Use:
+
+- :mod:`unibm` for ``estimate_evi_quantile`` and ``estimate_design_life_level``
+- :mod:`unibm.evi` for the full EVI workflow, bootstrap backbones, result
+  types, and external xi comparators
+- :mod:`unibm.ei` for formal extremal-index preparation and estimators
+- :mod:`unibm.diagnostics` and :mod:`unibm.plotting` as standalone public
+  modules when you need them
 
 .. automodule:: unibm
    :members:
