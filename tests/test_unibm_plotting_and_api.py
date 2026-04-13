@@ -18,6 +18,11 @@ from unibm.ei import (
     plot_ei_fit,
     plot_ei_path,
 )
+from unibm.ei.plotting import (
+    _default_fit_title as _default_ei_fit_title,
+    _default_path_title as _default_ei_path_title,
+    _threshold_fit_label,
+)
 from unibm.evi import (
     BlockSummaryCurve,
     PlateauWindow,
@@ -83,6 +88,22 @@ def _make_ei_path() -> EiPathBundle:
     )
 
 
+def _make_ei_disjoint_path() -> EiPathBundle:
+    path = _make_ei_path()
+    return EiPathBundle(
+        base_path=path.base_path,
+        sliding=False,
+        block_sizes=path.block_sizes,
+        theta_path=path.theta_path,
+        eir_path=path.eir_path,
+        z_path=path.z_path,
+        sample_counts=path.sample_counts,
+        sample_statistics=path.sample_statistics,
+        stable_window=path.stable_window,
+        selected_level=path.selected_level,
+    )
+
+
 def _make_ei_bm_fit() -> ExtremalIndexEstimate:
     return ExtremalIndexEstimate(
         method="bb_sliding_fgls",
@@ -100,6 +121,26 @@ def _make_ei_bm_fit() -> ExtremalIndexEstimate:
         block_scheme="sliding",
         base_path="bb",
         regression="FGLS",
+    )
+
+
+def _make_ei_sparse_path_fit() -> ExtremalIndexEstimate:
+    return ExtremalIndexEstimate(
+        method="northrop_sliding_ols",
+        theta_hat=0.58,
+        confidence_interval=(np.nan, np.nan),
+        path_level=(4, 8, 16),
+        path_theta=(0.52, 0.55, 0.57),
+    )
+
+
+def _make_ei_nonfinite_path_fit() -> ExtremalIndexEstimate:
+    return ExtremalIndexEstimate(
+        method="northrop_sliding_ols",
+        theta_hat=0.58,
+        confidence_interval=(0.5, 0.65),
+        path_level=(4, 8, 16),
+        path_theta=(np.nan, np.nan, np.nan),
     )
 
 
@@ -187,6 +228,50 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertGreater(threshold_out.stat().st_size, 0)
             self.assertGreater(len(plt.get_fignums()), 0)
             plt.close("all")
+
+    def test_ei_plotting_guardrails_and_default_labels(self) -> None:
+        self.assertIn("disjoint", _default_ei_path_title(_make_ei_disjoint_path()))
+        self.assertEqual(_default_ei_fit_title(_make_ei_threshold_fit()), "k-gaps")
+        self.assertEqual(_threshold_fit_label(_make_ei_threshold_fit()), "u=0.95, K=2")
+        self.assertEqual(
+            _threshold_fit_label(
+                ExtremalIndexEstimate(
+                    method="ferro_segers",
+                    theta_hat=0.5,
+                    confidence_interval=(np.nan, np.nan),
+                )
+            ),
+            "ferro_segers",
+        )
+        with self.assertRaisesRegex(ValueError, "contains no finite theta values"):
+            plot_ei_path(
+                EiPathBundle(
+                    base_path="bb",
+                    sliding=True,
+                    block_sizes=np.array([4, 8, 16], dtype=int),
+                    theta_path=np.array([np.nan, np.nan, np.nan]),
+                    eir_path=np.array([np.nan, np.nan, np.nan]),
+                    z_path=np.array([np.nan, np.nan, np.nan]),
+                    sample_counts=np.array([10, 6, 3], dtype=int),
+                    sample_statistics={4: np.array([1.0])},
+                    stable_window=EiStableWindow(4, 16),
+                    selected_level=8,
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "requires retained finite path values"):
+            plot_ei_fit(_make_ei_nonfinite_path_fit())
+
+    def test_ei_plotting_supports_sparse_path_and_nan_interval_threshold_views(self) -> None:
+        sparse_fit = _make_ei_sparse_path_fit()
+        threshold_fit = ExtremalIndexEstimate(
+            method="ferro_segers",
+            theta_hat=0.63,
+            confidence_interval=(np.nan, np.nan),
+        )
+        plot_ei_fit(sparse_fit, save=False, close=False)
+        plot_ei_fit(threshold_fit, save=False, close=True)
+        self.assertGreater(len(plt.get_fignums()), 0)
+        plt.close("all")
 
     def test_public_api_exposes_only_slim_facade(self) -> None:
         self.assertEqual(

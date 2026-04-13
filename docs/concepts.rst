@@ -22,8 +22,8 @@ view lives on the ``design-life years`` axis.
 
 The literature term closest to the current application output is a
 ``design-life level``: a quantile of the maximum over a design-life span, or
-equivalently a ``T``-year block-maximum ``tau``-quantile. The main
-manuscript/application default is ``tau = 0.5``, so the headline exported
+equivalently a ``T``-year block-maximum ``tau``-quantile. The current
+application default is ``tau = 0.5``, so the headline exported
 curve is best read as a **median design-life level** rather than as a
 classical return-period level. The application workflow also exports companion
 design-life levels at ``tau = 0.90, 0.95, 0.99``. Those higher curves reuse
@@ -44,7 +44,7 @@ EI workflow
 
 1. Prepare block-size paths from the raw series.
 2. Estimate a stable pooled block-maxima path.
-3. Fit the preferred formal estimator, currently the manuscript headline
+3. Fit one preferred formal estimator, for example the
    ``BB-sliding-FGLS`` path.
 4. Compare against reference estimators such as ``K-gaps``.
 

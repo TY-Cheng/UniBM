@@ -29,12 +29,7 @@ This is the standard **code-repo full rebuild**. It covers:
 - benchmark report generation;
 - USGS site freezing plus application rebuild;
 - vignette regeneration plus in-place notebook execution;
-- manuscript-facing figure/table refresh plus `paper_subset_manifest.json`;
 - unit tests, `src/unibm` coverage, Sphinx docs, and repo-wide formatting normalization.
-
-`just full` already refreshes the sibling manuscript repo's paper-facing
-`Figure/`, `Table/`, and `paper_subset_manifest.json`. If you only want the
-building blocks individually, run the specific top-level tasks below.
 
 If you only want the main workflow blocks individually, use:
 
@@ -42,7 +37,6 @@ If you only want the main workflow blocks individually, use:
 just verify
 just benchmark
 just application
-just manuscript
 just vignette
 ```
 
@@ -83,7 +77,6 @@ cp .env.example .env
 
 3. Edit `.env` and set:
    - `DIR_WORK` to your local code-repo clone path
-   - `DIR_MANUSCRIPT` if the manuscript lives in a separate repo
    - `UV_PROJECT_ENVIRONMENT` to a dedicated external uv environment path, e.g.
      `/Users/yourname/.venvs/unibm`
 4. Run one of the top-level `just` tasks. `just verify` is the lightest first
@@ -108,22 +101,20 @@ just verify
 just docs
 just benchmark
 just application
-just manuscript
 just vignette
 just clean-generated
 ```
 
 `just full` expands to `verify + docs + clean-generated + benchmark +
-application + vignette + artifact manifest refresh`. Each top-level `just`
+application + vignette`. Each top-level `just`
 task loads `.env` and runs `uv sync --dev` before its main work. The commands
 you mainly need to remember are:
 
-- `just full`: fail-fast verify, then cold rebuild of the main code-repo outputs plus manuscript manifest refresh
+- `just full`: fail-fast verify, then cold rebuild of the main code-repo outputs
 - `just verify`: `uv sync --dev` + tests + coverage + `ruff format .`
 - `just docs`: `uv sync --dev` + Sphinx HTML build into `docs/_build/html`
 - `just benchmark`: benchmark rebuild + benchmark reports
 - `just application`: USGS freeze + application rebuild
-- `just manuscript`: manuscript-facing benchmark/application report refresh plus artifact manifest
 - `just vignette`: sync the paired Jupytext notebook, execute it in place, and format outputs
 
 Current defaults:
@@ -140,7 +131,6 @@ Examples with explicit overrides:
 just full 8 40
 just application 6 40
 just benchmark 8
-just manuscript 6 40
 ```
 
 ## Canonical Rebuild Order
@@ -169,8 +159,6 @@ uv run sphinx-build -b html docs docs/_build/html
 mkdir -p out/benchmark/cache
 find out -mindepth 1 -maxdepth 1 ! -name benchmark -exec rm -rf {} +
 find out/benchmark -mindepth 1 -maxdepth 1 ! -name cache -exec rm -rf {} +
-rm -rf "${DIR_MANUSCRIPT:-../UniBM_manuscript}/Figure" "${DIR_MANUSCRIPT:-../UniBM_manuscript}/Table"
-rm -f "${DIR_MANUSCRIPT:-../UniBM_manuscript}/paper_subset_manifest.json"
 
 UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/evi_benchmark.py
 UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/ei_benchmark.py
@@ -184,7 +172,6 @@ UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 uv run python -m jupytext --sync notebooks/vignette.py
 uv run python -m nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
 uv run ruff format .
-uv run python scripts/manuscript/artifact_manifest.py
 ```
 
 Notes:
@@ -193,8 +180,7 @@ Notes:
   upgrades dependencies and is better treated as an explicit maintenance step.
 - Top-level `just` tasks load `.env` automatically and sync the development
   environment before running. If you run `uv ...` commands directly, load `.env`
-  into your shell first so `DIR_WORK`, `DIR_MANUSCRIPT`, and
-  `UV_PROJECT_ENVIRONMENT` are respected.
+  into your shell first so `DIR_WORK` and `UV_PROJECT_ENVIRONMENT` are respected.
 - `just vignette` syncs `notebooks/vignette.py` into `notebooks/vignette.ipynb`,
   executes the paired notebook in place, and then formats tracked `.py` and
   `.ipynb` files.
@@ -202,11 +188,8 @@ Notes:
 - `just docs` expands to `uv sync --dev + sphinx-build -b html docs docs/_build/html`.
 - `just full` expands to `verify + docs + clean-generated + benchmark +
   application + vignette`.
-- `just manuscript` refreshes manuscript-facing benchmark/application report artifacts
-  plus `paper_subset_manifest.json` without rerunning the full benchmark compute step.
 - `just clean-generated` removes generated outputs under `out/` while preserving
-  `out/benchmark/cache`, and also removes the manuscript repo's `Figure/` plus
-  `Table/` directories. Use it when you want a cold rebuild of all rendered
+  `out/benchmark/cache`. Use it when you want a cold rebuild of all rendered
   artifacts without deleting the benchmark cache.
 
 ## Workflow-Specific Commands
@@ -222,7 +205,7 @@ UNIBM_BENCHMARK_WORKERS=6 uv run python scripts/benchmark/ei_benchmark.py
 
 `UNIBM_BENCHMARK_WORKERS` controls scenario-level multiprocessing.
 
-Build manuscript-facing benchmark figures and tables:
+Build benchmark figures and tables:
 
 ```bash
 uv run python scripts/benchmark/evi_report.py
@@ -238,7 +221,7 @@ UNIBM_SCREENING_BOOTSTRAP_REPS=20 uv run python scripts/application/freeze_usgs.
 UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 ```
 
-The current manuscript-facing application package uses six application-facing
+The current application package uses six application-facing
 series across three environmental-risk layers:
 
 - Houston wet-season precipitation as a secondary EVI-only weather case;
@@ -251,7 +234,7 @@ series across three environmental-risk layers:
 `scripts/application/freeze_usgs.py` screens a curated Texas/Florida gauge pool
 and freezes one flagship USGS site per state into
 `data/metadata/application/usgs_frozen_sites.json`. The main application
-workflow then downloads any missing raw inputs and writes manuscript-facing CSVs
+workflow then downloads any missing raw inputs and writes application CSVs
 and figures.
 
 Provider-specific notes:
@@ -309,7 +292,7 @@ Interpreting the streamflow/NFIP application diagnostics:
   design-life spans;
 - the literature term closest to this output is a **design-life level**, i.e.
   a `T`-year block-maximum `tau`-quantile;
-- the current manuscript/application default is `tau = 0.50`, so the headline
+- the current application default is `tau = 0.50`, so the headline
   curve is a median design-life level;
 - the application plots and exports now also show `tau = 0.90 / 0.95 / 0.99`
   as increasingly conservative shared-`xi` companion curves;
@@ -325,37 +308,8 @@ Interpreting the streamflow/NFIP application diagnostics:
 - for NFIP, active-day design-life levels and calendar-day EI estimates are
   kept separate on purpose because they live on different clocks.
 
-Manuscript-facing application tables are written to the manuscript repo's
-`Table/` directory (typically `../UniBM_manuscript/Table/`):
-
-- `application_summary_main.tex`
-- `application_design_life_levels_main.tex`
-- `application_ei_main.tex`
-- `application_case_audit_main.tex`
-- `application_selection_sensitivity_main.tex`
-- `application_stationarity_main.tex`
-- `application_scaling_gof_main.tex`
-- `application_design_life_intervals_main.tex`
-- `application_ei_seasonal_sensitivity_main.tex`
-- `application_usgs_screening_main.tex`
-
-Manuscript-facing application figures are written to the manuscript repo's
-`Figure/` directory (typically `../UniBM_manuscript/Figure/`), including:
-
-- `application_ts_<stem>.pdf`
-- `application_evi_<stem>.pdf`
-- `application_target_<stem>.pdf`
-- `application_ei_<stem>.pdf` for the EI applications only
-- `application_design_life_<stem>.pdf`
-- `application_composite_<stem>.pdf`
-- `application_overview.pdf`
-
-The submission-facing manuscript subset is intentionally narrower than the full
-application workflow. The benchmark/application report steps plus
-`scripts/manuscript/artifact_manifest.py` refresh the manuscript repo's
-`paper_subset_manifest.json` (typically `../UniBM_manuscript/paper_subset_manifest.json`)
-for that curated figure/table subset, and the main `just full` workflow now
-does this automatically after the rebuild.
+Rendered application figures and tables stay under this repository's generated
+output tree together with the benchmark outputs and cached summaries.
 
 The composite figure is now the default notebook-facing visual. For streamflow
 and NFIP it combines target stability, the headline median-sliding-FGLS scaling
@@ -485,8 +439,8 @@ uv run ruff check .
 ```
 
 Coverage is intentionally scoped to the reusable statistical core under
-`src/unibm/`, not to raw-data downloads, workflow glue, or manuscript
-artifacts. The current coverage gate is `90%` for `src/unibm/`.
+`src/unibm/`, not to raw-data downloads or workflow glue. The current
+coverage gate is `90%` for `src/unibm/`.
 
 ## Repository Layout
 

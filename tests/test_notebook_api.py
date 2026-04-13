@@ -25,8 +25,6 @@ class NotebookApiTests(unittest.TestCase):
             "benchmark_table",
             "build_application_bundles",
             "build_application_outputs",
-            "build_ei_benchmark_manuscript_outputs",
-            "build_evi_benchmark_manuscript_outputs",
             "plot_application_composite",
             "plot_application_overview",
             "plot_application_time_series",

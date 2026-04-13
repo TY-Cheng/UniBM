@@ -6,8 +6,8 @@ as ``unibm`` once the repository environment has been synced. This site focuses
 on the reusable package layer, not on the full repo orchestration under
 ``scripts/benchmark`` and ``scripts/application``.
 
-Repo workflow
--------------
+Environment Setup
+-----------------
 
 .. code-block:: bash
 

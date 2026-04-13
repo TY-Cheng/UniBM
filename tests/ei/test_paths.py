@@ -157,6 +157,30 @@ class EiPathsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Stable EI window did not retain any finite"):
             extract_stable_path_window(bad_path)
 
+    def test_selection_edge_cases_cover_trim_fallback_and_minimal_windows(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Not enough finite EI path values"):
+            select_stable_path_window(
+                np.array([4, 8], dtype=int),
+                np.array([np.nan, 0.1], dtype=float),
+                min_points=2,
+            )
+        window, mask = select_stable_path_window(
+            np.array([4], dtype=int),
+            np.array([0.2], dtype=float),
+            min_points=1,
+            trim_fraction=0.9,
+        )
+        self.assertEqual(window, EiStableWindow(4, 4))
+        np.testing.assert_array_equal(mask, np.array([True]))
+        trimmed_window, trimmed_mask = select_stable_path_window(
+            np.array([4, 8, 16], dtype=int),
+            np.array([0.1, 0.11, 0.12], dtype=float),
+            min_points=3,
+            trim_fraction=0.49,
+        )
+        self.assertEqual(trimmed_window, EiStableWindow(4, 16))
+        np.testing.assert_array_equal(trimmed_mask, np.array([True, True, True]))
+
 
 if __name__ == "__main__":
     unittest.main()
