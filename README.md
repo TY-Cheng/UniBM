@@ -30,7 +30,7 @@ This is the standard **code-repo full rebuild**. It covers:
 - USGS site freezing plus application rebuild;
 - vignette regeneration plus in-place notebook execution;
 - manuscript-facing figure/table refresh plus `paper_subset_manifest.json`;
-- unit tests, `src/unibm` coverage, `ruff check`, Sphinx docs, and formatting.
+- unit tests, `src/unibm` coverage, Sphinx docs, and repo-wide formatting normalization.
 
 `just full` already refreshes the sibling manuscript repo's paper-facing
 `Figure/`, `Table/`, and `paper_subset_manifest.json`. If you only want the
@@ -42,8 +42,8 @@ If you only want the main workflow blocks individually, use:
 just verify
 just benchmark
 just application
+just manuscript
 just vignette
-just format
 ```
 
 Optional: install [`just`](https://github.com/casey/just) if you want short
@@ -108,23 +108,23 @@ just verify
 just docs
 just benchmark
 just application
+just manuscript
 just vignette
-just format
 just clean-generated
 ```
 
 `just full` expands to `verify + docs + clean-generated + benchmark +
-application + vignette + paper_subset_manifest.json`. Each top-level `just`
+application + vignette + artifact manifest refresh`. Each top-level `just`
 task loads `.env` and runs `uv sync --dev` before its main work. The commands
 you mainly need to remember are:
 
 - `just full`: fail-fast verify, then cold rebuild of the main code-repo outputs plus manuscript manifest refresh
-- `just verify`: `uv sync --dev` + tests + coverage + lint
+- `just verify`: `uv sync --dev` + tests + coverage + `ruff format .`
 - `just docs`: `uv sync --dev` + Sphinx HTML build into `docs/_build/html`
 - `just benchmark`: benchmark rebuild + benchmark reports
 - `just application`: USGS freeze + application rebuild
+- `just manuscript`: manuscript-facing benchmark/application report refresh plus artifact manifest
 - `just vignette`: sync the paired Jupytext notebook, execute it in place, and format outputs
-- `just format`: `uv sync --dev` + `ruff format` on tracked `.py` and `.ipynb`
 
 Current defaults:
 
@@ -140,7 +140,7 @@ Examples with explicit overrides:
 just full 8 40
 just application 6 40
 just benchmark 8
-just format
+just manuscript 6 40
 ```
 
 ## Canonical Rebuild Order
@@ -158,15 +158,13 @@ If you prefer the raw commands instead of `just`, the workflow behind
 set -a; source .env; set +a
 uv sync --dev
 
-uv run python -m unittest discover -s tests -p 'test_*.py'
 uv run coverage run -m unittest discover -s tests -p 'test_*.py'
 uv run coverage report -m
 uv run coverage xml
 uv run coverage html
-uv run ruff check scripts tests notebooks
+uv run ruff format .
 rm -rf docs/_build
 uv run sphinx-build -b html docs docs/_build/html
-uv run ruff format ./**/*.py ./**/*.ipynb
 
 mkdir -p out/benchmark/cache
 find out -mindepth 1 -maxdepth 1 ! -name benchmark -exec rm -rf {} +
@@ -185,7 +183,7 @@ UNIBM_APPLICATION_WORKERS=6 uv run python scripts/application/build.py
 
 uv run python -m jupytext --sync notebooks/vignette.py
 uv run python -m nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
-uv run ruff format ./**/*.py ./**/*.ipynb
+uv run ruff format .
 uv run python scripts/manuscript/artifact_manifest.py
 ```
 
@@ -200,10 +198,12 @@ Notes:
 - `just vignette` syncs `notebooks/vignette.py` into `notebooks/vignette.ipynb`,
   executes the paired notebook in place, and then formats tracked `.py` and
   `.ipynb` files.
-- `just verify` expands to `uv sync --dev + tests + coverage + ruff check`.
+- `just verify` expands to `uv sync --dev + tests + coverage + ruff format .`.
 - `just docs` expands to `uv sync --dev + sphinx-build -b html docs docs/_build/html`.
 - `just full` expands to `verify + docs + clean-generated + benchmark +
   application + vignette`.
+- `just manuscript` refreshes manuscript-facing benchmark/application report artifacts
+  plus `paper_subset_manifest.json` without rerunning the full benchmark compute step.
 - `just clean-generated` removes generated outputs under `out/` while preserving
   `out/benchmark/cache`, and also removes the manuscript repo's `Figure/` plus
   `Table/` directories. Use it when you want a cold rebuild of all rendered
@@ -279,6 +279,9 @@ Main application outputs are written to `out/applications/`:
 - `application_summary.csv`
 - `application_design_life_levels.csv`
   design-life-level curves over the application tau grid;
+- `application_stationarity.csv`
+- `application_scaling_gof.csv`
+- `application_design_life_intervals.csv`
 - `application_methods.csv`
 - `application_ei_methods.csv`
 - `application_ei_seasonal_methods.csv`
@@ -330,6 +333,11 @@ Manuscript-facing application tables are written to the manuscript repo's
 - `application_ei_main.tex`
 - `application_case_audit_main.tex`
 - `application_selection_sensitivity_main.tex`
+- `application_stationarity_main.tex`
+- `application_scaling_gof_main.tex`
+- `application_design_life_intervals_main.tex`
+- `application_ei_seasonal_sensitivity_main.tex`
+- `application_usgs_screening_main.tex`
 
 Manuscript-facing application figures are written to the manuscript repo's
 `Figure/` directory (typically `../UniBM_manuscript/Figure/`), including:
@@ -430,9 +438,22 @@ The docs include:
   and `unibm.ei` packages;
 - an `EVI and EI Workflow Guide` overview page;
 - a `Worked Examples` page with small runnable examples for EVI, bootstrap
-  backbones, and EI estimation;
+  backbones, design-life intervals, and EI estimation;
 - a `Reading Returned Objects` page showing which result fields to inspect
   first for EVI and EI fits.
+
+On the EI side, the docs now separate:
+
+- `unibm.ei.preparation` and `unibm.ei.paths` for sample preparation and BM-path construction;
+- `unibm.ei.selection` for stable-window selection/extraction;
+- `unibm.ei.bm` and `unibm.ei.threshold` for the two formal EI estimator families.
+- `unibm.ei.plotting` for library-grade EI path and fit plotting helpers.
+
+On the EVI side, the docs now separate:
+
+- `unibm.evi.estimation` for the canonical UniBM scaling-estimator family;
+- `unibm.evi.tail` for tail/order-statistic xi comparator estimators;
+- `unibm.evi.spectrum` for spectrum-style block-maxima xi comparator estimators.
 
 ## Testing and Coverage
 
@@ -455,6 +476,12 @@ uv run coverage run -m unittest discover -s tests -p 'test_*.py'
 uv run coverage report -m
 uv run coverage xml
 uv run coverage html
+```
+
+Run the explicit static lint pass separately with:
+
+```bash
+uv run ruff check .
 ```
 
 Coverage is intentionally scoped to the reusable statistical core under

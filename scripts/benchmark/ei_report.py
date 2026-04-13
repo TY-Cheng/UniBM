@@ -876,7 +876,9 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Frechet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
-                "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
+                "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05), but native "
+                "interval constructions differ across methods, so the table is descriptive and "
+                "is not used to rank cross-class interval calibration."
             ),
             label="tab:benchmark-ei-targets-main",
         )

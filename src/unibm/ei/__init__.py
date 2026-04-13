@@ -6,7 +6,6 @@ from .bm import (
     estimate_native_bm_ei,
     estimate_pooled_bm_ei,
 )
-from .paths import extract_stable_path_window
 from .preparation import prepare_ei_bundle
 from .models import (
     EiPathBundle,
@@ -15,6 +14,8 @@ from .models import (
     ExtremalIndexEstimate,
     ThresholdCandidate,
 )
+from .plotting import plot_ei_fit, plot_ei_path
+from .selection import extract_stable_path_window, select_stable_path_window
 from .threshold import estimate_ferro_segers, estimate_k_gaps
 from ._stats import (
     EI_ALPHA,
@@ -39,5 +40,8 @@ __all__ = [
     "estimate_native_bm_ei",
     "estimate_pooled_bm_ei",
     "extract_stable_path_window",
+    "plot_ei_fit",
+    "plot_ei_path",
     "prepare_ei_bundle",
+    "select_stable_path_window",
 ]

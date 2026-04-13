@@ -11,15 +11,22 @@ import numpy as np
 
 import unibm
 from unibm._window_ops import circular_sliding_window_maximum, sliding_window_extreme_valid
+from unibm.ei import (
+    EiPathBundle,
+    EiStableWindow,
+    ExtremalIndexEstimate,
+    plot_ei_fit,
+    plot_ei_path,
+)
 from unibm.evi import (
     BlockSummaryCurve,
     PlateauWindow,
     ScalingFit,
+    plot_scaling_fit,
 )
-from unibm.plotting import (
+from unibm.evi.plotting import (
     _resolved_file_path,
     _should_close_figure,
-    plot_scaling_fit,
 )
 from unibm._runtime import (
     _env_path_is_writable,
@@ -56,6 +63,58 @@ def _make_scaling_fit() -> ScalingFit:
         plateau=plateau,
         cov_beta=np.eye(2),
         bootstrap=None,
+    )
+
+
+def _make_ei_path() -> EiPathBundle:
+    block_sizes = np.array([4, 8, 16, 32], dtype=int)
+    theta_path = np.array([0.62, 0.58, 0.57, 0.59], dtype=float)
+    return EiPathBundle(
+        base_path="bb",
+        sliding=True,
+        block_sizes=block_sizes,
+        theta_path=theta_path,
+        eir_path=1.0 / theta_path,
+        z_path=np.log(1.0 / theta_path),
+        sample_counts=np.array([120, 60, 30, 15], dtype=int),
+        sample_statistics={int(level): np.linspace(0.1, 0.2, 4) for level in block_sizes},
+        stable_window=EiStableWindow(8, 32),
+        selected_level=16,
+    )
+
+
+def _make_ei_bm_fit() -> ExtremalIndexEstimate:
+    return ExtremalIndexEstimate(
+        method="bb_sliding_fgls",
+        theta_hat=0.58,
+        confidence_interval=(0.51, 0.65),
+        standard_error=0.035,
+        ci_method="log_wald",
+        ci_variant="bootstrap_cov",
+        tuning_axis="b",
+        selected_level=16,
+        stable_window=EiStableWindow(8, 32),
+        path_level=(4, 8, 16, 32),
+        path_theta=(0.62, 0.58, 0.57, 0.59),
+        path_eir=tuple(1.0 / np.array([0.62, 0.58, 0.57, 0.59], dtype=float)),
+        block_scheme="sliding",
+        base_path="bb",
+        regression="FGLS",
+    )
+
+
+def _make_ei_threshold_fit() -> ExtremalIndexEstimate:
+    return ExtremalIndexEstimate(
+        method="k_gaps",
+        theta_hat=0.61,
+        confidence_interval=(0.49, 0.73),
+        standard_error=0.06,
+        ci_method="profile",
+        ci_variant="default",
+        tuning_axis="u",
+        selected_threshold_quantile=0.95,
+        selected_threshold_value=4.2,
+        selected_run_k=2,
     )
 
 
@@ -103,6 +162,32 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             plot_scaling_fit(fit, save=False, close=True)
             plt.close("all")
 
+    def test_plot_ei_path_and_fit_support_path_and_threshold_views(self) -> None:
+        path = _make_ei_path()
+        bm_fit = _make_ei_bm_fit()
+        threshold_fit = _make_ei_threshold_fit()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path_out = Path(tmpdir) / "ei-path.pdf"
+            fit_out = Path(tmpdir) / "ei-fit.pdf"
+            threshold_out = Path(tmpdir) / "ei-threshold.pdf"
+            plot_ei_path(path, file_path=path_out, save=True, close=False, title="EI Path")
+            plot_ei_fit(bm_fit, file_path=fit_out, save=True, close=False, title="EI Fit")
+            plot_ei_fit(
+                threshold_fit,
+                file_path=threshold_out,
+                save=True,
+                close=True,
+                title="Threshold EI",
+            )
+            self.assertTrue(path_out.exists())
+            self.assertTrue(fit_out.exists())
+            self.assertTrue(threshold_out.exists())
+            self.assertGreater(path_out.stat().st_size, 0)
+            self.assertGreater(fit_out.stat().st_size, 0)
+            self.assertGreater(threshold_out.stat().st_size, 0)
+            self.assertGreater(len(plt.get_fignums()), 0)
+            plt.close("all")
+
     def test_public_api_exposes_only_slim_facade(self) -> None:
         self.assertEqual(
             set(unibm.__all__),
@@ -110,6 +195,8 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
         )
         self.assertIs(unibm.evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
         self.assertEqual(unibm.ei.__name__, "unibm.ei")
+        self.assertTrue(hasattr(unibm.ei, "plot_ei_fit"))
+        self.assertTrue(hasattr(unibm.ei, "plot_ei_path"))
         with self.assertRaisesRegex(AttributeError, "has no attribute"):
             getattr(unibm, "plot_scaling_fit")
         with self.assertRaisesRegex(AttributeError, "has no attribute"):

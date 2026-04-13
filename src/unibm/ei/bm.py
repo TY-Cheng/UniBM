@@ -15,7 +15,7 @@ from ._stats import (
     _log_scale_theta_interval,
 )
 from .models import EiPathBundle, EiPreparedBundle, ExtremalIndexEstimate
-from .paths import extract_stable_path_window
+from .selection import extract_stable_path_window
 
 
 EI_DEFAULT_COVARIANCE_SHRINKAGE = 0.35

@@ -4,25 +4,27 @@ import unittest
 
 import numpy as np
 
-from unibm.evi.baselines import (
+from unibm.evi.spectrum import (
+    _max_spectrum_curve,
+    _max_spectrum_path,
+    _positive_finite_in_order,
+    _weighted_slope_with_se,
+    candidate_max_spectrum_scales,
+    estimate_max_spectrum_evi,
+)
+from unibm.evi.tail import (
     _dedh_moment_path,
     _dedh_standard_error,
     _finite_positive,
     _hill_path,
     _hill_standard_error,
-    _max_spectrum_curve,
-    _max_spectrum_path,
     _normalize_standard_error,
     _pickands_path,
     _pickands_standard_error,
-    _positive_finite_in_order,
     _select_from_path,
-    _weighted_slope_with_se,
-    candidate_max_spectrum_scales,
     candidate_tail_counts,
     estimate_dedh_moment_evi,
     estimate_hill_evi,
-    estimate_max_spectrum_evi,
     estimate_pickands_evi,
     select_stable_integer_window,
     select_stable_tail_window,
@@ -30,7 +32,7 @@ from unibm.evi.baselines import (
 )
 
 
-class EviBaselinesTests(unittest.TestCase):
+class EviEstimatorFamilyTests(unittest.TestCase):
     @staticmethod
     def _pareto_sample(size: int = 4096, seed: int = 17) -> np.ndarray:
         rs = np.random.default_rng(seed)
@@ -70,7 +72,7 @@ class EviBaselinesTests(unittest.TestCase):
         )
         self.assertEqual(alias_chosen, 12)
 
-    def test_tail_and_max_spectrum_paths(self) -> None:
+    def test_tail_and_spectrum_paths(self) -> None:
         ordered = _finite_positive(self._pareto_sample(size=512))
         k_values = np.array([8, 12, 16, 24], dtype=int)
         self.assertTrue(np.all(np.isfinite(_hill_path(ordered, k_values))))
@@ -90,7 +92,7 @@ class EviBaselinesTests(unittest.TestCase):
         self.assertGreaterEqual(j_max, int(scales[-1]))
         self.assertEqual(start_scales.shape, xi_path.shape)
 
-    def test_public_baseline_estimators_return_finite_estimates(self) -> None:
+    def test_public_estimator_families_return_finite_estimates(self) -> None:
         sample = self._pareto_sample()
         hill = estimate_hill_evi(sample, k_values=np.array([16, 24, 32, 48, 64], dtype=int))
         pickands = estimate_pickands_evi(sample, k_values=np.array([8, 12, 16, 24, 32], dtype=int))

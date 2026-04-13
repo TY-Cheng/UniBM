@@ -34,10 +34,15 @@ from application.outputs import (
     _draw_design_life_levels_ax,
     _seasonal_adjusted_ei_method_rows,
     application_case_audit_table,
+    application_design_life_interval_table,
     application_ei_method_rows,
+    application_ei_seasonal_sensitivity_table,
     application_design_life_level_table,
     application_method_rows,
+    application_scaling_gof_table,
     application_selection_sensitivity_table,
+    application_stationarity_table,
+    application_usgs_screening_disclosure_table,
     seasonal_monthly_pit_unit_frechet,
     write_application_figures,
 )
@@ -272,7 +277,155 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertEqual(table.iloc[0]["Application"], "Texas NFIP claims")
         self.assertIn("[", table.iloc[0]["$\\xi$ headline [range]"])
         self.assertIn("[", table.iloc[0]["$\\theta$ headline [range]"])
-        self.assertIn("10y median DLL", table.columns.tolist()[3])
+        self.assertEqual(
+            table.columns.tolist(),
+            ["Application", "$\\xi$ headline [range]", "$\\theta$ headline [range]"],
+        )
+
+    def test_application_stationarity_table_reports_both_series_levels(self) -> None:
+        base_bundle = _make_standard_bundle()
+        stream_bundle = replace(
+            base_bundle,
+            spec=replace(
+                base_bundle.spec,
+                key="tx_streamflow",
+                label="Texas streamflow",
+                provider="usgs",
+            ),
+        )
+
+        table = application_stationarity_table([stream_bundle])
+
+        self.assertEqual(table.shape[0], 1)
+        self.assertEqual(table.iloc[0]["Application"], "Texas streamflow")
+        self.assertIn("Severity MK", table.columns[2])
+        self.assertIn("Annual-max Pettitt", table.columns[-1])
+        self.assertIn("p=", table.iloc[0]["Severity Pettitt"])
+
+    def test_application_scaling_gof_table_reports_plateau_and_ranges(self) -> None:
+        base_bundle = _make_standard_bundle()
+        stream_bundle = replace(
+            base_bundle,
+            spec=replace(
+                base_bundle.spec,
+                key="tx_streamflow",
+                label="Texas streamflow",
+                provider="usgs",
+            ),
+        )
+
+        table = application_scaling_gof_table([stream_bundle])
+
+        self.assertEqual(table.shape[0], 1)
+        self.assertEqual(table.iloc[0]["Application"], "Texas streamflow")
+        self.assertIn("[", table.iloc[0]["Selected plateau"])
+        self.assertIn("[", table.iloc[0]["Top-3 xi range"])
+        self.assertIn("[", table.iloc[0]["50y median DLL range"])
+
+    def test_application_design_life_interval_table_formats_headline_intervals(self) -> None:
+        base_bundle = _make_nfip_bundle()
+        nfip_bundle = replace(
+            base_bundle,
+            spec=replace(
+                base_bundle.spec,
+                key="tx_nfip_claims",
+                label="Texas NFIP claims",
+                provider="fema",
+            ),
+        )
+
+        table = application_design_life_interval_table([nfip_bundle])
+
+        self.assertEqual(table.shape[0], 1)
+        self.assertIn("10y headline DLL", table.columns)
+        self.assertIn("10y conditional 95% CI", table.columns)
+        self.assertIn("10y plateau envelope", table.columns)
+        self.assertIn("[", table.iloc[0]["10y conditional 95% CI"])
+        self.assertIn("[", table.iloc[0]["50y plateau envelope"])
+
+    def test_application_ei_seasonal_sensitivity_table_reports_headline_and_adjusted_theta(
+        self,
+    ) -> None:
+        base_stream_bundle = _make_standard_bundle()
+        stream_bundle = replace(
+            base_stream_bundle,
+            spec=replace(base_stream_bundle.spec, key="tx_streamflow", label="Texas streamflow"),
+        )
+        base_nfip_bundle = _make_nfip_bundle()
+        nfip_bundle = replace(
+            base_nfip_bundle,
+            spec=replace(base_nfip_bundle.spec, key="tx_nfip_claims", label="Texas NFIP claims"),
+        )
+
+        table = application_ei_seasonal_sensitivity_table([nfip_bundle, stream_bundle])
+
+        self.assertEqual(table["Application"].tolist(), ["Texas streamflow", "Texas NFIP claims"])
+        self.assertIn("Headline $\\theta$ (BB-FGLS)", table.columns)
+        self.assertIn("Seasonal-adjusted $\\theta$", table.columns)
+        self.assertIn("Interpretive note", table.columns)
+        self.assertTrue(all("[" in value for value in table["Seasonal-adjusted $\\theta$"]))
+
+    def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata_dir = Path(tmpdir)
+            screening_path = metadata_dir / "application_usgs_site_screening.csv"
+            (metadata_dir / "usgs_candidate_sites.json").write_text(
+                """
+{
+  "TX": [
+    {"site_no": "08066500", "station_name": "Trinity River at Romayor, TX"},
+    {"site_no": "08114000", "station_name": "Brazos River at Richmond, TX"}
+  ]
+}
+""".strip()
+            )
+            (metadata_dir / "usgs_frozen_sites.json").write_text(
+                """
+{
+  "TX": {
+    "site_no": "08066500",
+    "station_name": "Trinity River at Romayor, TX",
+    "state_code": "TX",
+    "screening_source": "freeze_usgs_station_selection"
+  }
+}
+""".strip()
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "state_code": "TX",
+                        "site_no": "08066500",
+                        "station_name": "Trinity River at Romayor, TX",
+                        "recommended": True,
+                        "supports_frechet_working_model": True,
+                        "plateau_points": 9,
+                        "n_years": 102.0,
+                        "xi_lower": 0.31,
+                    },
+                    {
+                        "state_code": "TX",
+                        "site_no": "08114000",
+                        "station_name": "Brazos River at Richmond, TX",
+                        "recommended": False,
+                        "supports_frechet_working_model": True,
+                        "plateau_points": 6,
+                        "n_years": 88.0,
+                        "xi_lower": 0.05,
+                    },
+                ]
+            ).to_csv(screening_path, index=False)
+
+            table = application_usgs_screening_disclosure_table(
+                metadata_dir=metadata_dir,
+                screening_path=screening_path,
+            )
+
+        self.assertEqual(table.shape[0], 2)
+        self.assertEqual(table.iloc[0]["Selected"], "yes")
+        self.assertEqual(table.iloc[0]["Recommended"], "yes")
+        self.assertIn("Frechet screen", table.columns)
+        self.assertIn("Record years", table.columns)
 
     def test_tau_scaling_views_for_fit(self) -> None:
         bundle = _make_standard_bundle()

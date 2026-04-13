@@ -8,6 +8,7 @@ Example 1: Median sliding-block EVI fit
 
    import numpy as np
    from unibm import estimate_evi_quantile, estimate_design_life_level
+   from unibm.evi import estimate_design_life_level_interval
 
    sample = np.random.default_rng(7).pareto(2.0, 4096) + 1.0
    fit = estimate_evi_quantile(sample, quantile=0.5, sliding=True, bootstrap_reps=120)
@@ -16,11 +17,17 @@ Example 1: Median sliding-block EVI fit
        years=np.array([10.0, 50.0]),
        observations_per_year=365.25,
    )
+   design_life_interval = estimate_design_life_level_interval(
+       fit,
+       years=np.array([10.0, 50.0]),
+       observations_per_year=365.25,
+   )
 
 Read ``fit.slope`` as the headline ``xi`` estimate, ``fit.confidence_interval``
 for uncertainty, and ``fit.plateau_bounds`` for the selected regression window.
 ``design_life`` contains the resulting design-life-level estimates on the
-original data scale.
+original data scale, while ``design_life_interval`` returns the matching
+conditional interval bounds from the fitted coefficient covariance.
 
 Example 2: Reusable bootstrap backbone
 --------------------------------------

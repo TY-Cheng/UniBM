@@ -1,4 +1,4 @@
-"""Canonical public baseline estimators for the xi/EVI branch."""
+"""Tail-side xi estimator family and shared comparator result models."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ ThresholdWindow = SelectionWindow
 
 @dataclass(frozen=True)
 class ExternalXiEstimate:
-    """Point estimate plus diagnostic path information for baseline estimators."""
+    """Point estimate plus diagnostic path information for comparator estimators."""
 
     method: str
     xi_hat: float
@@ -40,12 +40,12 @@ class ExternalXiEstimate:
 
     @property
     def selected_k(self) -> int | None:
-        """Backward-compatible alias for threshold-based methods."""
+        """Backward-compatible alias for threshold-indexed comparator paths."""
         return self.selected_level
 
     @property
     def path_k(self) -> tuple[int, ...]:
-        """Backward-compatible alias for threshold-based methods."""
+        """Backward-compatible alias for threshold-indexed comparator paths."""
         return self.path_level
 
 
@@ -85,21 +85,11 @@ def _finite_positive(sample: np.ndarray) -> np.ndarray:
     """Return positive finite observations sorted in descending order."""
     vec = positive_finite_values(
         sample,
-        context="external tail estimators",
+        context="tail xi estimators",
         minimum_size=8,
         stacklevel=3,
     )
     return np.sort(vec)[::-1]
-
-
-def _positive_finite_in_order(sample: np.ndarray) -> np.ndarray:
-    """Return positive finite observations in their original time order."""
-    return positive_finite_values(
-        sample,
-        context="external xi estimators",
-        minimum_size=8,
-        stacklevel=3,
-    )
 
 
 def _normalize_standard_error(value: float) -> float:
@@ -187,99 +177,6 @@ def _dedh_moment_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
     return np.asarray(estimates, dtype=float)
 
 
-def candidate_max_spectrum_scales(
-    n_obs: int,
-    *,
-    min_scale: int = 1,
-    min_blocks: int = 2,
-) -> np.ndarray:
-    """Construct dyadic block-size scales for max-spectrum estimation."""
-    if n_obs < 2**min_scale:
-        return np.empty(0, dtype=int)
-    j_max = int(np.floor(np.log2(n_obs)))
-    scales = np.arange(min_scale, j_max + 1, dtype=int)
-    n_blocks = n_obs // (2**scales)
-    return scales[n_blocks >= min_blocks]
-
-
-def _weighted_slope_with_se(
-    x: np.ndarray,
-    y: np.ndarray,
-    weights: np.ndarray,
-) -> tuple[float, float]:
-    """Return the weighted slope and HC1-style sandwich SE in one dimension."""
-    w = np.asarray(weights, dtype=float)
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(w) & (w > 0)
-    x = x[mask]
-    y = y[mask]
-    w = w[mask]
-    if x.size != y.size or x.size != w.size or x.size < 3:
-        return float("nan"), float("nan")
-    w_sum = float(np.sum(w))
-    if not np.isfinite(w_sum) or w_sum <= 0:
-        return float("nan"), float("nan")
-    X = np.column_stack([np.ones_like(x), x])
-    W = np.diag(w)
-    bread = np.linalg.pinv(X.T @ W @ X)
-    beta = bread @ (X.T @ W @ y)
-    fitted = X @ beta
-    resid = y - fitted
-    meat = X.T @ W @ np.diag(resid**2) @ W @ X
-    cov_beta = bread @ meat @ bread
-    if x.size > X.shape[1]:
-        cov_beta *= x.size / (x.size - X.shape[1])
-    slope = float(beta[1])
-    standard_error = _normalize_standard_error(np.sqrt(max(float(cov_beta[1, 1]), 0.0)))
-    return slope, standard_error
-
-
-def _max_spectrum_curve(
-    sample: np.ndarray,
-    scales: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the max-spectrum ordinates and effective block counts."""
-    vec = _positive_finite_in_order(sample)
-    y_values: list[float] = []
-    n_blocks: list[int] = []
-    for scale in np.asarray(scales, dtype=int):
-        block_size = 2 ** int(scale)
-        block_count = int(vec.size // block_size)
-        if block_count <= 0:
-            y_values.append(np.nan)
-            n_blocks.append(0)
-            continue
-        trimmed = vec[: block_count * block_size].reshape(block_count, block_size)
-        maxima = np.max(trimmed, axis=1)
-        y_values.append(float(np.mean(np.log2(maxima))))
-        n_blocks.append(block_count)
-    return np.asarray(y_values, dtype=float), np.asarray(n_blocks, dtype=int)
-
-
-def _max_spectrum_path(
-    scales: np.ndarray,
-    y_values: np.ndarray,
-    n_blocks: np.ndarray,
-    *,
-    min_scale_count: int = 3,
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """Construct the start-scale path for the max-spectrum slope estimator."""
-    if scales.size < min_scale_count:
-        raise ValueError("Max-spectrum requires at least three usable dyadic scales.")
-    j_max = int(scales[-1])
-    start_scales: list[int] = []
-    xi_path: list[float] = []
-    for start_idx in range(0, scales.size - min_scale_count + 1):
-        use_scales = scales[start_idx:]
-        use_y = y_values[start_idx:]
-        use_w = n_blocks[start_idx:]
-        slope, _ = _weighted_slope_with_se(use_scales, use_y, use_w)
-        start_scales.append(int(use_scales[0]))
-        xi_path.append(float(slope))
-    return np.asarray(start_scales, dtype=int), np.asarray(xi_path, dtype=float), j_max
-
-
 def select_stable_integer_window(
     levels: np.ndarray,
     path_xi: np.ndarray,
@@ -321,7 +218,7 @@ def select_stable_tail_window(
     *,
     min_window: int = 4,
 ) -> tuple[int, SelectionWindow, np.ndarray]:
-    """Backward-compatible wrapper for `k`-indexed tail paths."""
+    """Backward-compatible wrapper for ``k``-indexed tail paths."""
     return select_stable_integer_window(k_values, path_xi, min_window=min_window)
 
 
@@ -339,25 +236,27 @@ def _select_from_path(
     mask = np.isfinite(path_xi)
     if not np.any(mask):
         raise ValueError(f"{method} produced no finite path estimates.")
-    k_finite = level_values[mask]
+    level_finite = level_values[mask]
     xi_finite = path_xi[mask]
-    selected_k, stable_window, _ = select_stable_integer_window(
-        k_finite,
+    selected_level, stable_window, _ = select_stable_integer_window(
+        level_finite,
         xi_finite,
         min_window=selection_min_window,
     )
-    chosen_idx = int(np.argmin(np.abs(k_finite - selected_k)))
+    chosen_idx = int(np.argmin(np.abs(level_finite - selected_level)))
     xi_hat = float(xi_finite[chosen_idx])
     standard_error = (
-        _normalize_standard_error(se_fn(xi_hat, selected_k)) if se_fn is not None else float("nan")
+        _normalize_standard_error(se_fn(xi_hat, selected_level))
+        if se_fn is not None
+        else float("nan")
     )
     confidence_interval = wald_confidence_interval(xi_hat, standard_error)
     return ExternalXiEstimate(
         method=method,
         xi_hat=xi_hat,
-        selected_level=selected_k,
+        selected_level=selected_level,
         stable_window=stable_window,
-        path_level=tuple(int(k) for k in k_finite),
+        path_level=tuple(int(level) for level in level_finite),
         path_xi=tuple(float(value) for value in xi_finite),
         standard_error=standard_error,
         confidence_interval=confidence_interval,
@@ -372,7 +271,7 @@ def estimate_hill_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate `xi` with Hill's raw-sample tail estimator."""
+    """Estimate ``xi`` with Hill's raw-sample tail estimator."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -385,7 +284,7 @@ def estimate_pickands_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate `xi` with the Pickands raw-sample tail estimator."""
+    """Estimate ``xi`` with the Pickands raw-sample tail estimator."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -398,7 +297,7 @@ def estimate_dedh_moment_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate `xi` with the DEdH moment estimator."""
+    """Estimate ``xi`` with the DEdH moment estimator."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -411,47 +310,6 @@ def estimate_dedh_moment_evi(
     )
 
 
-def estimate_max_spectrum_evi(
-    sample: np.ndarray,
-    *,
-    scales: np.ndarray | None = None,
-    min_scale_count: int = 3,
-) -> ExternalXiEstimate:
-    """Estimate `xi` with the dependent max-spectrum estimator."""
-    vec = _positive_finite_in_order(sample)
-    if scales is None:
-        scales = candidate_max_spectrum_scales(vec.size, min_scale=1, min_blocks=2)
-    scales = np.asarray(scales, dtype=int)
-    y_values, n_blocks = _max_spectrum_curve(vec, scales)
-    start_scales, xi_path, j_max = _max_spectrum_path(
-        scales,
-        y_values,
-        n_blocks,
-        min_scale_count=min_scale_count,
-    )
-
-    def se_fn(_: float, selected_level: int) -> float:
-        matching = np.flatnonzero(scales == selected_level)
-        if matching.size != 1:
-            return float("nan")
-        _, standard_error = _weighted_slope_with_se(
-            scales[matching[0] :],
-            y_values[matching[0] :],
-            n_blocks[matching[0] :],
-        )
-        return standard_error
-
-    return _select_from_path(
-        "max_spectrum_raw",
-        start_scales,
-        xi_path,
-        se_fn=se_fn,
-        tuning_axis="scale_start",
-        fixed_upper_level=j_max,
-        selection_min_window=3,
-    )
-
-
 __all__ = [
     "ExternalXiEstimate",
     "SelectionWindow",
@@ -461,19 +319,13 @@ __all__ = [
     "_finite_positive",
     "_hill_path",
     "_hill_standard_error",
-    "_max_spectrum_curve",
-    "_max_spectrum_path",
     "_normalize_standard_error",
     "_pickands_path",
     "_pickands_standard_error",
-    "_positive_finite_in_order",
     "_select_from_path",
-    "_weighted_slope_with_se",
-    "candidate_max_spectrum_scales",
     "candidate_tail_counts",
     "estimate_dedh_moment_evi",
     "estimate_hill_evi",
-    "estimate_max_spectrum_evi",
     "estimate_pickands_evi",
     "select_stable_integer_window",
     "select_stable_tail_window",

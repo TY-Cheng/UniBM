@@ -10,10 +10,9 @@ from unibm.ei.paths import (
     _build_bm_paths_from_values,
     _build_path_from_scores,
     _rolling_window_minima,
-    _select_stable_ei_window,
-    extract_stable_path_window,
 )
 from unibm.ei.preparation import prepare_ei_bundle
+from unibm.ei.selection import extract_stable_path_window, select_stable_path_window
 
 
 def _baseline_select_stable_ei_window(
@@ -109,7 +108,7 @@ class EiPathsTests(unittest.TestCase):
     def test_path_builders_and_stable_window_selection(self) -> None:
         block_sizes = np.array([4, 8, 16, 32], dtype=int)
         z_path = np.array([0.1, 0.11, 0.12, 0.11], dtype=float)
-        window, mask = _select_stable_ei_window(block_sizes, z_path, min_points=3)
+        window, mask = select_stable_path_window(block_sizes, z_path, min_points=3)
         baseline_window, baseline_mask = _baseline_select_stable_ei_window(
             block_sizes,
             z_path,
