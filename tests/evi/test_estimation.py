@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -72,6 +73,51 @@ class EviEstimationTests(unittest.TestCase):
         )
         np.testing.assert_allclose(aligned, cov[1:, 1:])
         self.assertIsNone(_aligned_bootstrap_covariance(None, curve, plateau))
+        self.assertIsNone(_aligned_bootstrap_covariance({"covariance": None}, curve, plateau))
+        self.assertIsNone(
+            _aligned_bootstrap_covariance({"covariance": np.array([])}, curve, plateau)
+        )
+        self.assertIsNone(
+            _aligned_bootstrap_covariance(
+                {"covariance": np.eye(2), "block_sizes": np.array([4, 8, 16], dtype=int)},
+                curve,
+                plateau,
+            )
+        )
+        curve_with_gap = BlockSummaryCurve(
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            counts=np.array([10, 8, 4, 2], dtype=int),
+            values=np.array([2.0, -1.0, 5.0, 7.0], dtype=float),
+            positive_mask=np.array([True, False, True, True], dtype=bool),
+        )
+        gap_plateau = PlateauWindow(
+            start=0,
+            stop=2,
+            score=0.0,
+            mask=np.array([True, True, False], dtype=bool),
+            x=curve_with_gap.log_block_sizes[:2],
+            y=curve_with_gap.log_values[:2],
+        )
+        reordered = np.arange(9, dtype=float).reshape(3, 3)
+        aligned_reordered = _aligned_bootstrap_covariance(
+            {
+                "covariance": reordered,
+                "block_sizes": np.array([32, 4, 16], dtype=int),
+            },
+            curve_with_gap,
+            gap_plateau,
+        )
+        expected = reordered[np.ix_([1, 2, 0], [1, 2, 0])][:2, :2]
+        np.testing.assert_allclose(aligned_reordered, expected)
+
+    def test_fit_linear_model_condition_number_and_covariance_fallback(self) -> None:
+        x = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        y = 1.5 + 0.25 * x
+        with mock.patch("unibm.evi._regression.np.linalg.cond", side_effect=np.linalg.LinAlgError):
+            model = _fit_linear_model(x, y)
+        self.assertEqual(model["condition_number"], float("inf"))
+        fallback = _fit_linear_model(x, y, covariance=np.eye(3))
+        self.assertAlmostEqual(fallback["slope"], 0.25, places=6)
 
     def test_scaling_fit_entrypoints_return_finite_results(self) -> None:
         values = self._positive_sample()
@@ -115,6 +161,21 @@ class EviEstimationTests(unittest.TestCase):
         self.assertTrue(np.isfinite(quantile_fit.slope))
         self.assertTrue(np.isfinite(mean_fit.slope))
         self.assertTrue(np.isfinite(mode_fit.slope))
+        auto_fit = _fit_scaling_model(
+            values,
+            target="mean",
+            sliding=True,
+            block_sizes=None,
+            num_step=4,
+            min_block_size=4,
+            max_block_size=16,
+            plateau_points=3,
+            bootstrap_reps=2,
+            super_block_size=32,
+            random_state=3,
+        )
+        self.assertIsNotNone(auto_fit.bootstrap)
+        self.assertTrue(np.isfinite(auto_fit.slope))
 
         with self.assertRaisesRegex(ValueError, "At least 32 finite observations"):
             _fit_scaling_model(np.array([1.0, 2.0, 3.0]), target="quantile")

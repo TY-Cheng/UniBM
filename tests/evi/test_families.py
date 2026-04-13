@@ -52,11 +52,16 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         lo, hi = wald_confidence_interval(1.0, 0.5, ci_level=0.95)
         self.assertLess(lo, 1.0)
         self.assertGreater(hi, 1.0)
+        with self.assertRaisesRegex(ValueError, "ci_level must lie strictly"):
+            wald_confidence_interval(1.0, 0.5, ci_level=1.0)
+        self.assertTrue(np.isnan(wald_confidence_interval(np.nan, 0.2)[0]))
         self.assertTrue(np.isnan(_normalize_standard_error(-1.0)))
         self.assertEqual(_normalize_standard_error(0.25), 0.25)
 
         tail_counts = candidate_tail_counts(64, min_count=8, max_fraction=0.3, num=6)
         self.assertTrue(np.all(tail_counts >= 8))
+        singleton_tail_counts = candidate_tail_counts(10, min_count=8, max_fraction=0.9, num=6)
+        np.testing.assert_array_equal(singleton_tail_counts, np.array([7], dtype=int))
         chosen, window, stable = select_stable_integer_window(
             np.array([8, 12, 16, 20], dtype=int),
             np.array([1.0, 1.1, 1.12, 1.11], dtype=float),
@@ -71,6 +76,8 @@ class EviEstimatorFamilyTests(unittest.TestCase):
             min_window=4,
         )
         self.assertEqual(alias_chosen, 12)
+        with self.assertRaisesRegex(ValueError, "must be non-empty and aligned"):
+            select_stable_integer_window(np.array([], dtype=int), np.array([], dtype=float))
 
     def test_tail_and_spectrum_paths(self) -> None:
         ordered = _finite_positive(self._pareto_sample(size=512))
@@ -78,14 +85,61 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(_hill_path(ordered, k_values))))
         self.assertTrue(np.any(np.isfinite(_pickands_path(ordered, k_values))))
         self.assertTrue(np.all(np.isfinite(_dedh_moment_path(ordered, k_values))))
+        np.testing.assert_allclose(
+            _pickands_path(np.array([10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]), np.array([3])),
+            np.array([np.nan]),
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            _pickands_path(np.array([10.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0]), np.array([1])),
+            np.array([np.nan]),
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            _dedh_moment_path(np.array([5.0] * 10, dtype=float), np.array([2], dtype=int)),
+            np.array([np.nan]),
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            _dedh_moment_path(
+                np.array([np.exp(2.0), np.exp(2.0), 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+                np.array([2], dtype=int),
+            ),
+            np.array([np.nan]),
+            equal_nan=True,
+        )
         self.assertTrue(np.isnan(_hill_standard_error(np.nan, 8)))
         self.assertTrue(np.isnan(_pickands_standard_error(np.nan, 8)))
         self.assertTrue(np.isfinite(_pickands_standard_error(0.0, 8)))
         self.assertTrue(np.isnan(_dedh_standard_error(np.nan, 8)))
 
         sample = self._pareto_sample(size=1024, seed=23)
+        np.testing.assert_array_equal(
+            candidate_max_spectrum_scales(1, min_scale=1, min_blocks=2),
+            np.empty(0, dtype=int),
+        )
         scales = candidate_max_spectrum_scales(sample.size, min_scale=1, min_blocks=4)
         y_values, n_blocks = _max_spectrum_curve(sample, scales)
+        sparse_slope, sparse_se = _weighted_slope_with_se(
+            np.array([1.0, np.nan]),
+            np.array([2.0, 3.0]),
+            np.array([1.0, 1.0]),
+        )
+        self.assertTrue(np.isnan(sparse_slope))
+        self.assertTrue(np.isnan(sparse_se))
+        curve_with_empty_blocks, empty_counts = _max_spectrum_curve(
+            np.array([1.0] * 8, dtype=float),
+            np.array([10], dtype=int),
+        )
+        np.testing.assert_allclose(curve_with_empty_blocks, np.array([np.nan]), equal_nan=True)
+        np.testing.assert_array_equal(empty_counts, np.array([0], dtype=int))
+        with self.assertRaisesRegex(ValueError, "at least three usable dyadic scales"):
+            _max_spectrum_path(
+                np.array([1, 2], dtype=int),
+                np.array([1.0, 2.0], dtype=float),
+                np.array([8, 4], dtype=int),
+                min_scale_count=3,
+            )
         start_scales, xi_path, j_max = _max_spectrum_path(
             scales, y_values, n_blocks, min_scale_count=3
         )
@@ -97,12 +151,16 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         hill = estimate_hill_evi(sample, k_values=np.array([16, 24, 32, 48, 64], dtype=int))
         pickands = estimate_pickands_evi(sample, k_values=np.array([8, 12, 16, 24, 32], dtype=int))
         dedh = estimate_dedh_moment_evi(sample, k_values=np.array([16, 24, 32, 48, 64], dtype=int))
+        default_hill = estimate_hill_evi(sample)
+        default_pickands = estimate_pickands_evi(sample)
+        default_dedh = estimate_dedh_moment_evi(sample)
         max_spec = estimate_max_spectrum_evi(sample, min_scale_count=3)
-        for fit in (hill, pickands, dedh, max_spec):
+        for fit in (hill, pickands, dedh, default_hill, default_pickands, default_dedh, max_spec):
             self.assertTrue(np.isfinite(fit.xi_hat))
             self.assertIsNotNone(fit.selected_level)
             self.assertGreater(len(fit.path_level), 0)
         self.assertEqual(hill.selected_k, hill.selected_level)
+        self.assertEqual(hill.path_k, hill.path_level)
 
         x = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
         y = np.array([2.0, 4.1, 6.0, 8.2], dtype=float)
@@ -111,6 +169,14 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         self.assertTrue(np.isfinite(se))
         with self.assertRaisesRegex(ValueError, "produced no finite path estimates"):
             _select_from_path("bad_path", np.array([1, 2]), np.array([np.nan, np.nan]))
+        custom = _select_from_path(
+            "custom_path",
+            np.array([8, 12, 16, 20], dtype=int),
+            np.array([0.4, 0.42, 0.41, 0.43], dtype=float),
+            tuning_axis="level",
+        )
+        self.assertTrue(np.isnan(custom.standard_error))
+        self.assertEqual(custom.tuning_axis, "level")
 
 
 if __name__ == "__main__":
