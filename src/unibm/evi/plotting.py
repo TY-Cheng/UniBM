@@ -1,4 +1,4 @@
-"""Plotting helpers for UniBM model objects."""
+"""Plotting helpers for EVI model objects."""
 # ruff: noqa: E402
 
 from __future__ import annotations
@@ -6,17 +6,17 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from ._runtime import prepare_matplotlib_env
+from .._runtime import prepare_matplotlib_env
 
 prepare_matplotlib_env()
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .evi.models import ScalingFit
+from .models import ScalingFit
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
-    """Coerce optional output paths to `Path` objects."""
+    """Coerce optional output paths to ``Path`` objects."""
     if file_path is None:
         return None
     return Path(file_path)
@@ -46,33 +46,7 @@ def plot_scaling_fit(
     xlabel: str = "log(block size)",
     ylabel: str | None = None,
 ) -> None:
-    """Plot a UniBM scaling fit on the log-log block-size scale.
-
-    Parameters
-    ----------
-    fit
-        Fitted scaling model returned by :func:`unibm.evi.estimate_evi_quantile`
-        or :func:`unibm.evi.estimate_target_scaling`.
-    file_path
-        Optional output path used when ``save=True``.
-    dpi
-        Figure DPI.
-    title
-        Optional plot title.
-    save
-        If ``True``, save the figure to ``file_path``.
-    close
-        Whether to close the figure after rendering. By default, figures stay
-        open in notebook kernels and close automatically in batch usage.
-    xlabel, ylabel
-        Axis labels. ``ylabel`` defaults to a label inferred from the target
-        stored on ``fit``.
-
-    Returns
-    -------
-    None
-        The function draws a Matplotlib figure and optionally writes it to disk.
-    """
+    """Plot an EVI scaling fit on the log-log block-size scale."""
     if ylabel is None:
         if fit.target == "quantile":
             ylabel = f"log block quantile (tau={fit.quantile:.2f})"
@@ -113,3 +87,6 @@ def plot_scaling_fit(
         _save_figure_outputs(fig, file_path)
     if _should_close_figure(close):
         plt.close(fig)
+
+
+__all__ = ["plot_scaling_fit"]

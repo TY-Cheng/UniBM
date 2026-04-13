@@ -12,12 +12,13 @@ Use:
   such as :mod:`unibm.evi.blocks`, :mod:`unibm.evi.targets`,
   :mod:`unibm.evi.estimation`,
   :mod:`unibm.evi.design`, :mod:`unibm.evi.bootstrap`, and
-  :mod:`unibm.evi.baselines`
+  :mod:`unibm.evi.tail` / :mod:`unibm.evi.spectrum`
 - :mod:`unibm.ei` for the grouped EI namespace, with canonical submodules such
-  as :mod:`unibm.ei.preparation`, :mod:`unibm.ei.paths`, :mod:`unibm.ei.bm`,
-  and :mod:`unibm.ei.threshold`
+  as :mod:`unibm.ei.preparation`, :mod:`unibm.ei.paths`,
+  :mod:`unibm.ei.selection`, :mod:`unibm.ei.bm`,
+  :mod:`unibm.ei.threshold`, and :mod:`unibm.ei.plotting`
 - :mod:`unibm.cdf` as the standalone public empirical CDF helper
-- :mod:`unibm.plotting` as the standalone plotting module
+- :mod:`unibm.evi.plotting` for EVI fit plotting helpers
 
 .. automodule:: unibm
    :members:

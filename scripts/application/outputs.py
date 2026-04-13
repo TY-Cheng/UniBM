@@ -34,6 +34,14 @@ from application.inputs import (
     ensure_usgs_raw_data,
     load_usgs_frozen_sites,
 )
+from application.diagnostics import (
+    application_design_life_interval_record,
+    application_design_life_interval_table,
+    application_scaling_gof_table,
+    application_stationarity_records,
+    application_stationarity_table,
+    scaling_residual_record,
+)
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series, screen_extremal_index_series
 from application.specs import (
@@ -57,7 +65,6 @@ from unibm.evi import (
     DEFAULT_CURVATURE_PENALTY,
     ScalingFit,
     block_summary_curve,
-    estimate_design_life_level,
     estimate_target_scaling,
     target_stability_summary,
 )
@@ -509,8 +516,8 @@ def _application_clock_text(bundle: ApplicationBundle) -> str:
 def _application_preprocessing_text(bundle: ApplicationBundle) -> str:
     """Render a compact preprocessing summary for one application."""
     if bundle.spec.provider == "usgs":
-        return "daily discharge, minimal QC/filtering, no model-based detrending"
-    return "inflation-adjusted daily building payouts, active-day severity split"
+        return "deduplicate timestamps, drop negative values, trim incomplete terminal year"
+    return "CPI deflation, zero-filled calendar clock, active-day severity split"
 
 
 def _application_normalization_text(bundle: ApplicationBundle) -> str:
@@ -523,8 +530,8 @@ def _application_normalization_text(bundle: ApplicationBundle) -> str:
 def _application_stationarity_text(bundle: ApplicationBundle) -> str:
     """Render the main stationarity caveat for one application."""
     if bundle.spec.provider == "usgs":
-        return "working stationarity after minimal preprocessing"
-    return "working stationarity after inflation adjustment and clock split"
+        return "stationary extrapolation is conditional on diagnostics and unchanged regime"
+    return "stationary extrapolation is conditional; inflation adjustment does not remove exposure growth"
 
 
 def _render_wrapped_latex_table(
@@ -787,24 +794,6 @@ def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) ->
     for bundle in _manuscript_bundles(bundles):
         evi_fits = _fit_evi_window_variants(bundle, top_k=3)
         evi_xi = np.asarray([fit.slope for fit in evi_fits], dtype=float)
-        evi_10 = np.asarray(
-            [
-                estimate_design_life_level(
-                    fit, 10.0, observations_per_year=_application_observations_per_year(bundle)
-                )
-                for fit in evi_fits
-            ],
-            dtype=float,
-        )
-        evi_50 = np.asarray(
-            [
-                estimate_design_life_level(
-                    fit, 50.0, observations_per_year=_application_observations_per_year(bundle)
-                )
-                for fit in evi_fits
-            ],
-            dtype=float,
-        )
         ei_variants = _fit_ei_window_variants(bundle, top_k=3)
         theta_values = (
             np.asarray([estimate.theta_hat for estimate, _ in ei_variants], dtype=float)
@@ -828,18 +817,6 @@ def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) ->
                     "NA"
                     if theta_values.size == 0 or not np.isfinite(theta_headline)
                     else f"{theta_headline:.2f} [{np.min(theta_values):.2f}, {np.max(theta_values):.2f}]"
-                ),
-                "10y median DLL [range]": (
-                    f"{float(estimate_design_life_level(bundle.evi_fit, 10.0, observations_per_year=_application_observations_per_year(bundle))):.2f} "
-                    f"[{np.min(evi_10):.2f}, {np.max(evi_10):.2f}]"
-                    if evi_10.size
-                    else "NA"
-                ),
-                "50y median DLL [range]": (
-                    f"{float(estimate_design_life_level(bundle.evi_fit, 50.0, observations_per_year=_application_observations_per_year(bundle))):.2f} "
-                    f"[{np.min(evi_50):.2f}, {np.max(evi_50):.2f}]"
-                    if evi_50.size
-                    else "NA"
                 ),
             }
         )
@@ -1020,6 +997,61 @@ def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     float(bundle.ei_ferro_segers.confidence_interval[0]),
                     float(bundle.ei_ferro_segers.confidence_interval[1]),
                 ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _theta_regime(theta: float) -> str:
+    """Bucket theta into a short qualitative clustering regime label."""
+    if not np.isfinite(theta):
+        return "unknown clustering"
+    if theta < 0.10:
+        return "strong persistence"
+    if theta < 0.50:
+        return "moderate clustering"
+    return "weak clustering"
+
+
+def _seasonal_ei_note(headline_theta: float, seasonal_theta: float) -> str:
+    """Summarize whether seasonal adjustment changes the clustering reading."""
+    headline_regime = _theta_regime(headline_theta)
+    seasonal_regime = _theta_regime(seasonal_theta)
+    if headline_regime == seasonal_regime:
+        return f"{headline_regime} remains after adjustment"
+    return f"{headline_regime} shifts to {seasonal_regime}"
+
+
+def application_ei_seasonal_sensitivity_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build the manuscript appendix seasonal-adjusted EI sensitivity table."""
+    rows: list[dict[str, object]] = []
+    for bundle in _manuscript_bundles(bundles):
+        if not _bundle_has_formal_ei(bundle) or bundle.ei_bb_sliding_fgls is None:
+            continue
+        seasonal_rows = _seasonal_adjusted_ei_method_rows(bundle)
+        seasonal_bb = next(
+            (row for row in seasonal_rows if row["method"] == "bb_sliding_fgls"),
+            None,
+        )
+        if seasonal_bb is None:
+            continue
+        headline_theta = float(bundle.ei_bb_sliding_fgls.theta_hat)
+        seasonal_theta = float(seasonal_bb["theta_hat"])
+        rows.append(
+            {
+                "Application": bundle.spec.label,
+                "Headline $\\theta$ (BB-FGLS)": _format_interval(
+                    headline_theta,
+                    float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
+                    float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
+                ),
+                "Seasonal-adjusted $\\theta$": _format_interval(
+                    seasonal_theta,
+                    float(seasonal_bb["theta_lo"]),
+                    float(seasonal_bb["theta_hi"]),
+                ),
+                "Shift": f"{seasonal_theta - headline_theta:+.3f}",
+                "Interpretive note": _seasonal_ei_note(headline_theta, seasonal_theta),
             }
         )
     return pd.DataFrame(rows)
@@ -1864,6 +1896,96 @@ def _usgs_site_audit_frame(metadata_dir: Path) -> pd.DataFrame:
     )
 
 
+def _yes_no_or_na(value: object) -> str:
+    """Render booleans read from JSON/CSV into stable yes/no/NA text."""
+    if pd.isna(value):
+        return "NA"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return "yes"
+        if normalized in {"false", "no", "0"}:
+            return "no"
+    return "yes" if bool(value) else "no"
+
+
+def application_usgs_screening_disclosure_table(
+    *,
+    metadata_dir: Path,
+    screening_path: Path,
+) -> pd.DataFrame:
+    """Render the manuscript-facing USGS candidate-pool disclosure table."""
+    shortlist = _usgs_site_audit_frame(metadata_dir).copy()
+    shortlist["site_no"] = shortlist["site_no"].map(lambda value: str(value).zfill(8))
+    detailed = pd.DataFrame()
+    if screening_path.exists():
+        try:
+            detailed = pd.read_csv(screening_path)
+        except Exception:
+            detailed = pd.DataFrame()
+    required = {
+        "state_code",
+        "site_no",
+        "recommended",
+        "supports_frechet_working_model",
+        "plateau_points",
+        "n_years",
+        "xi_lower",
+    }
+    if required.issubset(detailed.columns):
+        detailed = detailed.loc[
+            :,
+            [
+                "state_code",
+                "site_no",
+                "recommended",
+                "supports_frechet_working_model",
+                "plateau_points",
+                "n_years",
+                "xi_lower",
+            ],
+        ].copy()
+        detailed["site_no"] = detailed["site_no"].map(lambda value: str(value).zfill(8))
+        shortlist = shortlist.merge(
+            detailed,
+            on=["state_code", "site_no"],
+            how="left",
+        )
+    else:
+        shortlist["recommended"] = np.nan
+        shortlist["supports_frechet_working_model"] = np.nan
+        shortlist["plateau_points"] = np.nan
+        shortlist["n_years"] = np.nan
+        shortlist["xi_lower"] = np.nan
+    shortlist["selected"] = shortlist["selected"].map(_yes_no_or_na)
+    shortlist["recommended"] = shortlist["recommended"].map(_yes_no_or_na)
+    shortlist["supports_frechet_working_model"] = shortlist["supports_frechet_working_model"].map(
+        _yes_no_or_na
+    )
+    shortlist["plateau_points"] = shortlist["plateau_points"].map(
+        lambda value: "NA" if pd.isna(value) else f"{int(value)}"
+    )
+    shortlist["n_years"] = shortlist["n_years"].map(
+        lambda value: "NA" if pd.isna(value) else f"{float(value):.1f}"
+    )
+    shortlist["xi_lower"] = shortlist["xi_lower"].map(
+        lambda value: "NA" if pd.isna(value) else f"{float(value):.2f}"
+    )
+    return shortlist.rename(
+        columns={
+            "state_code": "State",
+            "site_no": "Site no.",
+            "station_name": "Station",
+            "selected": "Selected",
+            "recommended": "Recommended",
+            "supports_frechet_working_model": "Frechet screen",
+            "plateau_points": "Plateau points",
+            "n_years": "Record years",
+            "xi_lower": "xi lower",
+        }
+    )
+
+
 def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     """Materialize all application-side CSVs, metadata, and figures."""
     dirs = resolve_repo_dirs(root)
@@ -1896,6 +2018,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     screening_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
     design_life_level_rows: list[dict[str, object]] = []
+    stationarity_rows: list[dict[str, object]] = []
+    design_life_interval_rows: list[dict[str, object]] = []
+    scaling_gof_rows: list[dict[str, object]] = []
     method_rows: list[dict[str, object]] = []
     ei_method_rows: list[dict[str, object]] = []
     seasonal_ei_method_rows: list[dict[str, object]] = []
@@ -1921,10 +2046,15 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             screening_rows.append(ei_review)
         summary_rows.append(application_summary_record(bundle))
         design_life_level_rows.extend(_application_design_life_level_rows(bundle))
+        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
+            stationarity_rows.append(application_stationarity_records(bundle))
+            design_life_interval_rows.append(application_design_life_interval_record(bundle))
         method_rows.extend(application_method_rows(bundle))
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
             seasonal_ei_method_rows.extend(_seasonal_adjusted_ei_method_rows(bundle))
+        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
+            scaling_gof_rows.append(scaling_residual_record(bundle))
         status("application", f"writing figures for {bundle.spec.label}")
         write_application_figures(bundle, fig_dir)
 
@@ -1946,10 +2076,24 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         out_dir / "application_design_life_levels.csv",
         index=False,
     )
-    _usgs_site_audit_frame(metadata_app_dir).to_csv(
-        out_dir / "application_usgs_site_screening.csv",
+    pd.DataFrame(stationarity_rows).sort_values(["provider", "application"]).to_csv(
+        out_dir / "application_stationarity.csv",
         index=False,
     )
+    pd.DataFrame(scaling_gof_rows).sort_values(["provider", "application"]).to_csv(
+        out_dir / "application_scaling_gof.csv",
+        index=False,
+    )
+    pd.DataFrame(design_life_interval_rows).sort_values(["provider", "application"]).to_csv(
+        out_dir / "application_design_life_intervals.csv",
+        index=False,
+    )
+    usgs_screening_path = out_dir / "application_usgs_site_screening.csv"
+    if not usgs_screening_path.exists():
+        _usgs_site_audit_frame(metadata_app_dir).to_csv(
+            usgs_screening_path,
+            index=False,
+        )
     pd.DataFrame(method_rows).sort_values(["application", "tau", "method"]).to_csv(
         out_dir / "application_methods.csv",
         index=False,
@@ -1984,7 +2128,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "pooled-BM comparator, and the implied mean cluster size $1/\\theta$ are "
                 "substantively interpreted."
             ),
-            label="tab:application-summary-generated",
+            label="tab:application-summary-main",
         )
     )
     status("application", "writing application LaTeX design-life-level table")
@@ -2040,13 +2184,110 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_selection_sensitivity_table(bundles),
             caption=(
-                "Appendix local selection-sensitivity summary for the curated four-case manuscript "
-                "subset. Each cell reports the headline estimate together with the min--max range "
-                "over the top three scoring EVI plateau windows or EI stable windows for the same "
-                "application. This is a bounded robustness check rather than full post-selection "
-                "inference."
+                "Appendix parameter-side local selection-sensitivity summary for the curated "
+                "four-case manuscript subset. Each cell reports the headline xi or theta estimate "
+                "together with the min--max range over the top three scoring EVI plateau windows "
+                "or EI stable windows for the same application. The layered design-life "
+                "uncertainty summary is reported separately in the companion design-life-interval "
+                "appendix table."
             ),
             label="tab:application-selection-sensitivity-main",
+        )
+    )
+    status("application", "writing application appendix stationarity table")
+    (table_dir / "application_stationarity_main.tex").write_text(
+        _render_wrapped_latex_table(
+            application_stationarity_table(bundles),
+            caption=(
+                "Appendix stationarity diagnostics for the curated four-case manuscript subset. "
+                "Each row reports Mann--Kendall trend and Pettitt break diagnostics for the "
+                "severity series used in the EVI branch and for its annual maxima. These are "
+                "diagnostics, not a guarantee of stationarity, so all 50-year design-life levels "
+                "remain conditional stationary extrapolations."
+            ),
+            label="tab:application-stationarity-main",
+            alignments=(
+                "p{0.16\\textwidth}p{0.16\\textwidth}p{0.17\\textwidth}"
+                "p{0.17\\textwidth}p{0.17\\textwidth}p{0.17\\textwidth}"
+            ),
+        )
+    )
+    status("application", "writing application appendix scaling-fit diagnostics table")
+    (table_dir / "application_scaling_gof_main.tex").write_text(
+        render_latex_table(
+            application_scaling_gof_table(bundles),
+            caption=(
+                "Appendix scaling-law diagnostics for the curated four-case manuscript subset. "
+                "Rows report the selected plateau, residual spread, a Shapiro--Wilk residual "
+                "diagnostic, and the top-three-window ranges for xi and the headline median "
+                "design-life levels. These ranges summarize local plateau sensitivity rather than "
+                "full post-selection uncertainty. For Florida NFIP, the selected plateau contains "
+                "only five retained points, so the Shapiro--Wilk line should be read as weakly "
+                "informative."
+            ),
+            label="tab:application-scaling-gof-main",
+        )
+    )
+    status("application", "writing application appendix median DLL interval table")
+    (table_dir / "application_design_life_intervals_main.tex").write_text(
+        _render_wrapped_latex_table(
+            application_design_life_interval_table(bundles),
+            caption=(
+                "Appendix layered uncertainty summary for the headline median design-life levels "
+                "across the curated four-case manuscript subset. Conditional 95 percent intervals "
+                "quantify uncertainty within the selected log-log scaling fit, while the plateau "
+                "envelope reports the min--max range across the top three scoring plateau windows. "
+                "Neither component is full post-selection inference. Florida NFIP is retained here "
+                "as a stress-case diagnostic only; its 50-year line has little actionable design "
+                "content under the stationary working model."
+            ),
+            label="tab:application-design-life-intervals-main",
+            alignments=(
+                "p{0.13\\textwidth}p{0.10\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}"
+                "p{0.13\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}p{0.13\\textwidth}"
+            ),
+        )
+    )
+    status("application", "writing application appendix seasonal EI sensitivity table")
+    (table_dir / "application_ei_seasonal_sensitivity_main.tex").write_text(
+        _render_wrapped_latex_table(
+            application_ei_seasonal_sensitivity_table(bundles),
+            caption=(
+                "Appendix seasonal EI sensitivity for the curated four-case manuscript subset. "
+                "Rows compare the headline BB-sliding-FGLS persistence estimate with a monthly "
+                "empirical-PIT unit-Frechet seasonal adjustment applied before the EI fit. This "
+                "table is a robustness check on whether seasonal marginal structure changes the "
+                "qualitative clustering interpretation; it is not a replacement for the headline "
+                "calendar-time EI analysis."
+            ),
+            label="tab:application-ei-seasonal-main",
+            alignments=(
+                "p{0.17\\textwidth}p{0.18\\textwidth}p{0.18\\textwidth}"
+                "p{0.10\\textwidth}p{0.29\\textwidth}"
+            ),
+        )
+    )
+    status("application", "writing USGS screening disclosure table")
+    (table_dir / "application_usgs_screening_main.tex").write_text(
+        _render_wrapped_latex_table(
+            application_usgs_screening_disclosure_table(
+                metadata_dir=metadata_app_dir,
+                screening_path=usgs_screening_path,
+            ),
+            caption=(
+                "Appendix disclosure table for the curated USGS streamflow candidate pools. "
+                "Sites were screened with method-informed criteria: minimum record length 20 years, "
+                "minimum plateau size 5 points, xi lower bound at least -0.25, and plateau-maxima "
+                "positive share at least 0.95. Ranking then prioritizes recommended status, "
+                "Frechet working-model support, plateau size, record length, and xi lower bound."
+            ),
+            label="tab:application-usgs-screening-main",
+            alignments=(
+                "p{0.07\\textwidth}p{0.11\\textwidth}p{0.26\\textwidth}p{0.08\\textwidth}"
+                "p{0.10\\textwidth}p{0.11\\textwidth}p{0.10\\textwidth}p{0.09\\textwidth}"
+                "p{0.08\\textwidth}"
+            ),
+            size=r"\tiny",
         )
     )
     return {
@@ -2054,6 +2295,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_screening": out_dir / "application_screening.csv",
         "application_summary": out_dir / "application_summary.csv",
         "application_design_life_levels": out_dir / "application_design_life_levels.csv",
+        "application_stationarity": out_dir / "application_stationarity.csv",
+        "application_scaling_gof": out_dir / "application_scaling_gof.csv",
+        "application_design_life_intervals": out_dir / "application_design_life_intervals.csv",
         "application_methods": out_dir / "application_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
         "application_ei_seasonal_methods": out_dir / "application_ei_seasonal_methods.csv",
@@ -2066,18 +2310,32 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_selection_sensitivity_main": (
             table_dir / "application_selection_sensitivity_main.tex"
         ),
+        "application_stationarity_main": table_dir / "application_stationarity_main.tex",
+        "application_scaling_gof_main": table_dir / "application_scaling_gof_main.tex",
+        "application_design_life_intervals_main": (
+            table_dir / "application_design_life_intervals_main.tex"
+        ),
+        "application_ei_seasonal_sensitivity_main": (
+            table_dir / "application_ei_seasonal_sensitivity_main.tex"
+        ),
+        "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
     }
 
 
 __all__ = [
     "application_ei_table",
+    "application_ei_seasonal_sensitivity_table",
     "application_ei_method_rows",
     "application_case_audit_table",
+    "application_design_life_interval_table",
     "application_method_rows",
     "application_design_life_level_table",
+    "application_scaling_gof_table",
     "application_selection_sensitivity_table",
+    "application_stationarity_table",
     "application_summary_record",
     "application_summary_table",
+    "application_usgs_screening_disclosure_table",
     "build_application_outputs",
     "plot_application_composite",
     "plot_application_ei",

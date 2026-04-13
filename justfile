@@ -22,6 +22,15 @@ benchmark workers="6":
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
 
+manuscript workers="6" screening_bootstrap="20":
+    just sync-env
+    test -f "${DIR_MANUSCRIPT:-../UniBM_manuscript}/0_manuscript.tex" || { echo "DIR_MANUSCRIPT does not point to a manuscript repo with 0_manuscript.tex"; exit 1; }
+    UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
+    UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
+    UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
+    UNIBM_APPLICATION_WORKERS={{ workers }} uv run python scripts/application/build.py
+    uv run python scripts/manuscript/artifact_manifest.py
+
 application workers="6" screening_bootstrap="20":
     just sync-env
     UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py

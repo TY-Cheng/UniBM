@@ -27,10 +27,12 @@ REMOVED_FLAT_MODULES = (
     "unibm.external",
     "unibm.models",
     "unibm.extremal_index",
+    "unibm.plotting",
 )
 REMOVED_LEGACY_MODULES = (
     "unibm.evi.core",
     "unibm.evi.external",
+    "unibm.evi.baselines",
     "unibm.ei.native",
 )
 REMOVED_DIAGNOSTICS_MODULES = (
@@ -64,19 +66,40 @@ class UniBmPackageStructureTests(unittest.TestCase):
         importlib.import_module("unibm.evi.selection")
         importlib.import_module("unibm.evi.estimation")
         importlib.import_module("unibm.evi.design")
-        importlib.import_module("unibm.evi.baselines")
+        importlib.import_module("unibm.evi.plotting")
+        importlib.import_module("unibm.evi.tail")
+        importlib.import_module("unibm.evi.spectrum")
         importlib.import_module("unibm.evi.bootstrap")
         importlib.import_module("unibm.ei.preparation")
+        importlib.import_module("unibm.ei.selection")
         importlib.import_module("unibm.ei.bm")
         importlib.import_module("unibm.ei.bootstrap")
         importlib.import_module("unibm.ei.paths")
+        importlib.import_module("unibm.ei.plotting")
         importlib.import_module("unibm.ei.threshold")
         importlib.import_module("unibm.ei.models")
         self.assertIs(evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
         self.assertIs(evi.estimate_design_life_level, unibm.estimate_design_life_level)
+        self.assertTrue(hasattr(evi, "estimate_design_life_level_interval"))
+        self.assertIs(
+            evi.estimate_hill_evi,
+            importlib.import_module("unibm.evi.tail").estimate_hill_evi,
+        )
+        self.assertIs(
+            evi.estimate_max_spectrum_evi,
+            importlib.import_module("unibm.evi.spectrum").estimate_max_spectrum_evi,
+        )
         self.assertIs(
             evi.target_stability_summary,
             importlib.import_module("unibm.evi.targets").target_stability_summary,
+        )
+        self.assertIs(
+            ei_module.select_stable_path_window,
+            importlib.import_module("unibm.ei.selection").select_stable_path_window,
+        )
+        self.assertIs(
+            ei_module.plot_ei_fit,
+            importlib.import_module("unibm.ei.plotting").plot_ei_fit,
         )
 
     def test_top_level_package_lazy_loads_grouped_subpackages(self) -> None:

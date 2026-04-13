@@ -46,12 +46,16 @@ LEGACY_SCENARIO_CACHE_VERSIONS = ("2026-04-03-benchmark-cache-v11",)
 DEFAULT_BENCHMARK_WORKERS = 4
 BENCHMARK_MASTER_SEED = 20260401
 UNIVERSAL_BENCHMARK_SET = "universal"
+STRESS_BENCHMARK_SET = "stress"
 UNIVERSAL_XI_VALUES = (0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0)
 UNIVERSAL_THETA_VALUES = (0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0)
 EVI_DEFAULT_THETA_VALUES = (0.01, 0.10, 0.50, 1.0)
 EI_DEFAULT_XI_VALUES = (0.01, 0.50, 1.0, 5.0)
+STRESS_XI_VALUES = (0.10, 0.30, 1.0)
+STRESS_THETA_VALUES = (0.10, 0.50, 1.0)
 MOVING_MAXIMA_Q = 99
 MOVING_MAXIMA_FAMILY = f"moving_maxima_q{MOVING_MAXIMA_Q}"
+STRESS_MOVING_MAXIMA_FAMILY = f"student_t_abs_moving_maxima_q{MOVING_MAXIMA_Q}"
 UNIVERSAL_FAMILIES = (
     "frechet_max_ar",
     MOVING_MAXIMA_FAMILY,
@@ -64,6 +68,7 @@ EVI_DEFAULT_FAMILIES = (
 )
 EI_DEFAULT_FAMILIES = UNIVERSAL_FAMILIES
 MOVING_MAXIMA_FAMILY_PATTERN = re.compile(r"^moving_maxima_q(?P<q>[1-9]\d*)$")
+STRESS_MOVING_MAXIMA_FAMILY_PATTERN = re.compile(r"^student_t_abs_moving_maxima_q(?P<q>[1-9]\d*)$")
 
 
 def _try_load_npz(cache_file: Path) -> Any | None:
@@ -157,15 +162,18 @@ REGRESSION_MARKERS = {
 FAMILY_LABELS = {
     "frechet_max_ar": "Frechet max-AR",
     MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
+    STRESS_MOVING_MAXIMA_FAMILY: f"Abs-Student-t moving maxima (q={MOVING_MAXIMA_Q})",
     "pareto_additive_ar1": "Pareto additive AR1",
 }
 FAMILY_ORDER = (
     "frechet_max_ar",
     MOVING_MAXIMA_FAMILY,
+    STRESS_MOVING_MAXIMA_FAMILY,
     "pareto_additive_ar1",
 )
 BENCHMARK_SET_LABELS = {
     UNIVERSAL_BENCHMARK_SET: "Projected short-record suite",
+    STRESS_BENCHMARK_SET: "Slow-convergence stress suite",
 }
 CORE_METHODS = (
     "disjoint_mean_ols",
@@ -226,11 +234,28 @@ def parse_moving_maxima_q(family: str) -> int | None:
     return q
 
 
+def parse_student_t_abs_moving_maxima_q(family: str) -> int | None:
+    """Return the stress moving-maxima order encoded in a family id, if present."""
+    match = STRESS_MOVING_MAXIMA_FAMILY_PATTERN.fullmatch(str(family))
+    if match is None:
+        return None
+    q = int(match.group("q"))
+    if q != MOVING_MAXIMA_Q:
+        raise ValueError(
+            "Only "
+            f"{STRESS_MOVING_MAXIMA_FAMILY} is supported in the benchmark design, got {family!r}."
+        )
+    return q
+
+
 def family_label(family: str) -> str:
     """Render a family id into a stable manuscript-friendly label."""
     q = parse_moving_maxima_q(family)
     if q is not None:
         return f"Moving Maxima (q={q})"
+    q = parse_student_t_abs_moving_maxima_q(family)
+    if q is not None:
+        return f"Abs-Student-t moving maxima (q={q})"
     return FAMILY_LABELS.get(family, family)
 
 
@@ -355,6 +380,9 @@ def map_theta_to_phi(family: str, theta: float, xi: float) -> float:
     q = parse_moving_maxima_q(family)
     if q is not None:
         return map_theta_to_phi_moving_maxima(theta, xi, q)
+    q = parse_student_t_abs_moving_maxima_q(family)
+    if q is not None:
+        return map_theta_to_phi_moving_maxima(theta, xi, q)
     raise ValueError(f"Unknown family for phi inversion: {family}")
 
 
@@ -363,6 +391,10 @@ def theta_from_phi(family: str, phi: float, xi: float) -> float:
     if family in ("frechet_max_ar", "pareto_additive_ar1"):
         return float(1.0 - phi ** (1.0 / xi))
     q = parse_moving_maxima_q(family)
+    if q is not None:
+        x = float(phi ** (1.0 / xi))
+        return float(1.0 / _moving_maxima_denominator(x, q))
+    q = parse_student_t_abs_moving_maxima_q(family)
     if q is not None:
         x = float(phi ** (1.0 / xi))
         return float(1.0 / _moving_maxima_denominator(x, q))
@@ -389,6 +421,18 @@ def _sample_frechet_innovations(
     tiny = np.finfo(float).tiny
     uniforms = np.clip(rng.random(n_obs), tiny, 1 - tiny)
     return np.power(-np.log(uniforms), -xi)
+
+
+def _sample_abs_student_t_innovations(
+    xi: float,
+    n_obs: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Draw positive absolute-Student-t innovations with EVT index xi = 1 / nu."""
+    if xi <= 0.0:
+        raise ValueError("xi must be strictly positive for the heavy-tailed stress design.")
+    degrees_of_freedom = float(1.0 / xi)
+    return np.abs(rng.standard_t(df=degrees_of_freedom, size=n_obs))
 
 
 def _simulate_positive_additive_ar1(
@@ -445,6 +489,28 @@ def simulate_moving_maxima_series(
     return series[burn_in : burn_in + n_obs]
 
 
+def simulate_abs_student_t_moving_maxima_series(
+    xi: float,
+    phi: float,
+    n_obs: int,
+    rng: np.random.Generator,
+    *,
+    q: int = MOVING_MAXIMA_Q,
+    burn_in: int = SIMULATION_BURN_IN,
+) -> np.ndarray:
+    """Simulate a slow-convergence moving-maxima stress process with absolute t innovations."""
+    weights = np.array([phi**j for j in range(q + 1)], dtype=float)
+    innovations = _sample_abs_student_t_innovations(
+        xi=xi,
+        n_obs=n_obs + burn_in + q,
+        rng=rng,
+    )
+    windows = np.lib.stride_tricks.sliding_window_view(innovations, q + 1)
+    reversed_weights = weights[::-1]
+    series = np.max(windows * reversed_weights, axis=-1)
+    return series[burn_in : burn_in + n_obs]
+
+
 def simulate_pareto_additive_ar1_series(
     xi: float,
     phi: float,
@@ -488,6 +554,15 @@ def simulate_series(cfg: SimulationConfig, rng: np.random.Generator) -> np.ndarr
     q = parse_moving_maxima_q(cfg.family)
     if q is not None:
         return simulate_moving_maxima_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng, q=q)
+    q = parse_student_t_abs_moving_maxima_q(cfg.family)
+    if q is not None:
+        return simulate_abs_student_t_moving_maxima_series(
+            cfg.xi_true,
+            cfg.phi,
+            cfg.n_obs,
+            rng,
+            q=q,
+        )
     raise ValueError(f"Unknown family: {cfg.family}")
 
 
@@ -563,6 +638,28 @@ def default_ei_simulation_configs(
                     )
                 )
     return configs
+
+
+def stress_evi_simulation_configs(
+    *,
+    xi_values: Iterable[float] = STRESS_XI_VALUES,
+    theta_values: Iterable[float] = STRESS_THETA_VALUES,
+    families: Iterable[str] = (STRESS_MOVING_MAXIMA_FAMILY,),
+    n_obs: int = 365,
+    reps: int = 32,
+    quantile: float = 0.5,
+    benchmark_set: str = STRESS_BENCHMARK_SET,
+) -> list[SimulationConfig]:
+    """Build the appendix-only slow-convergence EVI stress suite."""
+    return default_evi_simulation_configs(
+        xi_values=xi_values,
+        theta_values=theta_values,
+        families=families,
+        n_obs=n_obs,
+        reps=reps,
+        quantile=quantile,
+        benchmark_set=benchmark_set,
+    )
 
 
 def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:

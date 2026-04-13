@@ -61,6 +61,7 @@ different roles:
 In code, the main entrypoints are:
 
 - :func:`unibm.ei.preparation.prepare_ei_bundle`
+- :func:`unibm.ei.selection.select_stable_path_window`
 - :func:`unibm.ei.bm.estimate_pooled_bm_ei`
 - :func:`unibm.ei.threshold.estimate_k_gaps`
 - :func:`unibm.ei.threshold.estimate_ferro_segers`
@@ -100,11 +101,15 @@ Module responsibilities
 - ``evi.selection`` and ``evi.estimation``: plateau selection and log-log
   regression.
 - ``evi.design``: design-life-level mapping from fitted quantile scaling laws.
-- ``evi.bootstrap`` and ``evi.baselines``: covariance estimation and xi
-  comparator estimators.
+- ``evi.bootstrap``: covariance estimation for the main UniBM scaling fit.
+- ``evi.estimation``, ``evi.tail``, and ``evi.spectrum``: the canonical
+  scaling estimator family plus published tail and spectrum xi comparator
+  families.
 - ``ei.preparation`` and ``ei.paths``: observed-sample preparation and BM-path
   construction.
+- ``ei.selection``: stable-window scoring and extraction on EI paths.
 - ``ei.bm`` and ``ei.threshold``: formal BM-based and threshold-based EI
-  estimators.
+  estimation families.
+- ``ei.plotting``: figures for EI paths and fitted EI objects.
 - ``cdf``: the empirical CDF helper used by EI path preparation.
-- ``plotting``: figures for fitted objects.
+- ``evi.plotting``: figures for fitted EVI objects.

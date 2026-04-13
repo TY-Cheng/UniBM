@@ -15,8 +15,8 @@ from unibm.ei.bm import (
     estimate_native_bm_ei,
     estimate_pooled_bm_ei,
 )
-from unibm.ei.paths import extract_stable_path_window
 from unibm.ei.preparation import prepare_ei_bundle
+from unibm.ei.selection import extract_stable_path_window
 
 
 class EiBmTests(unittest.TestCase):

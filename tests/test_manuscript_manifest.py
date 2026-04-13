@@ -35,9 +35,16 @@ class ManuscriptManifestTests(unittest.TestCase):
             labels = {entry["label"] for entry in payload["entries"]}
             self.assertIn("fig:benchmark-evi-targets", labels)
             self.assertIn("fig:benchmark-ei-targets", labels)
+            self.assertIn("fig:benchmark-evi-stress", labels)
             self.assertIn("tab:application-case-context-main", labels)
             self.assertIn("tab:application-case-audit-main", labels)
+            self.assertIn("tab:benchmark-record-length-main", labels)
             self.assertIn("tab:application-selection-sensitivity-main", labels)
+            self.assertIn("tab:application-stationarity-main", labels)
+            self.assertIn("tab:application-scaling-gof-main", labels)
+            self.assertIn("tab:application-design-life-intervals-main", labels)
+            self.assertIn("tab:application-ei-seasonal-main", labels)
+            self.assertIn("tab:application-usgs-screening-main", labels)
             self.assertIn("tab:application-summary-main", labels)
 
 

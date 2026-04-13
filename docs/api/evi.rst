@@ -8,10 +8,11 @@ responsibilities:
 - :mod:`unibm.evi.targets` for cross-target block-summary stability tables
 - :mod:`unibm.evi.summaries` for block-summary functionals
 - :mod:`unibm.evi.selection` for plateau-window selection
-- :mod:`unibm.evi.estimation` for canonical EVI fitting entrypoints
+- :mod:`unibm.evi.estimation`, :mod:`unibm.evi.tail`, and
+  :mod:`unibm.evi.spectrum` for the EVI estimation families
 - :mod:`unibm.evi.design` for post-fit block-quantile and design-life mapping
+- :mod:`unibm.evi.plotting` for EVI fit plotting helpers
 - :mod:`unibm.evi.bootstrap` for reusable bootstrap backbones and covariance estimation
-- :mod:`unibm.evi.baselines` for comparator xi estimators
 - :mod:`unibm.evi.models` for result dataclasses
 
 .. automodule:: unibm.evi
@@ -51,8 +52,11 @@ Selection
    :undoc-members:
    :show-inheritance:
 
-Estimation
-----------
+Estimation Families
+-------------------
+
+Scaling Estimator
+^^^^^^^^^^^^^^^^^
 
 .. automodule:: unibm.evi.estimation
    :members:
@@ -67,6 +71,14 @@ Design
    :undoc-members:
    :show-inheritance:
 
+Plotting
+--------
+
+.. automodule:: unibm.evi.plotting
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Bootstrap
 ---------
 
@@ -75,10 +87,18 @@ Bootstrap
    :undoc-members:
    :show-inheritance:
 
-Baselines
----------
+Tail Estimators
+^^^^^^^^^^^^^^^
 
-.. automodule:: unibm.evi.baselines
+.. automodule:: unibm.evi.tail
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Spectrum Estimators
+^^^^^^^^^^^^^^^^^^^
+
+.. automodule:: unibm.evi.spectrum
    :members:
    :undoc-members:
    :show-inheritance:

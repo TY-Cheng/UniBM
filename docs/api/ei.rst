@@ -5,9 +5,11 @@ The theta/extremal-index branch is organized into canonical modules with
 parallel responsibilities:
 
 - :mod:`unibm.ei.preparation` for observed-sample preparation
-- :mod:`unibm.ei.paths` for BM-path construction and stable-window extraction
-- :mod:`unibm.ei.bm` for native and pooled BM-based EI estimators
-- :mod:`unibm.ei.threshold` for threshold-side EI estimators
+- :mod:`unibm.ei.paths` for BM-path construction
+- :mod:`unibm.ei.selection` for stable-window selection and extraction
+- :mod:`unibm.ei.bm` and :mod:`unibm.ei.threshold` for BM-based and
+  threshold-based EI estimation families
+- :mod:`unibm.ei.plotting` for EI path and fit plotting helpers
 - :mod:`unibm.ei.bootstrap` for BM path-bootstrap transforms
 - :mod:`unibm.ei.models` for reusable result dataclasses
 
@@ -32,8 +34,19 @@ Paths
    :undoc-members:
    :show-inheritance:
 
+Selection
+---------
+
+.. automodule:: unibm.ei.selection
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Estimation Families
+-------------------
+
 BM Estimators
--------------
+^^^^^^^^^^^^^
 
 .. automodule:: unibm.ei.bm
    :members:
@@ -41,9 +54,17 @@ BM Estimators
    :show-inheritance:
 
 Threshold Estimators
---------------------
+^^^^^^^^^^^^^^^^^^^^
 
 .. automodule:: unibm.ei.threshold
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Plotting
+--------
+
+.. automodule:: unibm.ei.plotting
    :members:
    :undoc-members:
    :show-inheritance:

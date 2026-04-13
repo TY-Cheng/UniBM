@@ -24,4 +24,3 @@ package under ``src/unibm``.
    api/evi
    api/ei
    api/cdf
-   api/plotting

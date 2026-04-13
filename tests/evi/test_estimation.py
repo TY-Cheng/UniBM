@@ -11,7 +11,11 @@ from unibm.evi._regression import (
     _fit_scaling_model,
 )
 from unibm.evi.blocks import block_summary_curve
-from unibm.evi.design import estimate_design_life_level, predict_block_quantile
+from unibm.evi.design import (
+    estimate_design_life_level,
+    estimate_design_life_level_interval,
+    predict_block_quantile,
+)
 from unibm.evi.estimation import estimate_evi_quantile, estimate_target_scaling
 from unibm.evi.models import BlockSummaryCurve, PlateauWindow
 from unibm.evi.selection import select_penultimate_window
@@ -132,7 +136,23 @@ class EviEstimationTests(unittest.TestCase):
             np.array([1.0, 10.0]),
             observations_per_year=365.25,
         )
+        interval_lo, interval_hi = estimate_design_life_level_interval(
+            fit,
+            np.array([1.0, 10.0]),
+            observations_per_year=365.25,
+        )
         self.assertEqual(levels.shape, (2,))
+        self.assertEqual(interval_lo.shape, (2,))
+        self.assertEqual(interval_hi.shape, (2,))
+        self.assertTrue(np.all(interval_lo <= levels))
+        self.assertTrue(np.all(levels <= interval_hi))
+        scalar_lo, scalar_hi = estimate_design_life_level_interval(
+            fit,
+            10.0,
+            observations_per_year=365.25,
+        )
+        self.assertLessEqual(scalar_lo, float(levels[1]))
+        self.assertGreaterEqual(scalar_hi, float(levels[1]))
         with self.assertRaisesRegex(ValueError, "quantile-based ScalingFit"):
             predict_block_quantile(
                 estimate_target_scaling(
@@ -157,8 +177,12 @@ class EviEstimationTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "same tau"):
             estimate_design_life_level(fit, 10.0, tau=0.9)
+        with self.assertRaisesRegex(ValueError, "same tau"):
+            estimate_design_life_level_interval(fit, 10.0, tau=0.9)
         with self.assertRaisesRegex(ValueError, "Block size must be positive"):
             predict_block_quantile(fit, 0.0)
+        with self.assertRaisesRegex(ValueError, "Design-life years must be positive"):
+            estimate_design_life_level_interval(fit, 0.0)
 
 
 if __name__ == "__main__":

@@ -31,11 +31,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from unibm.evi import (
+from unibm.evi.spectrum import estimate_max_spectrum_evi
+from unibm.evi.tail import (
     ExternalXiEstimate,
     estimate_dedh_moment_evi,
     estimate_hill_evi,
-    estimate_max_spectrum_evi,
     estimate_pickands_evi,
 )
 
