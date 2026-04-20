@@ -445,9 +445,9 @@ def plot_ei_shrinkage_sensitivity(
         methods = sorted(str(method) for method in subset["method"].drop_duplicates())
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("median_ape", "median APE"),
-        ("median_coverage", "median coverage"),
         ("median_interval_score", "median Winkler interval score"),
+        ("median_coverage", "median coverage"),
+        ("median_ape", "median APE"),
     ]
     color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["tab:blue"])
     fig, axes = plt.subplots(
@@ -834,7 +834,7 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
                 f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
+                "Cells report median Winkler interval score (IQR) / median APE (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
             ),
             label="tab:benchmark-ei-core-main",
@@ -852,7 +852,7 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
                 f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
+                "Cells report median Winkler interval score (IQR) / median APE (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05), but native "
                 "interval constructions differ across methods, so the table is descriptive and "
                 "is not used to rank cross-class interval calibration."
