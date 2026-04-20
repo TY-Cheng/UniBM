@@ -28,6 +28,7 @@ from benchmark.design import (
     _try_load_npz,
     BENCHMARK_CACHE_VERSION,
     default_ei_simulation_configs,
+    FGLS_BOOTSTRAP_REPS,
     load_or_draw_raw_bootstrap_samples,
     load_or_simulate_series_bank,
     ordered_families,
@@ -37,10 +38,10 @@ from benchmark.design import (
 from benchmark.common import (
     IQR_LOWER,
     IQR_UPPER,
+    add_wilson_bounds,
     interval_score,
     interval_width,
     quantile_agg,
-    wilson_interval,
 )
 from shared.runtime import status
 
@@ -126,7 +127,6 @@ EI_METHOD_MARKERS = {
     "northrop_sliding_native": "v",
     "bb_sliding_native": "<",
 }
-EI_BOOTSTRAP_REPS = 120
 EI_BM_PATH_KEYS = (
     ("northrop", False),
     ("northrop", True),
@@ -416,13 +416,7 @@ def summarize_ei_benchmark(df: pd.DataFrame) -> pd.DataFrame:
     grouped["theta_hat_sd"] = grouped["theta_hat_sd"].fillna(0.0)
     grouped["mape_sd"] = grouped["mape_sd"].fillna(0.0)
     grouped["theta_hat_se"] = grouped["theta_hat_sd"] / np.sqrt(grouped["n_rep"])
-    wilson_bounds = grouped.apply(
-        lambda row: wilson_interval(row["n_cover"], int(row["n_rep"])),
-        axis=1,
-        result_type="expand",
-    )
-    grouped["coverage_lo"] = wilson_bounds[0]
-    grouped["coverage_hi"] = wilson_bounds[1]
+    grouped = add_wilson_bounds(grouped, success_col="n_cover", total_col="n_rep")
     grouped["scenario"] = grouped.apply(
         lambda row: (
             f"{row['benchmark_set']}_{row['family']}_xi{row['xi_true']:.2f}"
@@ -459,7 +453,7 @@ def evaluate_ei_config(
             bundle=bundle,
             cache_dir=cache_dir,
             cache_key=cache_key,
-            reps=EI_BOOTSTRAP_REPS,
+            reps=FGLS_BOOTSTRAP_REPS,
             random_state=random_state + 10_000 * rep,
         )
         for base_path in ("northrop", "bb"):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,45 @@ def wilson_interval(successes: float, n_obs: int, z_crit: float = 1.96) -> tuple
     center = (p_hat + z_crit**2 / (2 * n_obs)) / denom
     half_width = z_crit * np.sqrt((p_hat * (1 - p_hat) + z_crit**2 / (4 * n_obs)) / n_obs) / denom
     return max(0.0, center - half_width), min(1.0, center + half_width)
+
+
+def add_wilson_bounds(
+    frame: pd.DataFrame,
+    *,
+    success_col: str,
+    total_col: str,
+    lower_col: str = "coverage_lo",
+    upper_col: str = "coverage_hi",
+    z_crit: float = 1.96,
+) -> pd.DataFrame:
+    """Attach Wilson-interval bounds to an aggregated benchmark frame."""
+    lower = np.full(frame.shape[0], np.nan, dtype=float)
+    upper = np.full(frame.shape[0], np.nan, dtype=float)
+    if not frame.empty:
+        successes = pd.to_numeric(frame[success_col], errors="coerce").to_numpy(dtype=float)
+        totals = pd.to_numeric(frame[total_col], errors="coerce").to_numpy(dtype=float)
+        valid = np.isfinite(successes) & np.isfinite(totals) & (totals > 0)
+        if np.any(valid):
+            p_hat = successes[valid] / totals[valid]
+            denom = 1.0 + z_crit**2 / totals[valid]
+            center = (p_hat + z_crit**2 / (2.0 * totals[valid])) / denom
+            half_width = (
+                z_crit
+                * np.sqrt(
+                    (p_hat * (1.0 - p_hat) + z_crit**2 / (4.0 * totals[valid])) / totals[valid]
+                )
+                / denom
+            )
+            lower[valid] = np.maximum(0.0, center - half_width)
+            upper[valid] = np.minimum(1.0, center + half_width)
+    frame[lower_col] = lower
+    frame[upper_col] = upper
+    return frame
+
+
+def interval_contains(interval: tuple[float, float], value: float) -> bool:
+    """Return whether a closed interval contains the requested value."""
+    return bool(interval[0] <= value <= interval[1])
 
 
 def latex_escape(text: object) -> str:
@@ -123,15 +162,62 @@ def bootstrap_percentile_interval(
     )
 
 
+def round_up_metric_upper(
+    metric: str,
+    value: float,
+    *,
+    upper_steps: Mapping[str, tuple[float, ...]],
+) -> float:
+    """Round one metric upper bound to a stable display scale."""
+    steps = upper_steps.get(metric)
+    if steps is None or not np.isfinite(value):
+        return float(value)
+    padded = max(float(value) * 1.02, steps[0])
+    for step in steps:
+        if padded <= step:
+            return float(step)
+    return float(steps[-1])
+
+
+def panel_metric_ylim(
+    frame: pd.DataFrame,
+    *,
+    metric: str,
+    methods: Iterable[str],
+    metric_columns: Mapping[str, tuple[str, str | None, str | None]],
+    upper_steps: Mapping[str, tuple[float, ...]],
+    method_col: str = "method",
+) -> tuple[float, float] | None:
+    """Choose a stable y-limit for one benchmark panel."""
+    available_methods = set(frame[method_col].dropna().tolist())
+    method_list = [method for method in methods if method in available_methods]
+    if not method_list:
+        return None
+    center_col, _, upper_col = metric_columns[metric]
+    value_col = upper_col if upper_col is not None else center_col
+    values = frame.loc[frame[method_col].isin(method_list), value_col].to_numpy(dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return (
+        0.0,
+        round_up_metric_upper(metric, float(np.max(finite)), upper_steps=upper_steps),
+    )
+
+
 __all__ = [
     "IQR_LOWER",
     "IQR_UPPER",
+    "add_wilson_bounds",
     "bootstrap_percentile_interval",
     "format_median_iqr",
     "interval_score",
+    "interval_contains",
     "interval_width",
     "latex_escape",
+    "panel_metric_ylim",
     "quantile_agg",
     "render_latex_table",
+    "round_up_metric_upper",
     "wilson_interval",
 ]

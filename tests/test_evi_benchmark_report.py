@@ -1,22 +1,20 @@
 from __future__ import annotations
 # ruff: noqa: E402
 
-import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 import pandas as pd
 
+try:
+    from . import _path_setup as test_paths
+except ImportError:  # pragma: no cover
+    import _path_setup as test_paths
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT / "src"
-SCRIPTS_DIR = ROOT / "scripts"
-for path in (SCRIPTS_DIR, SRC_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+test_paths.ensure_repo_import_paths()
 
 from benchmark.design import (
+    BENCHMARK_MONTE_CARLO_REPS,
     STRESS_BENCHMARK_SET,
     STRESS_MOVING_MAXIMA_FAMILY,
     default_evi_simulation_configs,
@@ -115,7 +113,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
         table = evi_record_length_sensitivity_table(summary)
 
         self.assertEqual(table.shape[0], 1)
-        self.assertEqual(table.iloc[0]["Family"], "Frechet max-AR")
+        self.assertEqual(table.iloc[0]["Family"], "Fréchet max-AR")
         self.assertEqual(int(table.iloc[0]["n_obs"]), 200)
         self.assertIn("median-sliding-FGLS", table.columns)
 
@@ -126,7 +124,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
         self.assertEqual({cfg.benchmark_set for cfg in configs}, {STRESS_BENCHMARK_SET})
         self.assertEqual({cfg.family for cfg in configs}, {STRESS_MOVING_MAXIMA_FAMILY})
         self.assertEqual({cfg.n_obs for cfg in configs}, {365})
-        self.assertEqual({cfg.reps for cfg in configs}, {32})
+        self.assertEqual({cfg.reps for cfg in configs}, {BENCHMARK_MONTE_CARLO_REPS})
 
     def test_build_evi_stress_suite_summary_emits_expected_family(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

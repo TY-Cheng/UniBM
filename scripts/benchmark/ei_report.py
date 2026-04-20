@@ -54,6 +54,7 @@ from unibm.ei import (
 )
 
 from benchmark.design import (
+    FGLS_BOOTSTRAP_REPS,
     UNIVERSAL_BENCHMARK_SET,
     family_label,
     load_or_simulate_series_bank,
@@ -62,7 +63,6 @@ from benchmark.design import (
     sort_by_family_order,
 )
 from benchmark.ei_eval import (
-    EI_BOOTSTRAP_REPS,
     EI_EXTERNAL_METHODS,
     EI_FGLS_METHODS,
     EI_INTERNAL_METHODS,
@@ -78,6 +78,8 @@ from benchmark.common import (
     IQR_UPPER,
     format_median_iqr,
     interval_score,
+    interval_contains,
+    panel_metric_ylim,
     quantile_agg,
     render_latex_table,
 )
@@ -233,11 +235,6 @@ def _ei_shrinkage_sensitivity_output_path(out_dir: Path) -> Path:
     return out_dir / "benchmark_ei_shrinkage_sensitivity.csv"
 
 
-def _contains(interval: tuple[float, float], value: float) -> bool:
-    """Check whether a nominal interval covers the truth."""
-    return bool(interval[0] <= value <= interval[1])
-
-
 def _ei_method_components(method: str) -> tuple[str, bool]:
     """Decode one pooled-BM EI method id into its path family and block scheme."""
     if method.startswith("northrop_"):
@@ -344,7 +341,7 @@ def build_ei_shrinkage_sensitivity_summary(
                 bundle=bundle,
                 cache_dir=cache_dir,
                 cache_key=cache_key,
-                reps=EI_BOOTSTRAP_REPS,
+                reps=FGLS_BOOTSTRAP_REPS,
                 random_state=scenario_seed + 10_000 * rep,
             )
             for method in selected_methods:
@@ -381,7 +378,7 @@ def build_ei_shrinkage_sensitivity_summary(
                                     alpha=EI_ALPHA,
                                 )
                             ),
-                            "covered": float(_contains((ci_lo, ci_hi), cfg.theta_true)),
+                            "covered": float(interval_contains((ci_lo, ci_hi), cfg.theta_true)),
                         }
                     )
     detail = pd.DataFrame(detail_rows)
@@ -517,39 +514,10 @@ _EI_METRIC_Y_UPPER_STEPS = {
     "interval_score": (2.0, 3.0, 5.0, 10.0, 20.0, 25.0, 30.0, 40.0, 50.0),
 }
 
-
-def _round_up_metric_upper(metric: str, value: float) -> float:
-    """Round one metric upper bound to a stable display scale."""
-    steps = _EI_METRIC_Y_UPPER_STEPS.get(metric)
-    if steps is None or not np.isfinite(value):
-        return float(value)
-    padded = max(float(value) * 1.02, steps[0])
-    for step in steps:
-        if padded <= step:
-            return float(step)
-    return float(steps[-1])
-
-
-def _panel_metric_ylim(
-    frame: pd.DataFrame,
-    *,
-    metric: str,
-    methods: Iterable[str],
-) -> tuple[float, float] | None:
-    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
-    method_list = [method for method in methods if method in frame["method"].unique()]
-    if not method_list:
-        return None
-    metric_cols = {
-        "ape": ("ape_median", "ape_q25", "ape_q75"),
-        "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
-    }
-    _, _, upper_col = metric_cols[metric]
-    values = frame.loc[frame["method"].isin(method_list), upper_col].to_numpy(dtype=float)
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return None
-    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
+_EI_PANEL_METRIC_COLUMNS = {
+    "ape": ("ape_median", "ape_q25", "ape_q75"),
+    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+}
 
 
 def _plot_panels(
@@ -567,7 +535,7 @@ def _plot_panels(
     xi_values = sorted(subset["xi_true"].drop_duplicates().tolist())
     theta_values = sorted(subset["theta_true"].drop_duplicates().tolist())
     theta_ticks = np.asarray(theta_values, dtype=float)
-    metrics = ["ape", "interval_score"]
+    metrics = ["interval_score", "ape"]
     nrows = len(families) * len(metrics)
     ncols = len(xi_values)
     fig, axes = plt.subplots(
@@ -585,18 +553,20 @@ def _plot_panels(
     x_multipliers = 10**x_offsets
     theta_lo = float(theta_ticks.min() / x_multipliers.max() * 0.98)
     theta_hi = float(theta_ticks.max() * x_multipliers.max() * 1.02)
-    metric_cols = {
-        "ape": ("ape_median", "ape_q25", "ape_q75"),
-        "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
-    }
     internal_methods = [method for method in methods if method in EI_INTERNAL_METHODS]
     ylim_methods = internal_methods if internal_methods else list(methods)
     for family_idx, family in enumerate(families):
         family_frame = subset[subset["family"] == family]
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
-            center_col, lower_col, upper_col = metric_cols[metric]
-            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
+            center_col, lower_col, upper_col = _EI_PANEL_METRIC_COLUMNS[metric]
+            ylim = panel_metric_ylim(
+                family_frame,
+                metric=metric,
+                methods=ylim_methods,
+                metric_columns=_EI_PANEL_METRIC_COLUMNS,
+                upper_steps=_EI_METRIC_Y_UPPER_STEPS,
+            )
             for col_idx, xi in enumerate(xi_values):
                 ax = axes[row_idx, col_idx]
                 xi_frame = family_frame[family_frame["xi_true"] == xi]
@@ -664,7 +634,7 @@ def _plot_panels(
                     ax.set_xlabel("true $\\theta$")
     n_legend_cols = min(4, max(1, len(methods)))
     legend_rows = int(np.ceil(len(methods) / n_legend_cols))
-    bottom_margin = 0.04 + 0.025 * legend_rows
+    bottom_margin = 0.03 + 0.022 * legend_rows
     handles = [
         Line2D(
             [0],
@@ -684,13 +654,15 @@ def _plot_panels(
         handles,
         [handle.get_label() for handle in handles],
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.005),
+        bbox_to_anchor=(0.5, 0.004),
         ncol=n_legend_cols,
         frameon=False,
         fontsize=8,
     )
-    fig.suptitle(title, y=0.99, fontsize=11)
-    fig.tight_layout(rect=(0, bottom_margin, 1, 0.96))
+    show_title = bool(title)
+    if show_title:
+        fig.suptitle(title, y=0.982, fontsize=11)
+    fig.tight_layout(rect=(0, bottom_margin, 1, 0.96 if show_title else 0.992))
     if save and file_path is not None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(file_path)
@@ -698,13 +670,17 @@ def _plot_panels(
 
 
 def plot_ei_core_panels(
-    summary: pd.DataFrame, *, file_path: Path | None = None, save: bool = False
+    summary: pd.DataFrame,
+    *,
+    title: str = "EI benchmark: pooled BM methods",
+    file_path: Path | None = None,
+    save: bool = False,
 ) -> None:
     """Plot the eight internal pooled BM EI methods."""
     _plot_panels(
         summary,
         methods=EI_INTERNAL_METHODS,
-        title="EI benchmark: pooled BM methods",
+        title=title,
         file_path=file_path,
         save=save,
     )
@@ -714,6 +690,7 @@ def plot_ei_targets_panels(
     internal_summary: pd.DataFrame,
     external_summary: pd.DataFrame,
     *,
+    title: str = "EI benchmark: selected pooled BM methods versus threshold and native sliding comparators",
     file_path: Path | None = None,
     save: bool = False,
 ) -> None:
@@ -722,7 +699,7 @@ def plot_ei_targets_panels(
     _plot_panels(
         combined,
         methods=[*EI_TARGET_INTERNAL_METHODS, *EI_EXTERNAL_METHODS],
-        title="EI benchmark: selected pooled BM methods versus threshold and native sliding comparators",
+        title=title,
         file_path=file_path,
         save=save,
     )
@@ -855,7 +832,7 @@ def write_ei_benchmark_manuscript_artifacts(
             caption=(
                 f"EI core benchmark on the projected short-record persistence suite with "
                 f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
@@ -873,7 +850,7 @@ def write_ei_benchmark_manuscript_artifacts(
             caption=(
                 f"EI target benchmark on the projected short-record persistence suite with "
                 f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) over "
                 "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05), but native "
@@ -901,7 +878,7 @@ def write_ei_benchmark_manuscript_artifacts(
             caption=(
                 f"EI interval sharpness-versus-calibration summary on the projected EI suite with "
                 f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
@@ -917,7 +894,7 @@ def write_ei_benchmark_manuscript_artifacts(
             caption=(
                 f"Appendix full EI benchmark overview on the projected EI suite with theta in "
                 f"{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, xi in {{0.01, 0.50, 1.0, 5.0}}, "
-                f"and the Frechet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
+                f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
                 f"with n_obs={n_obs}."
             ),
             label="tab:benchmark-ei-overview-main",
@@ -925,12 +902,14 @@ def write_ei_benchmark_manuscript_artifacts(
     )
     plot_ei_core_panels(
         benchmark_summary,
+        title="",
         file_path=fig_dir / "benchmark_ei_summary.pdf",
         save=True,
     )
     plot_ei_targets_panels(
         benchmark_summary,
         external_benchmark_summary,
+        title="",
         file_path=fig_dir / "benchmark_ei_targets.pdf",
         save=True,
     )

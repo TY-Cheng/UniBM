@@ -1,7 +1,6 @@
 from __future__ import annotations
 # ruff: noqa: E402
 
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -12,12 +11,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT / "src"
-SCRIPTS_DIR = ROOT / "scripts"
-for path in (SCRIPTS_DIR, SRC_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+try:
+    from . import _path_setup as test_paths
+except ImportError:  # pragma: no cover
+    import _path_setup as test_paths
+
+test_paths.ensure_repo_import_paths()
 
 from data_prep.ghcn import PreparedSeries
 from application.build import (
@@ -275,12 +274,13 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(table.shape[0], 1)
         self.assertEqual(table.iloc[0]["Application"], "Texas NFIP claims")
-        self.assertIn("[", table.iloc[0]["$\\xi$ headline [range]"])
-        self.assertIn("[", table.iloc[0]["$\\theta$ headline [range]"])
-        self.assertEqual(
-            table.columns.tolist(),
-            ["Application", "$\\xi$ headline [range]", "$\\theta$ headline [range]"],
-        )
+        metric_columns = table.columns.tolist()[1:]
+        self.assertEqual(len(metric_columns), 2)
+        self.assertTrue(metric_columns[0].startswith("$\\xi$"))
+        self.assertTrue(metric_columns[1].startswith("$\\theta$"))
+        self.assertTrue(all("[range]" in column for column in metric_columns))
+        self.assertIn("[", table.iloc[0][metric_columns[0]])
+        self.assertIn("[", table.iloc[0][metric_columns[1]])
 
     def test_application_stationarity_table_reports_both_series_levels(self) -> None:
         base_bundle = _make_standard_bundle()
@@ -360,10 +360,17 @@ class ApplicationOutputTests(unittest.TestCase):
         table = application_ei_seasonal_sensitivity_table([nfip_bundle, stream_bundle])
 
         self.assertEqual(table["Application"].tolist(), ["Texas streamflow", "Texas NFIP claims"])
-        self.assertIn("Headline $\\theta$ (BB-FGLS)", table.columns)
-        self.assertIn("Seasonal-adjusted $\\theta$", table.columns)
+        headline_column = next(
+            column
+            for column in table.columns
+            if column.startswith("Headline") and "BB-FGLS" in column
+        )
+        seasonal_column = next(
+            column for column in table.columns if column.startswith("Seasonal-adjusted")
+        )
         self.assertIn("Interpretive note", table.columns)
-        self.assertTrue(all("[" in value for value in table["Seasonal-adjusted $\\theta$"]))
+        self.assertTrue(all("[" in value for value in table[headline_column]))
+        self.assertTrue(all("[" in value for value in table[seasonal_column]))
 
     def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -424,7 +431,9 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertEqual(table.shape[0], 2)
         self.assertEqual(table.iloc[0]["Selected"], "yes")
         self.assertEqual(table.iloc[0]["Recommended"], "yes")
-        self.assertIn("Frechet screen", table.columns)
+        screening_columns = [column for column in table.columns if "screen" in column.lower()]
+        self.assertEqual(screening_columns, ["Fréchet-domain screen"])
+        self.assertEqual(table.iloc[0][screening_columns[0]], "yes")
         self.assertIn("Record years", table.columns)
 
     def test_tau_scaling_views_for_fit(self) -> None:

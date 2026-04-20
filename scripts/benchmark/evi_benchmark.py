@@ -56,6 +56,7 @@ from benchmark.design import (
 )
 from benchmark.common import (
     interval_score,
+    interval_contains,
     interval_width,
 )
 from benchmark.evi_report import (
@@ -129,10 +130,6 @@ class EviBenchmarkOutputs:
     external_summary: pd.DataFrame
 
 
-def _contains(interval: tuple[float, float], value: float) -> bool:
-    return bool(interval[0] <= value <= interval[1])
-
-
 def _result_row(
     cfg: SimulationConfig,
     rep: int,
@@ -170,7 +167,7 @@ def _result_row(
             ci_hi,
             alpha=BENCHMARK_ALPHA,
         ),
-        "covered": _contains(fit.confidence_interval, cfg.xi_true),
+        "covered": interval_contains(fit.confidence_interval, cfg.xi_true),
         "plateau_lo": fit.plateau_bounds[0],
         "plateau_hi": fit.plateau_bounds[1],
     }
