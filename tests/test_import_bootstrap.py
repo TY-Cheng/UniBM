@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT / "src"
-SCRIPTS_DIR = ROOT / "scripts"
-for path in (SCRIPTS_DIR, SRC_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+try:
+    from . import _path_setup as test_paths
+except ImportError:  # pragma: no cover
+    import _path_setup as test_paths
+
+test_paths.ensure_repo_import_paths()
+ROOT = test_paths.ROOT
+SRC_DIR = test_paths.SRC_DIR
+SCRIPTS_DIR = test_paths.SCRIPTS_DIR
 
 from shared.import_bootstrap import (
     bootstrap_notebook_scripts_dir,

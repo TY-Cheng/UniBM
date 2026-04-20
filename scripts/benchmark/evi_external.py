@@ -3,10 +3,8 @@
 These benchmarks reuse the same synthetic series as the main UniBM workflow but
 compare against published xi estimators outside the UniBM regression pipeline.
 Most are classical raw-sample threshold estimators; max-spectrum is the
-closest block-maxima-style published comparator. The main benchmark uses each
-external estimator's native asymptotic Gaussian/Wald interval. A shared
-circular block-bootstrap percentile interval remains available as an optional
-sensitivity path.
+closest block-maxima-style published comparator. The benchmark uses each
+external estimator's native asymptotic Gaussian/Wald interval.
 """
 # ruff: noqa: E402
 
@@ -40,10 +38,6 @@ from unibm.evi.tail import (
 )
 
 from benchmark.design import (
-    _atomic_savez,
-    _try_load_npz,
-    BENCHMARK_CACHE_VERSION,
-    COMMON_BOOTSTRAP_REPS,
     ordered_families,
     METHOD_LABELS,
     SimulationConfig,
@@ -51,7 +45,6 @@ from benchmark.design import (
     UNIVERSAL_BENCHMARK_SET,
     family_label,
     default_simulation_configs,
-    load_or_draw_raw_bootstrap_samples,
     load_or_simulate_series_bank,
     method_style,
     resolve_benchmark_workers,
@@ -59,15 +52,16 @@ from benchmark.design import (
     sort_by_family_order,
 )
 from benchmark.common import (
-    bootstrap_percentile_interval,
+    add_wilson_bounds,
     format_median_iqr,
     IQR_LOWER,
     IQR_UPPER,
     interval_score,
+    interval_contains,
     interval_width,
+    panel_metric_ylim,
     quantile_agg,
     render_latex_table,
-    wilson_interval,
 )
 
 
@@ -117,8 +111,6 @@ EXTERNAL_METHOD_LINESTYLES = {
     "pickands_raw": "--",
     "dedh_moment_raw": "--",
 }
-EXTERNAL_BOOTSTRAP_REPS = COMMON_BOOTSTRAP_REPS
-EXTERNAL_CI_LEVEL = 0.95
 BENCHMARK_ALPHA = 0.05
 EXTERNAL_ESTIMATORS = {
     "hill_raw": estimate_hill_evi,
@@ -158,25 +150,6 @@ def _estimator_from_method(method: str):
     return EXTERNAL_ESTIMATORS[method]
 
 
-def _external_interval_cache_file(
-    cache_dir: Path,
-    *,
-    cache_key: str,
-    ci_method: str,
-    bootstrap_reps: int,
-) -> Path:
-    """Return the cache path for external bootstrap-percentile xi intervals."""
-    return (
-        cache_dir
-        / "external_intervals"
-        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__{ci_method}__reps{bootstrap_reps}.npz"
-    )
-
-
-def _contains(interval: tuple[float, float], value: float) -> bool:
-    return bool(interval[0] <= value <= interval[1])
-
-
 def _failed_external_estimate(method: str) -> ExternalXiEstimate:
     """Return a sentinel estimate when one external baseline is undefined."""
     return ExternalXiEstimate(
@@ -194,119 +167,15 @@ def _failed_external_estimate(method: str) -> ExternalXiEstimate:
     )
 
 
-def _round_up_metric_upper(metric: str, value: float) -> float:
-    """Round one metric upper bound to a stable display scale."""
-    steps = _EVI_METRIC_Y_UPPER_STEPS.get(metric)
-    if steps is None or not np.isfinite(value):
-        return float(value)
-    padded = max(float(value) * 1.02, steps[0])
-    for step in steps:
-        if padded <= step:
-            return float(step)
-    return float(steps[-1])
-
-
-def _panel_metric_ylim(
-    frame: pd.DataFrame,
-    *,
-    metric: str,
-    methods: Iterable[str],
-) -> tuple[float, float] | None:
-    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
-    method_list = [method for method in methods if method in frame["method"].unique()]
-    if not method_list:
-        return None
-    _, _, upper_col = _metric_columns(metric)
-    value_col = upper_col if upper_col is not None else _metric_columns(metric)[0]
-    values = frame.loc[frame["method"].isin(method_list), value_col].to_numpy(dtype=float)
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return None
-    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
-
-
-# Optional sensitivity path: shared raw-series bootstrap percentile intervals.
-def bootstrap_external_intervals(
-    bootstrap_samples: np.ndarray,
-    *,
-    methods: Iterable[str] = EXTERNAL_BASELINE_METHODS,
-    ci_level: float = EXTERNAL_CI_LEVEL,
-) -> dict[str, tuple[tuple[float, float], np.ndarray]]:
-    """Reuse one bootstrap sample bank across all external xi estimators.
-
-    The external benchmark is expensive because each estimator re-selects its
-    tuning parameter inside every bootstrap resample. Sharing the resample bank
-    avoids paying the time-series bootstrap draw cost repeatedly for each
-    method.
-    """
-    method_list = [method for method in methods if method in EXTERNAL_ESTIMATORS]
-    draws_by_method: dict[str, list[float]] = {method: [] for method in method_list}
-    for sample in np.asarray(bootstrap_samples, dtype=float):
-        for method in method_list:
-            estimator = _estimator_from_method(method)
-            try:
-                fit = estimator(sample)
-            except ValueError:
-                continue
-            if np.isfinite(fit.xi_hat):
-                draws_by_method[method].append(float(fit.xi_hat))
-    return {
-        method: (
-            bootstrap_percentile_interval(draws, ci_level=ci_level),
-            np.asarray(draws, dtype=float),
+def _validate_external_ci_method(ci_method: str) -> None:
+    """Validate the external EVI benchmark interval mode."""
+    if ci_method == "bootstrap":
+        raise NotImplementedError(
+            "The external EVI benchmark no longer supports ci_method='bootstrap'; "
+            "use the estimators' native asymptotic intervals."
         )
-        for method, draws in draws_by_method.items()
-    }
-
-
-def _load_or_compute_external_bootstrap_intervals(
-    vec: np.ndarray,
-    *,
-    cache_dir: Path | None,
-    cache_key: str,
-    ci_method: str,
-    bootstrap_reps: int,
-    random_state: int,
-) -> dict[str, tuple[tuple[float, float], np.ndarray]]:
-    """Load or compute external percentile intervals from the shared bootstrap bank."""
-    if cache_dir is not None:
-        cache_file = _external_interval_cache_file(
-            cache_dir,
-            cache_key=cache_key,
-            ci_method=ci_method,
-            bootstrap_reps=bootstrap_reps,
-        )
-        if cache_file.exists():
-            loaded = _try_load_npz(cache_file)
-            if loaded is not None:
-                with loaded as data:
-                    methods = [str(method) for method in np.asarray(data["methods"])]
-                    results: dict[str, tuple[tuple[float, float], np.ndarray]] = {}
-                    for method in methods:
-                        results[method] = (
-                            (
-                                float(data[f"{method}__ci_lo"]),
-                                float(data[f"{method}__ci_hi"]),
-                            ),
-                            np.asarray(data[f"{method}__draws"], dtype=float),
-                        )
-                    return results
-    bootstrap_samples = load_or_draw_raw_bootstrap_samples(
-        vec,
-        cache_dir=cache_dir,
-        cache_key=cache_key,
-        bootstrap_reps=bootstrap_reps,
-        random_state=random_state,
-    )
-    results = bootstrap_external_intervals(bootstrap_samples)
-    if cache_dir is not None:
-        arrays: dict[str, Any] = {"methods": np.asarray(list(results), dtype="U32")}
-        for method, (interval, draws) in results.items():
-            arrays[f"{method}__ci_lo"] = float(interval[0])
-            arrays[f"{method}__ci_hi"] = float(interval[1])
-            arrays[f"{method}__draws"] = np.asarray(draws, dtype=float)
-        _atomic_savez(cache_file, compressed=False, **arrays)
-    return results
+    if ci_method != "asymptotic":
+        raise ValueError("ci_method must be 'asymptotic'.")
 
 
 def _external_result_row(
@@ -314,8 +183,6 @@ def _external_result_row(
     rep: int,
     estimate: ExternalXiEstimate,
     confidence_interval: tuple[float, float],
-    *,
-    ci_method: str,
 ) -> dict[str, Any]:
     signed_error = estimate.xi_hat - cfg.xi_true
     abs_error = abs(signed_error)
@@ -332,8 +199,8 @@ def _external_result_row(
         "theta_true": cfg.theta_true,
         "phi": cfg.phi,
         "xi_hat": estimate.xi_hat,
-        "standard_error": (estimate.standard_error if ci_method == "asymptotic" else float("nan")),
-        "ci_method": ci_method,
+        "standard_error": estimate.standard_error,
+        "ci_method": "asymptotic",
         "ci_lo": ci_lo,
         "ci_hi": ci_hi,
         "signed_error": signed_error,
@@ -341,7 +208,7 @@ def _external_result_row(
         "relative_error": abs_error / cfg.xi_true,
         "interval_width": interval_width(ci_lo, ci_hi),
         "interval_score": interval_score(cfg.xi_true, ci_lo, ci_hi, alpha=BENCHMARK_ALPHA),
-        "covered": _contains(confidence_interval, cfg.xi_true)
+        "covered": interval_contains(confidence_interval, cfg.xi_true)
         if np.all(np.isfinite(confidence_interval))
         else False,
         "selected_k": np.nan if estimate.selected_k is None else float(estimate.selected_k),
@@ -363,17 +230,14 @@ def evaluate_external_config(
     *,
     random_state: int = 0,
     ci_method: Literal["asymptotic", "bootstrap"] = "asymptotic",
-    bootstrap_reps: int = EXTERNAL_BOOTSTRAP_REPS,
     cache_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Evaluate the appendix external xi estimators on one benchmark scenario.
 
-    The default path uses the estimators' native asymptotic Gaussian/Wald
-    intervals. Raw-series bootstrap percentile intervals are retained only as
-    an optional sensitivity mode.
+    The external benchmark uses each estimator's native asymptotic Gaussian/Wald
+    interval and does not maintain a separate shared-bootstrap sensitivity path.
     """
-    if ci_method not in {"asymptotic", "bootstrap"}:
-        raise ValueError("ci_method must be either 'asymptotic' or 'bootstrap'.")
+    _validate_external_ci_method(ci_method)
     rows: list[dict[str, Any]] = []
     series_bank = load_or_simulate_series_bank(
         cfg,
@@ -387,44 +251,27 @@ def evaluate_external_config(
                 estimates[method] = estimator(vec)
             except ValueError:
                 estimates[method] = _failed_external_estimate(method)
-        shared_intervals: dict[str, tuple[tuple[float, float], np.ndarray]] = {}
-        if ci_method == "bootstrap" and bootstrap_reps >= 2:
-            shared_intervals = _load_or_compute_external_bootstrap_intervals(
-                vec,
-                cache_dir=cache_dir,
-                cache_key=f"{cfg.scenario}__seed{random_state}__rep{rep:04d}",
-                ci_method=ci_method,
-                bootstrap_reps=bootstrap_reps,
-                random_state=random_state + 10_000 * rep,
-            )
         for method, estimate in estimates.items():
-            interval = (
-                estimate.confidence_interval
-                if ci_method == "asymptotic"
-                else shared_intervals.get(method, ((np.nan, np.nan), np.empty(0)))[0]
-            )
             rows.append(
                 _external_result_row(
                     cfg,
                     rep,
                     estimate,
-                    interval,
-                    ci_method=ci_method,
+                    estimate.confidence_interval,
                 )
             )
     return pd.DataFrame(rows)
 
 
 def _evaluate_external_config_worker(
-    args: tuple[SimulationConfig, int, str, int, Path | None],
+    args: tuple[SimulationConfig, int, str, Path | None],
 ) -> pd.DataFrame:
     """Process-pool wrapper for one external benchmark scenario."""
-    cfg, random_state, ci_method, bootstrap_reps, cache_dir = args
+    cfg, random_state, ci_method, cache_dir = args
     return evaluate_external_config(
         cfg,
         random_state=random_state,
         ci_method=ci_method,
-        bootstrap_reps=bootstrap_reps,
         cache_dir=cache_dir,
     )
 
@@ -474,13 +321,7 @@ def external_benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
     grouped["coverage_se"] = np.sqrt(
         grouped["coverage"] * (1 - grouped["coverage"]) / grouped["n_rep"].clip(lower=1)
     )
-    wilson_bounds = grouped.apply(
-        lambda row: wilson_interval(row["n_cover"], int(row["n_rep"])),
-        axis=1,
-        result_type="expand",
-    )
-    grouped["coverage_lo"] = wilson_bounds[0]
-    grouped["coverage_hi"] = wilson_bounds[1]
+    grouped = add_wilson_bounds(grouped, success_col="n_cover", total_col="n_rep")
     grouped["method_label"] = grouped["method"].map(EXTERNAL_METHOD_LABELS)
     grouped["scenario"] = grouped.apply(
         lambda row: (
@@ -780,12 +621,14 @@ def interval_sharpness_story_latex(
     return _render_story_latex(table, caption=caption, label=label)
 
 
+_METRIC_COLUMNS = {
+    "ape": ("ape_median", "ape_q25", "ape_q75"),
+    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+}
+
+
 def _metric_columns(metric: str) -> tuple[str, str, str]:
-    metric_map = {
-        "ape": ("ape_median", "ape_q25", "ape_q75"),
-        "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
-    }
-    return metric_map[metric]
+    return _METRIC_COLUMNS[metric]
 
 
 def plot_external_comparison_panels(
@@ -799,7 +642,7 @@ def plot_external_comparison_panels(
     title: str | None = None,
     save: bool = False,
 ) -> None:
-    """Plot appendix xi-comparison curves for the proposed and external methods."""
+    """Plot appendix xi-comparison curves with interval score above APE."""
     methods = [method for method in methods if method in EXTERNAL_METHOD_ORDER]
     combined = _stack_benchmark_summaries(
         internal_summary,
@@ -813,7 +656,7 @@ def plot_external_comparison_panels(
 
     families = ordered_families(combined["family"].drop_duplicates().tolist())
     theta_values = sorted(combined["theta_true"].drop_duplicates().tolist())
-    metrics = ["ape", "interval_score"]
+    metrics = ["interval_score", "ape"]
     fig, axes = plt.subplots(
         nrows=len(families) * len(metrics),
         ncols=len(theta_values),
@@ -832,7 +675,13 @@ def plot_external_comparison_panels(
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
-            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
+            ylim = panel_metric_ylim(
+                family_frame,
+                metric=metric,
+                methods=ylim_methods,
+                metric_columns=_METRIC_COLUMNS,
+                upper_steps=_EVI_METRIC_Y_UPPER_STEPS,
+            )
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -953,7 +802,7 @@ def plot_target_plus_external_panels(
     title: str | None = None,
     save: bool = False,
 ) -> None:
-    """Plot APE and interval-score curves for the mixed target/external comparison."""
+    """Plot mixed target/external curves with interval score above APE."""
     methods = [method for method in methods if method in TARGET_PLUS_EXTERNAL_METHODS]
     combined = _stack_benchmark_summaries(
         internal_summary,
@@ -969,7 +818,7 @@ def plot_target_plus_external_panels(
 
     families = ordered_families(combined["family"].drop_duplicates().tolist())
     theta_values = sorted(combined["theta_true"].drop_duplicates().tolist())
-    metrics = ["ape", "interval_score"]
+    metrics = ["interval_score", "ape"]
     fig, axes = plt.subplots(
         nrows=len(families) * len(metrics),
         ncols=len(theta_values),
@@ -988,7 +837,13 @@ def plot_target_plus_external_panels(
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
-            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=ylim_methods)
+            ylim = panel_metric_ylim(
+                family_frame,
+                metric=metric,
+                methods=ylim_methods,
+                metric_columns=_METRIC_COLUMNS,
+                upper_steps=_EVI_METRIC_Y_UPPER_STEPS,
+            )
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -1064,12 +919,15 @@ def plot_target_plus_external_panels(
         for method in methods
         if method in combined["method"].unique()
     ]
+    n_legend_cols = min(3, max(1, len(handles)))
+    legend_rows = int(np.ceil(len(handles) / n_legend_cols)) if handles else 1
+    bottom_margin = 0.035 + 0.022 * legend_rows
     fig.legend(
         handles,
         [handle.get_label() for handle in handles],
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.012),
-        ncol=min(3, max(1, len(handles))),
+        bbox_to_anchor=(0.5, 0.006),
+        ncol=n_legend_cols,
         frameon=False,
         fontsize=9,
         columnspacing=1.2,
@@ -1077,8 +935,10 @@ def plot_target_plus_external_panels(
     )
     if title is None:
         title = "Target comparison under sliding-block FGLS with published xi baselines"
-    fig.suptitle(title, y=0.985)
-    fig.tight_layout(rect=(0, 0.09, 1, 0.94))
+    show_title = bool(title)
+    if show_title:
+        fig.suptitle(title, y=0.982)
+    fig.tight_layout(rect=(0, bottom_margin, 1, 0.95 if show_title else 0.992))
     if save and file_path is not None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(file_path)
@@ -1194,11 +1054,11 @@ def run_external_benchmark(
     random_state: int = 0,
     configs: list[SimulationConfig] | None = None,
     ci_method: Literal["asymptotic", "bootstrap"] = "asymptotic",
-    bootstrap_reps: int = EXTERNAL_BOOTSTRAP_REPS,
     cache_dir: Path | None = None,
     max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the appendix external-xi benchmark on the default simulation grid."""
+    _validate_external_ci_method(ci_method)
     if configs is None:
         configs = default_simulation_configs()
     workers = resolve_benchmark_workers(len(configs), max_workers=max_workers)
@@ -1207,7 +1067,6 @@ def run_external_benchmark(
             cfg,
             scenario_random_state(cfg, master_seed=random_state),
             ci_method,
-            bootstrap_reps,
             cache_dir,
         )
         for cfg in configs
@@ -1235,7 +1094,6 @@ __all__ = [
     "EXTERNAL_METHOD_ORDER",
     "INTERVAL_DIAGNOSTIC_METHODS",
     "TARGET_PLUS_EXTERNAL_METHODS",
-    "bootstrap_external_intervals",
     "evaluate_external_config",
     "external_benchmark_summary",
     "external_story_latex",

@@ -324,11 +324,11 @@ def _stable_window_text(estimate) -> str:
 
 
 def seasonal_monthly_pit_unit_frechet(series: pd.Series) -> pd.Series:
-    """Map a daily series to a seasonal-adjusted unit-Frechet scale by month.
+    """Map a daily series to a seasonal-adjusted unit-Fréchet scale by month.
 
     The transform is deterministic and preserves the original daily index.
     Within each calendar month, values are mapped to scaled empirical ranks
-    `u = rank / (n + 1)` and then transformed by the unit-Frechet inverse CDF
+    `u = rank / (n + 1)` and then transformed by the unit-Fréchet inverse CDF
     `x = -1 / log(u)`.
     """
     if not isinstance(series.index, pd.DatetimeIndex):
@@ -808,12 +808,12 @@ def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) ->
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "$\\xi$ headline [range]": (
+                "$\\xi$ [range]": (
                     f"{bundle.evi_fit.slope:.2f} [{np.min(evi_xi):.2f}, {np.max(evi_xi):.2f}]"
                     if evi_xi.size
                     else "NA"
                 ),
-                "$\\theta$ headline [range]": (
+                "$\\theta$ [range]": (
                     "NA"
                     if theta_values.size == 0 or not np.isfinite(theta_headline)
                     else f"{theta_headline:.2f} [{np.min(theta_values):.2f}, {np.max(theta_values):.2f}]"
@@ -1040,12 +1040,12 @@ def application_ei_seasonal_sensitivity_table(bundles: list[ApplicationBundle]) 
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "Headline $\\theta$ (BB-FGLS)": _format_interval(
+                "Headline theta (BB-FGLS)": _format_interval(
                     headline_theta,
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "Seasonal-adjusted $\\theta$": _format_interval(
+                "Seasonal-adjusted theta": _format_interval(
                     seasonal_theta,
                     float(seasonal_bb["theta_lo"]),
                     float(seasonal_bb["theta_hi"]),
@@ -1978,7 +1978,7 @@ def application_usgs_screening_disclosure_table(
             "station_name": "Station",
             "selected": "Selected",
             "recommended": "Recommended",
-            "supports_frechet_working_model": "Frechet screen",
+            "supports_frechet_working_model": "Fréchet-domain screen",
             "plateau_points": "Plateau points",
             "n_years": "Record years",
             "xi_lower": "xi lower",
@@ -2255,7 +2255,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             caption=(
                 "Appendix seasonal EI sensitivity for the curated four-case manuscript subset. "
                 "Rows compare the headline BB-sliding-FGLS persistence estimate with a monthly "
-                "empirical-PIT unit-Frechet seasonal adjustment applied before the EI fit. This "
+                "empirical-PIT unit-Fréchet seasonal adjustment applied before the EI fit. This "
                 "table is a robustness check on whether seasonal marginal structure changes the "
                 "qualitative clustering interpretation; it is not a replacement for the headline "
                 "calendar-time EI analysis."
@@ -2279,7 +2279,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "Sites were screened with method-informed criteria: minimum record length 20 years, "
                 "minimum plateau size 5 points, xi lower bound at least -0.25, and plateau-maxima "
                 "positive share at least 0.95. Ranking then prioritizes recommended status, "
-                "Frechet working-model support, plateau size, record length, and xi lower bound."
+                "Fréchet-domain support, plateau size, record length, and xi lower bound."
             ),
             label="tab:application-usgs-screening-main",
             alignments=(

@@ -9,8 +9,12 @@ import unibm
 from unibm import evi
 from unibm import ei as ei_module
 
+try:
+    from . import _path_setup as test_paths
+except ImportError:  # pragma: no cover
+    import _path_setup as test_paths
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = test_paths.ROOT
 SRC_UNIBM = ROOT / "src" / "unibm"
 TEXT_SCAN_SUFFIXES = {".py", ".rst", ".md"}
 FORBIDDEN_IMPORT_PREFIXES = (

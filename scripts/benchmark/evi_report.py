@@ -46,11 +46,13 @@ import pandas as pd
 from benchmark.common import (
     IQR_LOWER,
     IQR_UPPER,
+    add_wilson_bounds,
     format_median_iqr,
     interval_score,
+    interval_contains,
+    panel_metric_ylim,
     quantile_agg,
     render_latex_table,
-    wilson_interval,
 )
 from benchmark.design import (
     BENCHMARK_SET_LABELS,
@@ -138,13 +140,7 @@ def benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
     grouped["coverage_se"] = np.sqrt(
         grouped["coverage"] * (1 - grouped["coverage"]) / grouped["n_rep"].clip(lower=1)
     )
-    wilson_bounds = grouped.apply(
-        lambda row: wilson_interval(row["n_cover"], int(row["n_rep"])),
-        axis=1,
-        result_type="expand",
-    )
-    grouped["coverage_lo"] = wilson_bounds[0]
-    grouped["coverage_hi"] = wilson_bounds[1]
+    grouped = add_wilson_bounds(grouped, success_col="n_cover", total_col="n_rep")
     grouped["method_label"] = grouped["method"].map(METHOD_LABELS)
     grouped["block_scheme"] = grouped["method"].map(
         lambda method: METHOD_LOOKUP[method].block_scheme
@@ -182,37 +178,6 @@ _EVI_METRIC_Y_UPPER_STEPS = {
         500.0,
     ),
 }
-
-
-def _round_up_metric_upper(metric: str, value: float) -> float:
-    """Round one metric upper bound to a stable manuscript-friendly display scale."""
-    steps = _EVI_METRIC_Y_UPPER_STEPS.get(metric)
-    if steps is None or not np.isfinite(value):
-        return float(value)
-    padded = max(float(value) * 1.02, steps[0])
-    for step in steps:
-        if padded <= step:
-            return float(step)
-    return float(steps[-1])
-
-
-def _panel_metric_ylim(
-    frame: pd.DataFrame,
-    *,
-    metric: str,
-    methods: Iterable[str],
-) -> tuple[float, float] | None:
-    """Choose a row-wise y-limit that keeps the plotted UniBM methods fully visible."""
-    method_list = [method for method in methods if method in frame["method"].unique()]
-    if not method_list:
-        return None
-    _, _, upper_col = _metric_columns(metric)
-    value_col = upper_col if upper_col is not None else _metric_columns(metric)[0]
-    values = frame.loc[frame["method"].isin(method_list), value_col].to_numpy(dtype=float)
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return None
-    return (0.0, _round_up_metric_upper(metric, float(np.max(finite))))
 
 
 def benchmark_table(summary: pd.DataFrame, *, benchmark_set: str | None = None) -> pd.DataFrame:
@@ -326,11 +291,6 @@ def _stress_summary_output_path(out_dir: Path) -> Path:
 def _record_length_summary_output_path(out_dir: Path) -> Path:
     """Return the canonical appendix CSV for the record-length sensitivity."""
     return out_dir / "benchmark_record_length_sensitivity.csv"
-
-
-def _contains(interval: tuple[float, float], value: float) -> bool:
-    """Check whether a nominal interval covers the truth."""
-    return bool(interval[0] <= value <= interval[1])
 
 
 def _shrinkage_sensitivity_contract_ok(
@@ -460,7 +420,7 @@ def build_evi_shrinkage_sensitivity_summary(
                                 alpha=BENCHMARK_ALPHA,
                             )
                         ),
-                        "covered": float(_contains((ci_lo, ci_hi), cfg.xi_true)),
+                        "covered": float(interval_contains((ci_lo, ci_hi), cfg.xi_true)),
                     }
                 )
     detail = pd.DataFrame(detail_rows)
@@ -585,7 +545,11 @@ def build_evi_record_length_sensitivity_summary(
     force: bool = False,
 ) -> tuple[pd.DataFrame, Path]:
     """Materialize the appendix EVI record-length sensitivity summary CSV."""
-    from benchmark.design import default_evi_simulation_configs, fit_methods_for_series
+    from benchmark.design import (
+        BENCHMARK_MONTE_CARLO_REPS,
+        default_evi_simulation_configs,
+        fit_methods_for_series,
+    )
     from benchmark.evi_benchmark import BENCHMARK_ALPHA, BENCHMARK_RANDOM_STATE
     from config import resolve_repo_dirs
 
@@ -604,7 +568,7 @@ def build_evi_record_length_sensitivity_summary(
                     families=RECORD_LENGTH_FAMILIES,
                     theta_values=(RECORD_LENGTH_THETA,),
                     n_obs=int(n_obs),
-                    reps=32,
+                    reps=BENCHMARK_MONTE_CARLO_REPS,
                 )
             )
     else:
@@ -661,7 +625,7 @@ def build_evi_record_length_sensitivity_summary(
                                 alpha=BENCHMARK_ALPHA,
                             )
                         ),
-                        "covered": float(_contains((ci_lo, ci_hi), cfg.xi_true)),
+                        "covered": float(interval_contains((ci_lo, ci_hi), cfg.xi_true)),
                     }
                 )
     detail = pd.DataFrame(detail_rows)
@@ -808,14 +772,16 @@ def plot_evi_shrinkage_sensitivity(
 # ---------------------------------------------------------------------------
 
 
+_METRIC_COLUMNS = {
+    "ape": ("ape_median", "ape_q25", "ape_q75"),
+    "coverage": ("coverage", "coverage_lo", "coverage_hi"),
+    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+    "mape": ("mape", None, None),
+}
+
+
 def _metric_columns(metric: str) -> tuple[str, str | None, str | None]:
-    metric_map = {
-        "ape": ("ape_median", "ape_q25", "ape_q75"),
-        "coverage": ("coverage", "coverage_lo", "coverage_hi"),
-        "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
-        "mape": ("mape", None, None),
-    }
-    return metric_map[metric]
+    return _METRIC_COLUMNS[metric]
 
 
 def _stress_cutoff(subset: pd.DataFrame) -> float | None:
@@ -836,7 +802,13 @@ def _x_multipliers(methods: list[str], interval_style: str) -> dict[str, float]:
     return {method: float(10**power) for method, power in zip(methods, offset_powers, strict=True)}
 
 
-def _add_explicit_legend(fig: plt.Figure, methods: list[str], available_methods: set[str]) -> None:
+def _add_explicit_legend(
+    fig: plt.Figure,
+    methods: list[str],
+    available_methods: set[str],
+    *,
+    anchor_y: float = 0.006,
+) -> None:
     handles = []
     for method in methods:
         if method not in available_methods:
@@ -860,7 +832,7 @@ def _add_explicit_legend(fig: plt.Figure, methods: list[str], available_methods:
         handles,
         [handle.get_label() for handle in handles],
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.012),
+        bbox_to_anchor=(0.5, anchor_y),
         ncol=min(3, max(1, len(handles))),
         frameon=False,
         fontsize=9,
@@ -945,7 +917,7 @@ def plot_benchmark_panels(
     benchmark_set: str | None = None,
     families: Iterable[str] | None = None,
     methods: Iterable[str] = METHOD_ORDER,
-    metrics: Iterable[str] = ("ape", "interval_score"),
+    metrics: Iterable[str] = ("interval_score", "ape"),
     file_path: Path | None = None,
     dpi: int = 600,
     title: str | None = None,
@@ -991,7 +963,13 @@ def plot_benchmark_panels(
         for metric_idx, metric in enumerate(metrics):
             row_idx = family_idx * len(metrics) + metric_idx
             center_col, lower_col, upper_col = _metric_columns(metric)
-            ylim = _panel_metric_ylim(family_frame, metric=metric, methods=methods)
+            ylim = panel_metric_ylim(
+                family_frame,
+                metric=metric,
+                methods=methods,
+                metric_columns=_METRIC_COLUMNS,
+                upper_steps=_EVI_METRIC_Y_UPPER_STEPS,
+            )
             for col_idx, theta in enumerate(theta_values):
                 ax = axes[row_idx, col_idx]
                 theta_frame = family_frame[family_frame["theta_true"] == theta]
@@ -1064,17 +1042,26 @@ def plot_benchmark_panels(
                 if row_idx == nrows - 1:
                     ax.set_xlabel("true $\\xi$")
     if legend_mode == "explicit":
-        _add_explicit_legend(fig, methods, set(subset["method"].unique()))
+        _add_explicit_legend(
+            fig,
+            methods,
+            set(subset["method"].unique()),
+            anchor_y=0.006,
+        )
+        bottom_margin = 0.058
     else:
         _add_grouped_legends(fig, subset)
+        bottom_margin = 0.09
     if title is None:
         title = (
             "Combined benchmark"
             if benchmark_set is None
             else f"{BENCHMARK_SET_LABELS.get(benchmark_set, benchmark_set)} benchmark"
         )
-    fig.suptitle(title, y=0.985)
-    fig.tight_layout(rect=(0, 0.09, 1, 0.94))
+    show_title = bool(title)
+    if show_title:
+        fig.suptitle(title, y=0.982)
+    fig.tight_layout(rect=(0, bottom_margin, 1, 0.95 if show_title else 0.992))
     if save and file_path is not None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(file_path)
@@ -1122,7 +1109,7 @@ def write_evi_benchmark_manuscript_artifacts(
             caption=(
                 f"Necessary-components EVI benchmark on the projected short-record severity suite "
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
-                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median Winkler interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
@@ -1139,7 +1126,7 @@ def write_evi_benchmark_manuscript_artifacts(
             caption=(
                 f"Target-comparison EVI benchmark on the projected short-record severity suite "
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
-                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
                 "Cells report median APE (IQR) / median interval score (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
@@ -1157,7 +1144,7 @@ def write_evi_benchmark_manuscript_artifacts(
             caption=(
                 f"Appendix interval sharpness-versus-calibration summary on the projected EVI suite "
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
-                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Frechet max-AR, moving-maxima q=99, "
+                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
             ),
@@ -1170,7 +1157,7 @@ def write_evi_benchmark_manuscript_artifacts(
             caption=(
                 f"Appendix full EVI benchmark overview on the projected EVI suite with xi in "
                 f"{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, theta in {{0.01, 0.10, 0.50, 1.0}}, "
-                f"and the Frechet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
+                f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
                 f"with n_obs={n_obs}."
             ),
             label="tab:benchmark-overview-main",
@@ -1180,7 +1167,7 @@ def write_evi_benchmark_manuscript_artifacts(
         benchmark_summary_df,
         benchmark_set=UNIVERSAL_BENCHMARK_SET,
         methods=CORE_METHODS,
-        title="Necessary components: from disjoint OLS baselines to sliding-median FGLS",
+        title="",
         legend_mode="explicit",
         interval_style="errorbar",
         file_path=fig_dir / "benchmark_summary.pdf",
@@ -1200,7 +1187,7 @@ def write_evi_benchmark_manuscript_artifacts(
         benchmark_summary_df,
         external_benchmark_summary,
         benchmark_set=UNIVERSAL_BENCHMARK_SET,
-        title="Target comparison under sliding-block FGLS",
+        title="",
         file_path=fig_dir / "benchmark_targets.pdf",
         save=True,
     )
@@ -1255,7 +1242,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 caption=(
                     "Appendix EVI record-length sensitivity for the headline within-BM "
                     "severity comparison. The table holds theta fixed at 0.10, compares "
-                    "n_obs in {200, 365, 730} for the Frechet max-AR and Pareto additive AR(1) "
+                    "n_obs in {200, 365, 730} for the Fréchet max-AR and Pareto additive AR(1) "
                     "families, and reports median APE (IQR) / median Winkler interval score "
                     "(IQR) across the xi grid for disjoint-median-OLS, sliding-median-OLS, "
                     "and sliding-median-FGLS. The purpose is to delimit how the short-record "

@@ -32,11 +32,11 @@ from unibm.evi import (
 )
 
 
-# The full 12-method EVI grid is expensive, but the paper-scale benchmark should
-# still use enough resampling to stabilize the internal FGLS covariance
-# estimates and any optional bootstrap-based sensitivity runs.
+# The full benchmark grid is expensive, but the paper-scale design should still
+# use enough Monte Carlo replicates to stabilize scenario summaries and enough
+# covariance-bootstrap draws to support the internal FGLS fits.
+BENCHMARK_MONTE_CARLO_REPS = 100
 FGLS_BOOTSTRAP_REPS = 120
-COMMON_BOOTSTRAP_REPS = 32
 BENCHMARK_CACHE_VERSION = "2026-04-06-benchmark-cache-v14-projected-grid-bundled-cache"
 LEGACY_BENCHMARK_CACHE_VERSIONS = (
     "2026-04-06-benchmark-cache-v13-universal-q",
@@ -160,7 +160,7 @@ REGRESSION_MARKERS = {
     "OLS": "o",
 }
 FAMILY_LABELS = {
-    "frechet_max_ar": "Frechet max-AR",
+    "frechet_max_ar": "Fréchet max-AR",
     MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
     STRESS_MOVING_MAXIMA_FAMILY: f"Abs-Student-t moving maxima (q={MOVING_MAXIMA_Q})",
     "pareto_additive_ar1": "Pareto additive AR1",
@@ -572,7 +572,7 @@ def default_evi_simulation_configs(
     theta_values: Iterable[float] = EVI_DEFAULT_THETA_VALUES,
     families: Iterable[str] = EVI_DEFAULT_FAMILIES,
     n_obs: int = 365,
-    reps: int = 32,
+    reps: int = BENCHMARK_MONTE_CARLO_REPS,
     quantile: float = 0.5,
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> list[SimulationConfig]:
@@ -609,7 +609,7 @@ def default_ei_simulation_configs(
     theta_values: Iterable[float] = UNIVERSAL_THETA_VALUES,
     families: Iterable[str] = EI_DEFAULT_FAMILIES,
     n_obs: int = 365,
-    reps: int = 32,
+    reps: int = BENCHMARK_MONTE_CARLO_REPS,
     quantile: float = 0.5,
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
 ) -> list[SimulationConfig]:
@@ -646,7 +646,7 @@ def stress_evi_simulation_configs(
     theta_values: Iterable[float] = STRESS_THETA_VALUES,
     families: Iterable[str] = (STRESS_MOVING_MAXIMA_FAMILY,),
     n_obs: int = 365,
-    reps: int = 32,
+    reps: int = BENCHMARK_MONTE_CARLO_REPS,
     quantile: float = 0.5,
     benchmark_set: str = STRESS_BENCHMARK_SET,
 ) -> list[SimulationConfig]:

@@ -3,10 +3,13 @@ from __future__ import annotations
 import shutil
 import subprocess
 import unittest
-from pathlib import Path
 
+try:
+    from . import _path_setup as test_paths
+except ImportError:  # pragma: no cover
+    import _path_setup as test_paths
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = test_paths.ROOT
 JUSTFILE = ROOT / "justfile"
 
 
