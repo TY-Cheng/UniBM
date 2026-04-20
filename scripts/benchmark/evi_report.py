@@ -716,9 +716,9 @@ def plot_evi_shrinkage_sensitivity(
         )
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("median_ape", "median APE"),
-        ("median_coverage", "median coverage"),
         ("median_interval_score", "median Winkler interval score"),
+        ("median_coverage", "median coverage"),
+        ("median_ape", "median APE"),
     ]
     color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["tab:blue"])
     fig, axes = plt.subplots(
@@ -1111,7 +1111,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
                 f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median APE (IQR) / median Winkler interval score (IQR) "
+                "Cells report median Winkler interval score (IQR) / median APE (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05)."
             ),
@@ -1128,7 +1128,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
                 f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median APE (IQR) / median interval score (IQR) "
+                "Cells report median interval score (IQR) / median APE (IQR) "
                 "summarized over the xi grid. All interval metrics use 95\\% CI "
                 "(alpha = 0.05), but native interval constructions differ across methods, "
                 "so the table is descriptive and is not used to rank cross-class interval calibration."
@@ -1217,7 +1217,7 @@ def write_evi_benchmark_manuscript_artifacts(
                     "Appendix slow-convergence stress suite for the headline EVI workflow. "
                     "The design uses absolute-Student-t moving-maxima q=99 series with "
                     "xi in {0.10, 0.30, 1.0}, theta in {0.10, 0.50, 1.0}, and n_obs=365. "
-                    "Cells report median APE (IQR) / median Winkler interval score (IQR) "
+                    "Cells report median Winkler interval score (IQR) / median APE (IQR) "
                     "summarized over the xi grid. The purpose is robustness checking under "
                     "heavy-tailed but slower-converging block-maxima behavior, not a second "
                     "headline benchmark."
@@ -1243,7 +1243,7 @@ def write_evi_benchmark_manuscript_artifacts(
                     "Appendix EVI record-length sensitivity for the headline within-BM "
                     "severity comparison. The table holds theta fixed at 0.10, compares "
                     "n_obs in {200, 365, 730} for the Fréchet max-AR and Pareto additive AR(1) "
-                    "families, and reports median APE (IQR) / median Winkler interval score "
+                    "families, and reports median Winkler interval score (IQR) / median APE "
                     "(IQR) across the xi grid for disjoint-median-OLS, sliding-median-OLS, "
                     "and sliding-median-FGLS. The purpose is to delimit how the short-record "
                     "benchmark narrative transports across nearby record lengths, not to create "
