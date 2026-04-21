@@ -29,7 +29,6 @@ class NotebookApiTests(unittest.TestCase):
             "plot_application_scaling",
             "plot_application_ei",
             "plot_application_design_life_levels",
-            "seasonal_monthly_pit_unit_frechet",
             "plot_benchmark_panels",
             "plot_ei_core_panels",
             "plot_interval_sharpness_scatter",

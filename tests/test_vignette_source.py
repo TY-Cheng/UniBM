@@ -32,7 +32,6 @@ class VignetteSourceTests(unittest.TestCase):
     def test_vignette_references_composite_application_workflow(self) -> None:
         text = VIGNETTE_SOURCE.read_text()
         self.assertIn("plot_application_composite", text)
-        self.assertIn("application_ei_seasonal_methods", text)
         self.assertIn(
             "Definitions: Return Period, Design-Life Level, and `T`-Year Block-Maximum",
             text,

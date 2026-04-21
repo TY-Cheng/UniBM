@@ -6,7 +6,6 @@ from dataclasses import replace
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from application.specs import ApplicationBundle
 from unibm.ei import EiStableWindow, estimate_pooled_bm_ei
@@ -56,80 +55,6 @@ def _format_range(lo: float, hi: float, *, precision: int = 2) -> str:
     if precision == 2:
         return f"[{_format_compact_number(lo)}, {_format_compact_number(hi)}]"
     return f"[{lo:.{precision}f}, {hi:.{precision}f}]"
-
-
-def _series_break_label(value: object) -> str:
-    if value is None:
-        return "NA"
-    if isinstance(value, pd.Timestamp):
-        return value.date().isoformat()
-    if isinstance(value, np.datetime64):
-        return pd.Timestamp(value).date().isoformat()
-    if isinstance(value, (int, np.integer)):
-        return str(int(value))
-    if isinstance(value, (float, np.floating)) and np.isfinite(value):
-        rounded = round(float(value))
-        if np.isclose(float(value), rounded):
-            return str(int(rounded))
-        return f"{float(value):.2f}"
-    return str(value)
-
-
-def _mann_kendall(series: pd.Series) -> tuple[float, float]:
-    values = pd.Series(series, copy=False).dropna().to_numpy(dtype=float)
-    if values.size < 2:
-        return float("nan"), float("nan")
-    tau, p_value = stats.kendalltau(np.arange(values.size, dtype=float), values)
-    return float(tau), float(p_value)
-
-
-def _pettitt_test(series: pd.Series) -> tuple[float, object | None]:
-    clean = pd.Series(series, copy=False).dropna()
-    values = clean.to_numpy(dtype=float)
-    if values.size < 2:
-        return float("nan"), None
-    ranks = stats.rankdata(values, method="average")
-    n_obs = values.size
-    cumulative = np.cumsum(ranks)
-    time = np.arange(1, n_obs + 1, dtype=float)
-    statistic_path = 2.0 * cumulative - time * (n_obs + 1.0)
-    idx = int(np.argmax(np.abs(statistic_path)))
-    k_stat = float(np.abs(statistic_path[idx]))
-    p_value = float(2.0 * np.exp((-6.0 * k_stat * k_stat) / (n_obs**3 + n_obs**2)))
-    return min(p_value, 1.0), clean.index[idx]
-
-
-def _series_stationarity_record(
-    series: pd.Series,
-    *,
-    prefix: str,
-) -> dict[str, object]:
-    tau, tau_p = _mann_kendall(series)
-    pettitt_p, break_point = _pettitt_test(series)
-    return {
-        f"{prefix}_n_obs": int(pd.Series(series, copy=False).dropna().size),
-        f"{prefix}_mk_tau": tau,
-        f"{prefix}_mk_p": tau_p,
-        f"{prefix}_pettitt_p": pettitt_p,
-        f"{prefix}_pettitt_break": _series_break_label(break_point),
-    }
-
-
-def application_stationarity_records(bundle: ApplicationBundle) -> dict[str, object]:
-    severity_series = bundle.prepared.evi.series
-    annual_maxima = bundle.prepared.evi.annual_maxima
-    return {
-        "application": bundle.spec.key,
-        "label": bundle.spec.label,
-        "provider": bundle.spec.provider,
-        "severity_clock": (
-            "calendar-day discharge"
-            if bundle.spec.provider == "usgs"
-            else "claim-active-day payouts"
-        ),
-        **_series_stationarity_record(severity_series, prefix="severity"),
-        **_series_stationarity_record(annual_maxima, prefix="annual_maxima"),
-    }
 
 
 def _top_penultimate_windows(
@@ -211,76 +136,6 @@ def fit_evi_window_variants(
     return fits
 
 
-def scaling_residual_record(bundle: ApplicationBundle) -> dict[str, object]:
-    fit = bundle.evi_fit
-    plateau_x = np.asarray(fit.plateau.x, dtype=float)
-    plateau_y = np.asarray(fit.plateau.y, dtype=float)
-    residuals = plateau_y - (fit.intercept + fit.slope * plateau_x)
-    residual_sd = (
-        float(np.std(residuals, ddof=1)) if residuals.size >= 2 else float(np.std(residuals))
-    )
-    if residuals.size >= 3:
-        shapiro_p = float(stats.shapiro(residuals).pvalue)
-    else:
-        shapiro_p = float("nan")
-    variants = fit_evi_window_variants(bundle, top_k=APPLICATION_DIAGNOSTIC_TOP_K)
-    xi_values = np.asarray([variant.slope for variant in variants], dtype=float)
-    observations_per_year = application_observations_per_year(bundle)
-    dll_10 = np.asarray(
-        [
-            estimate_design_life_level(
-                variant,
-                10.0,
-                observations_per_year=observations_per_year,
-            )
-            for variant in variants
-        ],
-        dtype=float,
-    )
-    dll_50 = np.asarray(
-        [
-            estimate_design_life_level(
-                variant,
-                50.0,
-                observations_per_year=observations_per_year,
-            )
-            for variant in variants
-        ],
-        dtype=float,
-    )
-    return {
-        "application": bundle.spec.key,
-        "label": bundle.spec.label,
-        "provider": bundle.spec.provider,
-        "plateau_lo": int(fit.plateau_bounds[0]),
-        "plateau_hi": int(fit.plateau_bounds[1]),
-        "plateau_points": int(plateau_x.size),
-        "residual_sd": residual_sd,
-        "shapiro_p": shapiro_p,
-        "xi_headline": float(fit.slope),
-        "xi_range_lo": float(np.min(xi_values)) if xi_values.size else float("nan"),
-        "xi_range_hi": float(np.max(xi_values)) if xi_values.size else float("nan"),
-        "dll10_headline": float(
-            estimate_design_life_level(
-                fit,
-                10.0,
-                observations_per_year=observations_per_year,
-            )
-        ),
-        "dll10_range_lo": float(np.min(dll_10)) if dll_10.size else float("nan"),
-        "dll10_range_hi": float(np.max(dll_10)) if dll_10.size else float("nan"),
-        "dll50_headline": float(
-            estimate_design_life_level(
-                fit,
-                50.0,
-                observations_per_year=observations_per_year,
-            )
-        ),
-        "dll50_range_lo": float(np.min(dll_50)) if dll_50.size else float("nan"),
-        "dll50_range_hi": float(np.max(dll_50)) if dll_50.size else float("nan"),
-    }
-
-
 def application_design_life_interval_record(bundle: ApplicationBundle) -> dict[str, object]:
     observations_per_year = application_observations_per_year(bundle)
     variants = fit_evi_window_variants(bundle, top_k=APPLICATION_DIAGNOSTIC_TOP_K)
@@ -347,63 +202,6 @@ def application_design_life_interval_record(bundle: ApplicationBundle) -> dict[s
         "dll50_env_lo": float(np.min(dll50_env)) if dll50_env.size else float("nan"),
         "dll50_env_hi": float(np.max(dll50_env)) if dll50_env.size else float("nan"),
     }
-
-
-def application_stationarity_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for bundle in manuscript_bundles(bundles):
-        record = application_stationarity_records(bundle)
-        rows.append(
-            {
-                "Application": record["label"],
-                "Severity clock": record["severity_clock"],
-                "Severity MK tau (p)": (
-                    f"{float(record['severity_mk_tau']):.2f} "
-                    f"(p={float(record['severity_mk_p']):.3g})"
-                ),
-                "Severity Pettitt": (
-                    f"p={float(record['severity_pettitt_p']):.3g}, "
-                    f"break={record['severity_pettitt_break']}"
-                ),
-                "Annual-max MK tau (p)": (
-                    f"{float(record['annual_maxima_mk_tau']):.2f} "
-                    f"(p={float(record['annual_maxima_mk_p']):.3g})"
-                ),
-                "Annual-max Pettitt": (
-                    f"p={float(record['annual_maxima_pettitt_p']):.3g}, "
-                    f"break={record['annual_maxima_pettitt_break']}"
-                ),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def application_scaling_gof_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for bundle in manuscript_bundles(bundles):
-        record = scaling_residual_record(bundle)
-        rows.append(
-            {
-                "Application": record["label"],
-                "Selected plateau": f"[{record['plateau_lo']}, {record['plateau_hi']}]",
-                "Plateau points": int(record["plateau_points"]),
-                "Residual SD": f"{float(record['residual_sd']):.3f}",
-                "Shapiro-Wilk p": f"{float(record['shapiro_p']):.3g}",
-                "Top-3 xi range": _format_range(
-                    float(record["xi_range_lo"]),
-                    float(record["xi_range_hi"]),
-                ),
-                "10y median DLL range": _format_range(
-                    float(record["dll10_range_lo"]),
-                    float(record["dll10_range_hi"]),
-                ),
-                "50y median DLL range": _format_range(
-                    float(record["dll50_range_lo"]),
-                    float(record["dll50_range_hi"]),
-                ),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def application_design_life_interval_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
@@ -595,11 +393,7 @@ __all__ = [
     "application_design_life_interval_record",
     "application_design_life_interval_table",
     "application_observations_per_year",
-    "application_scaling_gof_table",
-    "application_stationarity_records",
-    "application_stationarity_table",
     "fit_ei_window_variants",
     "fit_evi_window_variants",
     "manuscript_bundles",
-    "scaling_residual_record",
 ]

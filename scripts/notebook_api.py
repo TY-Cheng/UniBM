@@ -12,7 +12,6 @@ from application.build import (
     plot_application_scaling,
     plot_application_target_stability,
     plot_application_time_series,
-    seasonal_monthly_pit_unit_frechet,
 )
 from benchmark.design import CORE_METHODS, UNIVERSAL_BENCHMARK_SET
 from benchmark.ei_report import (
@@ -70,7 +69,6 @@ __all__ = [
     "plot_ei_targets_panels",
     "plot_interval_sharpness_scatter",
     "plot_target_plus_external_panels",
-    "seasonal_monthly_pit_unit_frechet",
     "target_plus_external_story_latex",
     "target_plus_external_story_table",
 ]

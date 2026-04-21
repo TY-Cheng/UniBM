@@ -139,7 +139,6 @@ REQUIRED_OUTPUTS = [
     OUT / "application_design_life_levels.csv",
     OUT / "application_methods.csv",
     OUT / "application_ei_methods.csv",
-    OUT / "application_ei_seasonal_methods.csv",
     OUT / "application_usgs_site_screening.csv",
     TABLE_DIR / "application_summary_main.tex",
     TABLE_DIR / "application_design_life_levels_main.tex",
@@ -183,7 +182,6 @@ else:
 application_summary = pd.read_csv(OUT / "application_summary.csv")
 application_design_life_levels = pd.read_csv(OUT / "application_design_life_levels.csv")
 application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
-application_ei_seasonal_methods = pd.read_csv(OUT / "application_ei_seasonal_methods.csv")
 application_methods = pd.read_csv(OUT / "application_methods.csv")
 application_screening = pd.read_csv(OUT / "application_screening.csv")
 application_series_registry = pd.read_csv(OUT / "application_series_registry.csv")
@@ -611,12 +609,10 @@ plt.show()
 # %%
 application_design_life_levels = pd.read_csv(OUT / "application_design_life_levels.csv")
 application_ei_methods = pd.read_csv(OUT / "application_ei_methods.csv")
-application_ei_seasonal_methods = pd.read_csv(OUT / "application_ei_seasonal_methods.csv")
 
 display(application_summary)
 display(application_design_life_levels.head(12))
 display(application_ei_methods)
-display(application_ei_seasonal_methods)
 
 print((TABLE_DIR / "application_summary_main.tex").read_text())
 print((TABLE_DIR / "application_design_life_levels_main.tex").read_text())
@@ -666,13 +662,6 @@ def _design_life_row_tau(app_key, years, tau):
     ].iloc[0]
 
 
-def _seasonal_row(app_key, method):
-    return application_ei_seasonal_methods.loc[
-        (application_ei_seasonal_methods["application"] == app_key)
-        & (application_ei_seasonal_methods["method"] == method)
-    ].iloc[0]
-
-
 # %%
 tx_stream_row = _summary_row("tx_streamflow")
 fl_stream_row = _summary_row("fl_streamflow")
@@ -693,12 +682,6 @@ display(
 
 
 # %% [markdown]
-# **Seasonal-adjusted EI sensitivity.**
-#
-# The main EI workflow is still run on the original prepared EI series for streamflow and NFIP.
-# As an appendix sensitivity, the notebook also reports a monthly empirical-PIT to unit-Frechet transform that strips month-specific marginal seasonality while preserving the daily ordering.
-# Those seasonal-adjusted EI rows are shown below each application and should be read as a robustness check, not as the headline application estimator.
-#
 # **How the scaling, design-life-level, and EI panels fit together.**
 #
 # The design-life-level panel is **not** a separate annual-maxima or GEV fit.
@@ -741,9 +724,6 @@ streamflow_design_life_levels = application_design_life_levels[
 streamflow_ei = application_ei_methods[
     application_ei_methods["application"].isin(["tx_streamflow", "fl_streamflow"])
 ].copy()
-streamflow_seasonal_ei = application_ei_seasonal_methods[
-    application_ei_seasonal_methods["application"].isin(["tx_streamflow", "fl_streamflow"])
-].copy()
 streamflow_methods = application_methods[
     application_methods["application"].isin(["tx_streamflow", "fl_streamflow"])
 ].copy()
@@ -751,7 +731,6 @@ display(streamflow_screening)
 display(streamflow_summary)
 display(streamflow_design_life_levels)
 display(streamflow_ei)
-display(streamflow_seasonal_ei)
 display(streamflow_methods)
 
 plot_application_time_series(streamflow_bundles[0])
@@ -787,8 +766,6 @@ tx_stream_ferro = streamflow_ei.loc[
 fl_stream_ferro = streamflow_ei.loc[
     (streamflow_ei["application"] == "fl_streamflow") & (streamflow_ei["method"] == "ferro_segers")
 ].iloc[0]
-tx_stream_seasonal_bb = _seasonal_row("tx_streamflow", "bb_sliding_fgls")
-fl_stream_seasonal_bb = _seasonal_row("fl_streamflow", "bb_sliding_fgls")
 
 display(
     Markdown(
@@ -798,8 +775,6 @@ display(
 That main pooled-BM story is reinforced rather than contradicted by the other EI estimators: the Northrop pooled-BM fits are `{_fmt_interval(tx_stream_northrop["theta_hat"], tx_stream_northrop["theta_lo"], tx_stream_northrop["theta_hi"], digits=3)}` in Texas and `{_fmt_interval(fl_stream_northrop["theta_hat"], fl_stream_northrop["theta_lo"], fl_stream_northrop["theta_hi"], digits=3)}` in Florida, while Ferro-Segers remains in the same low-theta regime at `{_fmt_interval(tx_stream_ferro["theta_hat"], tx_stream_ferro["theta_lo"], tx_stream_ferro["theta_hi"], digits=3)}` and `{_fmt_interval(fl_stream_ferro["theta_hat"], fl_stream_ferro["theta_lo"], fl_stream_ferro["theta_hi"], digits=3)}`.
 
 The design-life severity scale is still substantial. The headline median 10-year design-life levels are `{_fmt_value(tx_stream_design_life_10["design_life_level"])}` in Texas and `{_fmt_value(fl_stream_design_life_10["design_life_level"])}` in Florida, while the shared-`xi` `tau = 0.95` 10-year curves rise to `{_fmt_value(tx_stream_design_life_10_p95["design_life_level"])}` and `{_fmt_value(fl_stream_design_life_10_p95["design_life_level"])}`. At the longer and more stress-oriented end, the `tau = 0.99` 50-year design-life levels reach `{_fmt_value(tx_stream_design_life_50_p99["design_life_level"])}` and `{_fmt_value(fl_stream_design_life_50_p99["design_life_level"])}`. Those numbers all describe peak flood severity on the calendar-day discharge scale; the EI results above should be read alongside them to quantify how long one flood episode tends to persist once it starts.
-
-Seasonal adjustment does not erase that conclusion. The monthly-PIT BB sensitivity remains very small at `{_fmt_interval(tx_stream_seasonal_bb["theta_hat"], tx_stream_seasonal_bb["theta_lo"], tx_stream_seasonal_bb["theta_hi"], digits=3)}` in Texas and `{_fmt_interval(fl_stream_seasonal_bb["theta_hat"], fl_stream_seasonal_bb["theta_lo"], fl_stream_seasonal_bb["theta_hi"], digits=3)}` in Florida, so the clustering story is not just a marginal seasonal artifact.
         """
     )
 )
@@ -828,9 +803,6 @@ nfip_design_life_levels = application_design_life_levels[
 nfip_ei = application_ei_methods[
     application_ei_methods["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
 ].copy()
-nfip_seasonal_ei = application_ei_seasonal_methods[
-    application_ei_seasonal_methods["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
-].copy()
 nfip_methods = application_methods[
     application_methods["application"].isin(["tx_nfip_claims", "fl_nfip_claims"])
 ].copy()
@@ -842,7 +814,6 @@ display(nfip_screening)
 display(nfip_summary)
 display(nfip_design_life_levels)
 display(nfip_ei)
-display(nfip_seasonal_ei)
 display(nfip_methods)
 
 plot_application_time_series(nfip_bundles[0])
@@ -878,8 +849,6 @@ tx_nfip_ferro = nfip_ei.loc[
 fl_nfip_ferro = nfip_ei.loc[
     (nfip_ei["application"] == "fl_nfip_claims") & (nfip_ei["method"] == "ferro_segers")
 ].iloc[0]
-tx_nfip_seasonal_bb = _seasonal_row("tx_nfip_claims", "bb_sliding_fgls")
-fl_nfip_seasonal_bb = _seasonal_row("fl_nfip_claims", "bb_sliding_fgls")
 
 display(
     Markdown(
@@ -889,8 +858,6 @@ display(
 The split-series design is also justified by the raw timing structure: only `{100 * tx_nfip_ei_screen["daily_positive_share"]:.1f}%` of Texas calendar days and `{100 * fl_nfip_ei_screen["daily_positive_share"]:.1f}%` of Florida calendar days carry positive payouts, so EI needs the zero-filled daily axis to preserve claim-wave timing. On that calendar scale, BB-sliding-FGLS gives `theta ~ {_fmt_value(nfip_summary.loc[nfip_summary["application"] == "tx_nfip_claims", "theta_hat_bb_sliding_fgls"].iloc[0])}` in Texas and `{_fmt_value(nfip_summary.loc[nfip_summary["application"] == "fl_nfip_claims", "theta_hat_bb_sliding_fgls"].iloc[0])}` in Florida, with Northrop pooled-BM at `{_fmt_interval(tx_nfip_northrop["theta_hat"], tx_nfip_northrop["theta_lo"], tx_nfip_northrop["theta_hi"])}` and `{_fmt_interval(fl_nfip_northrop["theta_hat"], fl_nfip_northrop["theta_lo"], fl_nfip_northrop["theta_hi"])}` and Ferro-Segers at `{_fmt_interval(tx_nfip_ferro["theta_hat"], tx_nfip_ferro["theta_lo"], tx_nfip_ferro["theta_hi"])}` and `{_fmt_interval(fl_nfip_ferro["theta_hat"], fl_nfip_ferro["theta_lo"], fl_nfip_ferro["theta_hi"])}`. Those estimates all point to multi-day claim waves rather than isolated one-day impacts.
 
 The headline 10-year claim-active-day design-life levels, `{_fmt_value(tx_nfip_design_life_10["design_life_level"])}` in Texas and `{_fmt_value(fl_nfip_design_life_10["design_life_level"])}` in Florida, should therefore be read together with the EI evidence for multi-day claim waves. The upper shared-`xi` curves are materially higher: `tau = 0.95` gives `{_fmt_value(tx_nfip_design_life_10_p95["design_life_level"])}` in Texas and `{_fmt_value(fl_nfip_design_life_10_p95["design_life_level"])}` in Florida, while the 50-year `tau = 0.99` stress curves reach `{_fmt_value(tx_nfip_design_life_50_p99["design_life_level"])}` and `{_fmt_value(fl_nfip_design_life_50_p99["design_life_level"])}`. The design-life-level curve is fit on **positive claim-active days**, whereas the EI analysis is defined on the **zero-filled calendar-day process**. Those are different clocks, so they are reported side by side rather than forced onto one axis as if they were the same estimand.
-
-Seasonal adjustment also leaves the qualitative claim-wave story intact. The monthly-PIT BB sensitivity lands at `{_fmt_interval(tx_nfip_seasonal_bb["theta_hat"], tx_nfip_seasonal_bb["theta_lo"], tx_nfip_seasonal_bb["theta_hi"])}` in Texas and `{_fmt_interval(fl_nfip_seasonal_bb["theta_hat"], fl_nfip_seasonal_bb["theta_lo"], fl_nfip_seasonal_bb["theta_hi"])}` in Florida, so the clustering evidence is not an artifact of month-specific payout levels alone.
         """
     )
 )

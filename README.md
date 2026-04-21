@@ -262,12 +262,9 @@ Main application outputs are written to `out/applications/`:
 - `application_summary.csv`
 - `application_design_life_levels.csv`
   design-life-level curves over the application tau grid;
-- `application_stationarity.csv`
-- `application_scaling_gof.csv`
 - `application_design_life_intervals.csv`
 - `application_methods.csv`
 - `application_ei_methods.csv`
-- `application_ei_seasonal_methods.csv`
 - `application_usgs_site_screening.csv`
 
 Application method defaults are now intentionally asymmetric:
@@ -279,10 +276,7 @@ Application method defaults are now intentionally asymmetric:
 - `application_ei_methods.csv` records the four-method EI comparison set
   `bb_sliding_fgls`, `northrop_sliding_fgls`, `k_gaps`, and `ferro_segers`
   only for the EI applications (`tx_streamflow`, `fl_streamflow`,
-  `tx_nfip_claims`, and `fl_nfip_claims`);
-- `application_ei_seasonal_methods.csv` stores the appendix-only monthly
-  empirical-PIT to unit-Frechet seasonal sensitivity for those same four EI
-  methods and the same EI applications.
+  `tx_nfip_claims`, and `fl_nfip_claims`).
 
 Interpreting the streamflow/NFIP application diagnostics:
 
