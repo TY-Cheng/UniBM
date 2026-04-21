@@ -26,7 +26,7 @@ from config import resolve_repo_dirs
 import numpy as np
 import pandas as pd
 
-from application.fit import build_application_bundles_from_inputs, fit_application_ei_estimates
+from application.fit import build_application_bundles_from_inputs
 from application.inputs import (
     build_application_inputs,
     ensure_ghcn_raw_data,
@@ -37,10 +37,6 @@ from application.inputs import (
 from application.diagnostics import (
     application_design_life_interval_record,
     application_design_life_interval_table,
-    application_scaling_gof_table,
-    application_stationarity_records,
-    application_stationarity_table,
-    scaling_residual_record,
 )
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series, screen_extremal_index_series
@@ -323,69 +319,6 @@ def _stable_window_text(estimate) -> str:
     return f"{int(estimate.stable_window.lo)}-{int(estimate.stable_window.hi)}"
 
 
-def seasonal_monthly_pit_unit_frechet(series: pd.Series) -> pd.Series:
-    """Map a daily series to a seasonal-adjusted unit-Fréchet scale by month.
-
-    The transform is deterministic and preserves the original daily index.
-    Within each calendar month, values are mapped to scaled empirical ranks
-    `u = rank / (n + 1)` and then transformed by the unit-Fréchet inverse CDF
-    `x = -1 / log(u)`.
-    """
-    if not isinstance(series.index, pd.DatetimeIndex):
-        raise TypeError("Seasonal EI sensitivity requires a DatetimeIndex.")
-    values = pd.to_numeric(series, errors="coerce")
-    transformed = pd.Series(np.nan, index=series.index, dtype=float, name=series.name)
-    for month in range(1, 13):
-        month_mask = values.index.month == month
-        month_values = values.loc[month_mask]
-        finite_mask = np.isfinite(month_values.to_numpy(dtype=float))
-        if not np.any(finite_mask):
-            continue
-        finite_values = month_values.iloc[np.flatnonzero(finite_mask)]
-        ranks = finite_values.rank(method="average").to_numpy(dtype=float)
-        u = np.clip(ranks / (finite_values.size + 1.0), 1e-12, 1.0 - 1e-12)
-        transformed.loc[finite_values.index] = 1.0 / (-np.log(u))
-    return transformed
-
-
-def _seasonal_adjusted_ei_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]]:
-    """Build seasonal-adjusted EI sensitivity rows for one application."""
-    if not _bundle_has_formal_ei(bundle):
-        return []
-    transformed = seasonal_monthly_pit_unit_frechet(bundle.prepared.ei.series)
-    _, estimates = fit_application_ei_estimates(
-        transformed,
-        allow_zeros=False,
-        label=f"{bundle.spec.label} seasonal-adjusted EI sensitivity",
-        status_prefix="application",
-    )
-    rows: list[dict[str, object]] = []
-    for method in APPLICATION_EI_METHOD_IDS:
-        estimate = estimates[method]
-        rows.append(
-            {
-                "application": bundle.spec.key,
-                "provider": bundle.spec.provider,
-                "transform": "monthly_pit_unit_frechet",
-                "method": method,
-                "theta_hat": float(estimate.theta_hat),
-                "theta_lo": float(estimate.confidence_interval[0]),
-                "theta_hi": float(estimate.confidence_interval[1]),
-                "standard_error": float(estimate.standard_error),
-                "stable_level_lo": (
-                    np.nan if estimate.stable_window is None else float(estimate.stable_window.lo)
-                ),
-                "stable_level_hi": (
-                    np.nan if estimate.stable_window is None else float(estimate.stable_window.hi)
-                ),
-                "mean_cluster_size": float(1.0 / estimate.theta_hat),
-                "ci_method": estimate.ci_method,
-                "ci_variant": estimate.ci_variant,
-            }
-        )
-    return rows
-
-
 def _format_interval(center: float, lo: float, hi: float) -> str:
     """Format one estimate and interval for compact application tables."""
     if not (np.isfinite(center) and np.isfinite(lo) and np.isfinite(hi)):
@@ -516,8 +449,8 @@ def _application_clock_text(bundle: ApplicationBundle) -> str:
 def _application_preprocessing_text(bundle: ApplicationBundle) -> str:
     """Render a compact preprocessing summary for one application."""
     if bundle.spec.provider == "usgs":
-        return "deduplicate timestamps, drop negative values, trim incomplete terminal year"
-    return "CPI deflation, zero-filled calendar clock, active-day severity split"
+        return "deduplicated daily discharge, nonnegative filter, terminal-year trim"
+    return "annual CPI-U deflation to 2025 USD with active-day severity split"
 
 
 def _application_normalization_text(bundle: ApplicationBundle) -> str:
@@ -997,61 +930,6 @@ def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     float(bundle.ei_ferro_segers.confidence_interval[0]),
                     float(bundle.ei_ferro_segers.confidence_interval[1]),
                 ),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _theta_regime(theta: float) -> str:
-    """Bucket theta into a short qualitative clustering regime label."""
-    if not np.isfinite(theta):
-        return "unknown clustering"
-    if theta < 0.10:
-        return "strong persistence"
-    if theta < 0.50:
-        return "moderate clustering"
-    return "weak clustering"
-
-
-def _seasonal_ei_note(headline_theta: float, seasonal_theta: float) -> str:
-    """Summarize whether seasonal adjustment changes the clustering reading."""
-    headline_regime = _theta_regime(headline_theta)
-    seasonal_regime = _theta_regime(seasonal_theta)
-    if headline_regime == seasonal_regime:
-        return f"{headline_regime} remains after adjustment"
-    return f"{headline_regime} shifts to {seasonal_regime}"
-
-
-def application_ei_seasonal_sensitivity_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the manuscript appendix seasonal-adjusted EI sensitivity table."""
-    rows: list[dict[str, object]] = []
-    for bundle in _manuscript_bundles(bundles):
-        if not _bundle_has_formal_ei(bundle) or bundle.ei_bb_sliding_fgls is None:
-            continue
-        seasonal_rows = _seasonal_adjusted_ei_method_rows(bundle)
-        seasonal_bb = next(
-            (row for row in seasonal_rows if row["method"] == "bb_sliding_fgls"),
-            None,
-        )
-        if seasonal_bb is None:
-            continue
-        headline_theta = float(bundle.ei_bb_sliding_fgls.theta_hat)
-        seasonal_theta = float(seasonal_bb["theta_hat"])
-        rows.append(
-            {
-                "Application": bundle.spec.label,
-                "$\\theta$ (BB-FGLS)": _format_interval(
-                    headline_theta,
-                    float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
-                    float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
-                ),
-                "Seasonal-adjusted $\\theta$": _format_interval(
-                    seasonal_theta,
-                    float(seasonal_bb["theta_lo"]),
-                    float(seasonal_bb["theta_hi"]),
-                ),
-                "Shift": f"{seasonal_theta - headline_theta:+.3f}",
-                "Interpretive note": _seasonal_ei_note(headline_theta, seasonal_theta),
             }
         )
     return pd.DataFrame(rows)
@@ -2018,12 +1896,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     screening_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
     design_life_level_rows: list[dict[str, object]] = []
-    stationarity_rows: list[dict[str, object]] = []
     design_life_interval_rows: list[dict[str, object]] = []
-    scaling_gof_rows: list[dict[str, object]] = []
     method_rows: list[dict[str, object]] = []
     ei_method_rows: list[dict[str, object]] = []
-    seasonal_ei_method_rows: list[dict[str, object]] = []
     provider_metadata: dict[str, list[dict[str, object]]] = {"ghcn": [], "usgs": [], "fema": []}
 
     for bundle in bundles:
@@ -2047,14 +1922,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         summary_rows.append(application_summary_record(bundle))
         design_life_level_rows.extend(_application_design_life_level_rows(bundle))
         if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
-            stationarity_rows.append(application_stationarity_records(bundle))
             design_life_interval_rows.append(application_design_life_interval_record(bundle))
         method_rows.extend(application_method_rows(bundle))
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
-            seasonal_ei_method_rows.extend(_seasonal_adjusted_ei_method_rows(bundle))
-        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
-            scaling_gof_rows.append(scaling_residual_record(bundle))
         status("application", f"writing figures for {bundle.spec.label}")
         write_application_figures(bundle, fig_dir)
 
@@ -2076,14 +1947,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         out_dir / "application_design_life_levels.csv",
         index=False,
     )
-    pd.DataFrame(stationarity_rows).sort_values(["provider", "application"]).to_csv(
-        out_dir / "application_stationarity.csv",
-        index=False,
-    )
-    pd.DataFrame(scaling_gof_rows).sort_values(["provider", "application"]).to_csv(
-        out_dir / "application_scaling_gof.csv",
-        index=False,
-    )
     pd.DataFrame(design_life_interval_rows).sort_values(["provider", "application"]).to_csv(
         out_dir / "application_design_life_intervals.csv",
         index=False,
@@ -2100,10 +1963,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     )
     pd.DataFrame(ei_method_rows).sort_values(["application", "method"]).to_csv(
         out_dir / "application_ei_methods.csv",
-        index=False,
-    )
-    pd.DataFrame(seasonal_ei_method_rows).sort_values(["application", "method"]).to_csv(
-        out_dir / "application_ei_seasonal_methods.csv",
         index=False,
     )
     for provider, rows in provider_metadata.items():
@@ -2194,40 +2053,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             label="tab:application-selection-sensitivity-main",
         )
     )
-    status("application", "writing application appendix stationarity table")
-    (table_dir / "application_stationarity_main.tex").write_text(
-        _render_wrapped_latex_table(
-            application_stationarity_table(bundles),
-            caption=(
-                "Appendix stationarity diagnostics for the four focal case studies. "
-                "Each row reports Mann--Kendall trend and Pettitt break diagnostics for the "
-                "severity series used in the EVI branch and for its annual maxima. These are "
-                "diagnostics, not a guarantee of stationarity, so all 50-year design-life levels "
-                "remain conditional stationary extrapolations."
-            ),
-            label="tab:application-stationarity-main",
-            alignments=(
-                "p{0.16\\textwidth}p{0.16\\textwidth}p{0.17\\textwidth}"
-                "p{0.17\\textwidth}p{0.17\\textwidth}p{0.17\\textwidth}"
-            ),
-        )
-    )
-    status("application", "writing application appendix scaling-fit diagnostics table")
-    (table_dir / "application_scaling_gof_main.tex").write_text(
-        render_latex_table(
-            application_scaling_gof_table(bundles),
-            caption=(
-                "Appendix scaling-law diagnostics for the four focal case studies. "
-                "Rows report the selected plateau, residual spread, a Shapiro--Wilk residual "
-                "diagnostic, and the top-three-window ranges for $\\xi$ and the median "
-                "design-life levels. These ranges summarize local plateau sensitivity rather than "
-                "full post-selection uncertainty. For Florida NFIP, the selected plateau contains "
-                "only five retained points, so the Shapiro--Wilk line should be read as weakly "
-                "informative."
-            ),
-            label="tab:application-scaling-gof-main",
-        )
-    )
     status("application", "writing application appendix median DLL interval table")
     (table_dir / "application_design_life_intervals_main.tex").write_text(
         _render_wrapped_latex_table(
@@ -2245,25 +2070,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             alignments=(
                 "p{0.13\\textwidth}p{0.10\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}"
                 "p{0.13\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}p{0.13\\textwidth}"
-            ),
-        )
-    )
-    status("application", "writing application appendix seasonal EI sensitivity table")
-    (table_dir / "application_ei_seasonal_sensitivity_main.tex").write_text(
-        _render_wrapped_latex_table(
-            application_ei_seasonal_sensitivity_table(bundles),
-            caption=(
-                "Appendix seasonal EI sensitivity for the four focal case studies. "
-                "Rows compare the BB-sliding-FGLS persistence estimate with a monthly "
-                "empirical-PIT unit-Fréchet seasonal adjustment applied before the EI fit. This "
-                "table is a robustness check on whether seasonal marginal structure changes the "
-                "qualitative clustering interpretation; it is not a replacement for the main "
-                "calendar-time EI analysis."
-            ),
-            label="tab:application-ei-seasonal-main",
-            alignments=(
-                "p{0.17\\textwidth}p{0.18\\textwidth}p{0.18\\textwidth}"
-                "p{0.10\\textwidth}p{0.29\\textwidth}"
             ),
         )
     )
@@ -2295,12 +2101,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_screening": out_dir / "application_screening.csv",
         "application_summary": out_dir / "application_summary.csv",
         "application_design_life_levels": out_dir / "application_design_life_levels.csv",
-        "application_stationarity": out_dir / "application_stationarity.csv",
-        "application_scaling_gof": out_dir / "application_scaling_gof.csv",
         "application_design_life_intervals": out_dir / "application_design_life_intervals.csv",
         "application_methods": out_dir / "application_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
-        "application_ei_seasonal_methods": out_dir / "application_ei_seasonal_methods.csv",
         "application_usgs_site_screening": out_dir / "application_usgs_site_screening.csv",
         "application_summary_main": table_dir / "application_summary_main.tex",
         "application_design_life_levels_main": table_dir
@@ -2310,13 +2113,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_selection_sensitivity_main": (
             table_dir / "application_selection_sensitivity_main.tex"
         ),
-        "application_stationarity_main": table_dir / "application_stationarity_main.tex",
-        "application_scaling_gof_main": table_dir / "application_scaling_gof_main.tex",
         "application_design_life_intervals_main": (
             table_dir / "application_design_life_intervals_main.tex"
-        ),
-        "application_ei_seasonal_sensitivity_main": (
-            table_dir / "application_ei_seasonal_sensitivity_main.tex"
         ),
         "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
     }
@@ -2324,15 +2122,12 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
 
 __all__ = [
     "application_ei_table",
-    "application_ei_seasonal_sensitivity_table",
     "application_ei_method_rows",
     "application_case_audit_table",
     "application_design_life_interval_table",
     "application_method_rows",
     "application_design_life_level_table",
-    "application_scaling_gof_table",
     "application_selection_sensitivity_table",
-    "application_stationarity_table",
     "application_summary_record",
     "application_summary_table",
     "application_usgs_screening_disclosure_table",
@@ -2344,6 +2139,5 @@ __all__ = [
     "plot_application_scaling",
     "plot_application_target_stability",
     "plot_application_time_series",
-    "seasonal_monthly_pit_unit_frechet",
     "write_application_figures",
 ]

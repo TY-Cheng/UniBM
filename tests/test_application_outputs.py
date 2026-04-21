@@ -31,18 +31,13 @@ from application.outputs import (
     _tau_scaling_views_for_fit,
     _draw_ei_ax,
     _draw_design_life_levels_ax,
-    _seasonal_adjusted_ei_method_rows,
     application_case_audit_table,
     application_design_life_interval_table,
     application_ei_method_rows,
-    application_ei_seasonal_sensitivity_table,
     application_design_life_level_table,
     application_method_rows,
-    application_scaling_gof_table,
     application_selection_sensitivity_table,
-    application_stationarity_table,
     application_usgs_screening_disclosure_table,
-    seasonal_monthly_pit_unit_frechet,
     write_application_figures,
 )
 from application.specs import APPLICATION_DESIGN_LIFE_TAUS, APPLICATION_RANDOM_STATE
@@ -185,45 +180,6 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(application_ei_method_rows(bundle), [])
 
-    def test_seasonal_monthly_pit_unit_frechet_is_deterministic_and_positive(self) -> None:
-        index = pd.date_range("2000-01-01", periods=365 * 4, freq="D")
-        values = pd.Series(0.0, index=index, dtype=float)
-        values.iloc[::5] = 2.0
-        values.iloc[1::11] = 7.0
-
-        transformed_a = seasonal_monthly_pit_unit_frechet(values)
-        transformed_b = seasonal_monthly_pit_unit_frechet(values)
-
-        self.assertTrue(transformed_a.index.equals(values.index))
-        self.assertTrue(
-            np.allclose(transformed_a.to_numpy(), transformed_b.to_numpy(), equal_nan=True)
-        )
-        finite = transformed_a.to_numpy(dtype=float)[
-            np.isfinite(transformed_a.to_numpy(dtype=float))
-        ]
-        self.assertTrue(np.all(finite > 0.0))
-
-    def test_seasonal_adjusted_rows_include_four_methods(self) -> None:
-        bundle = _make_standard_bundle()
-
-        rows = _seasonal_adjusted_ei_method_rows(bundle)
-
-        self.assertEqual(
-            {row["method"] for row in rows},
-            {
-                "bb_sliding_fgls",
-                "northrop_sliding_fgls",
-                "k_gaps",
-                "ferro_segers",
-            },
-        )
-        self.assertTrue(all(row["transform"] == "monthly_pit_unit_frechet" for row in rows))
-
-    def test_seasonal_adjusted_rows_skip_evi_only_applications(self) -> None:
-        bundle = _make_evi_only_bundle()
-
-        self.assertEqual(_seasonal_adjusted_ei_method_rows(bundle), [])
-
     def test_application_case_audit_table_tracks_curated_subset(self) -> None:
         base_stream_bundle = _make_standard_bundle()
         stream_bundle = replace(
@@ -282,47 +238,7 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertIn("[", table.iloc[0][metric_columns[0]])
         self.assertIn("[", table.iloc[0][metric_columns[1]])
 
-    def test_application_stationarity_table_reports_both_series_levels(self) -> None:
-        base_bundle = _make_standard_bundle()
-        stream_bundle = replace(
-            base_bundle,
-            spec=replace(
-                base_bundle.spec,
-                key="tx_streamflow",
-                label="Texas streamflow",
-                provider="usgs",
-            ),
-        )
-
-        table = application_stationarity_table([stream_bundle])
-
-        self.assertEqual(table.shape[0], 1)
-        self.assertEqual(table.iloc[0]["Application"], "Texas streamflow")
-        self.assertIn("Severity MK", table.columns[2])
-        self.assertIn("Annual-max Pettitt", table.columns[-1])
-        self.assertIn("p=", table.iloc[0]["Severity Pettitt"])
-
-    def test_application_scaling_gof_table_reports_plateau_and_ranges(self) -> None:
-        base_bundle = _make_standard_bundle()
-        stream_bundle = replace(
-            base_bundle,
-            spec=replace(
-                base_bundle.spec,
-                key="tx_streamflow",
-                label="Texas streamflow",
-                provider="usgs",
-            ),
-        )
-
-        table = application_scaling_gof_table([stream_bundle])
-
-        self.assertEqual(table.shape[0], 1)
-        self.assertEqual(table.iloc[0]["Application"], "Texas streamflow")
-        self.assertIn("[", table.iloc[0]["Selected plateau"])
-        self.assertIn("[", table.iloc[0]["Top-3 xi range"])
-        self.assertIn("[", table.iloc[0]["50y median DLL range"])
-
-    def test_application_design_life_interval_table_formats_headline_intervals(self) -> None:
+    def test_application_design_life_interval_table_formats_interval_columns(self) -> None:
         base_bundle = _make_nfip_bundle()
         nfip_bundle = replace(
             base_bundle,
@@ -337,40 +253,22 @@ class ApplicationOutputTests(unittest.TestCase):
         table = application_design_life_interval_table([nfip_bundle])
 
         self.assertEqual(table.shape[0], 1)
-        self.assertIn("10y headline DLL", table.columns)
-        self.assertIn("10y conditional 95% CI", table.columns)
-        self.assertIn("10y plateau envelope", table.columns)
-        self.assertIn("[", table.iloc[0]["10y conditional 95% CI"])
-        self.assertIn("[", table.iloc[0]["50y plateau envelope"])
-
-    def test_application_ei_seasonal_sensitivity_table_reports_headline_and_adjusted_theta(
-        self,
-    ) -> None:
-        base_stream_bundle = _make_standard_bundle()
-        stream_bundle = replace(
-            base_stream_bundle,
-            spec=replace(base_stream_bundle.spec, key="tx_streamflow", label="Texas streamflow"),
-        )
-        base_nfip_bundle = _make_nfip_bundle()
-        nfip_bundle = replace(
-            base_nfip_bundle,
-            spec=replace(base_nfip_bundle.spec, key="tx_nfip_claims", label="Texas NFIP claims"),
-        )
-
-        table = application_ei_seasonal_sensitivity_table([nfip_bundle, stream_bundle])
-
-        self.assertEqual(table["Application"].tolist(), ["Texas streamflow", "Texas NFIP claims"])
-        headline_column = next(
+        ten_year_value_column = next(
             column
             for column in table.columns
-            if column.startswith("Headline") and "BB-FGLS" in column
+            if column.startswith("10y ") and column.endswith("DLL")
         )
-        seasonal_column = next(
-            column for column in table.columns if column.startswith("Seasonal-adjusted")
+        fifty_year_value_column = next(
+            column
+            for column in table.columns
+            if column.startswith("50y ") and column.endswith("DLL")
         )
-        self.assertIn("Interpretive note", table.columns)
-        self.assertTrue(all("[" in value for value in table[headline_column]))
-        self.assertTrue(all("[" in value for value in table[seasonal_column]))
+        self.assertIn("10y conditional 95% CI", table.columns)
+        self.assertIn("10y plateau envelope", table.columns)
+        self.assertNotEqual(table.iloc[0][ten_year_value_column], "NA")
+        self.assertNotEqual(table.iloc[0][fifty_year_value_column], "NA")
+        self.assertIn("[", table.iloc[0]["10y conditional 95% CI"])
+        self.assertIn("[", table.iloc[0]["50y plateau envelope"])
 
     def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

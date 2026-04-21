@@ -17,8 +17,6 @@ from data_prep.ghcn import PreparedSeries
 from application.build import ApplicationPreparedInputs, ApplicationSpec, build_application_bundle
 from application.diagnostics import (
     application_design_life_interval_record,
-    application_stationarity_records,
-    scaling_residual_record,
 )
 
 
@@ -56,30 +54,6 @@ def _make_stream_bundle() -> object:
 
 
 class ApplicationDiagnosticsTests(unittest.TestCase):
-    def test_stationarity_records_are_deterministic(self) -> None:
-        bundle = _make_stream_bundle()
-
-        record_a = application_stationarity_records(bundle)
-        record_b = application_stationarity_records(bundle)
-
-        self.assertEqual(record_a["application"], "tx_streamflow")
-        self.assertEqual(record_a["severity_clock"], "calendar-day discharge")
-        self.assertEqual(record_a["severity_pettitt_break"], record_b["severity_pettitt_break"])
-        self.assertTrue(np.isfinite(float(record_a["severity_mk_p"])))
-        self.assertTrue(np.isfinite(float(record_a["annual_maxima_mk_p"])))
-
-    def test_scaling_residual_record_reports_finite_ranges(self) -> None:
-        bundle = _make_stream_bundle()
-
-        record = scaling_residual_record(bundle)
-
-        self.assertGreater(int(record["plateau_points"]), 0)
-        self.assertTrue(np.isfinite(float(record["residual_sd"])))
-        self.assertTrue(np.isfinite(float(record["xi_range_lo"])))
-        self.assertLessEqual(float(record["xi_range_lo"]), float(record["xi_range_hi"]))
-        self.assertLessEqual(float(record["dll10_range_lo"]), float(record["dll10_range_hi"]))
-        self.assertLessEqual(float(record["dll50_range_lo"]), float(record["dll50_range_hi"]))
-
     def test_design_life_interval_record_contains_point_estimate(self) -> None:
         bundle = _make_stream_bundle()
 

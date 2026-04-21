@@ -205,31 +205,10 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-stationarity-main",
-            placement="appendix",
-            generated_by="scripts/application/build.py",
-            path=table_dir / "application_stationarity_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
-            label="tab:application-scaling-gof-main",
-            placement="appendix",
-            generated_by="scripts/application/build.py",
-            path=table_dir / "application_scaling_gof_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
             label="tab:application-design-life-intervals-main",
             placement="appendix",
             generated_by="scripts/application/build.py",
             path=table_dir / "application_design_life_intervals_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
-            label="tab:application-ei-seasonal-main",
-            placement="appendix",
-            generated_by="scripts/application/build.py",
-            path=table_dir / "application_ei_seasonal_sensitivity_main.tex",
             root=workspace_root,
         ),
         _table_entry(

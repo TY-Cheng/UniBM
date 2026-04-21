@@ -25,7 +25,6 @@ class ApplicationFacadeTests(unittest.TestCase):
             "build_application_outputs",
             "load_usgs_frozen_sites",
             "plot_application_composite",
-            "seasonal_monthly_pit_unit_frechet",
         }
         self.assertTrue(expected.issubset(set(application.__all__)))
         for name in expected:
