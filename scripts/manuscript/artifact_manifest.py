@@ -156,10 +156,10 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:benchmark-targets-main",
+            label="tab:benchmark-evi-summary-main",
             placement="appendix",
             generated_by="scripts/benchmark/evi_report.py",
-            path=table_dir / "benchmark_targets_main.tex",
+            path=table_dir / "benchmark_evi_summary_main.tex",
             root=workspace_root,
         ),
         _table_entry(
@@ -184,10 +184,10 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:benchmark-ei-targets-main",
+            label="tab:benchmark-ei-summary-main",
             placement="appendix",
             generated_by="scripts/benchmark/ei_report.py",
-            path=table_dir / "benchmark_ei_targets_main.tex",
+            path=table_dir / "benchmark_ei_summary_main.tex",
             root=workspace_root,
         ),
         _table_entry(

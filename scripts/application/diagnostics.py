@@ -415,7 +415,7 @@ def application_design_life_interval_table(bundles: list[ApplicationBundle]) -> 
             {
                 "Application": record["label"],
                 "Basis": basis,
-                "10y headline DLL": _format_compact_number(float(record["dll10"])),
+                "10y median DLL": _format_compact_number(float(record["dll10"])),
                 "10y conditional 95% CI": _format_range(
                     float(record["dll10_lo"]),
                     float(record["dll10_hi"]),
@@ -424,7 +424,7 @@ def application_design_life_interval_table(bundles: list[ApplicationBundle]) -> 
                     float(record["dll10_env_lo"]),
                     float(record["dll10_env_hi"]),
                 ),
-                "50y headline DLL": _format_compact_number(float(record["dll50"])),
+                "50y median DLL": _format_compact_number(float(record["dll50"])),
                 "50y conditional 95% CI": _format_range(
                     float(record["dll50_lo"]),
                     float(record["dll50_hi"]),

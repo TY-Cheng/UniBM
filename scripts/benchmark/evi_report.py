@@ -52,6 +52,7 @@ from benchmark.common import (
     interval_contains,
     panel_metric_ylim,
     quantile_agg,
+    render_grouped_latex_table,
     render_latex_table,
 )
 from benchmark.design import (
@@ -245,8 +246,8 @@ def benchmark_story_table(
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])} / "
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])}"
+            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
     )
@@ -272,10 +273,18 @@ def benchmark_story_latex(
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     caption: str,
     label: str,
+    environment: str = "table",
+    position: str = "htbp",
 ) -> str:
     """Render the compact benchmark story table without depending on notebook tooling."""
     table = benchmark_story_table(summary, methods=methods, benchmark_set=benchmark_set)
-    return render_latex_table(table, caption=caption, label=label)
+    return render_latex_table(
+        table,
+        caption=caption,
+        label=label,
+        environment=environment,
+        position=position,
+    )
 
 
 def _shrinkage_sensitivity_output_path(out_dir: Path) -> Path:
@@ -329,7 +338,7 @@ def build_evi_shrinkage_sensitivity_summary(
 
     The sensitivity run reuses the existing benchmark scenario cache and the
     original sample's bootstrap backbone. Only the covariance-shrinkage value is
-    varied, and only for the headline sliding-median-FGLS severity workflow.
+    varied, and only for the retained sliding-median-FGLS severity workflow.
     """
     from benchmark.design import (
         default_evi_simulation_configs,
@@ -677,8 +686,8 @@ def evi_record_length_sensitivity_table(summary: pd.DataFrame) -> pd.DataFrame:
     subset["Family"] = subset["family"].map(family_label)
     subset["Summary"] = subset.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])} / "
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])}"
+            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
     )
@@ -1081,6 +1090,55 @@ def _main_evi_benchmark_n_obs(summary: pd.DataFrame) -> int:
     return int(round(float(rows.median())))
 
 
+def _format_evi_theta(value: object) -> str:
+    theta = float(value)
+    if theta < 1.0:
+        return f"{theta:.2f}"
+    return f"{theta:.1f}"
+
+
+def _transpose_evi_summary_table(
+    table: pd.DataFrame,
+    *,
+    method_order: list[str] | None = None,
+) -> tuple[pd.DataFrame, list[tuple[str, list[tuple[str, str]]]]]:
+    """Rotate the merged EVI story table to methods-as-rows, scenarios-as-columns."""
+    method_columns = [column for column in table.columns if column not in {"family", "theta_true"}]
+    if method_order is not None:
+        method_columns = [method for method in method_order if method in method_columns]
+    groups: list[tuple[str, list[tuple[str, str]]]] = []
+    scenario_keys: list[tuple[str, str, str]] = []
+    for family in ordered_families(table["family"].tolist()):
+        family_rows = table.loc[table["family"] == family].sort_values("theta_true")
+        group_label = family_label(family)
+        subheaders: list[tuple[str, str]] = []
+        for _, row in family_rows.iterrows():
+            subheader = _format_evi_theta(row["theta_true"])
+            key = f"{family}__{subheader}"
+            scenario_keys.append((key, family, subheader))
+            subheaders.append((key, subheader))
+        groups.append((group_label, subheaders))
+
+    rows: list[dict[str, object]] = []
+    for method in method_columns:
+        record: dict[str, object] = {"method": method}
+        for key, family, subheader in scenario_keys:
+            value = table.loc[
+                (table["family"] == family)
+                & (table["theta_true"].map(_format_evi_theta) == subheader),
+                method,
+            ]
+            record[key] = value.iloc[0] if not value.empty else "NA"
+        rows.append(record)
+
+    transposed = pd.DataFrame(rows)
+    ordered_columns = ["method"] + [key for key, _, _ in scenario_keys]
+    grouped_headers = []
+    for group_label, subheaders in groups:
+        grouped_headers.append((group_label, subheaders))
+    return transposed.loc[:, ordered_columns], grouped_headers
+
+
 def write_evi_benchmark_manuscript_artifacts(
     benchmark_summary_df: pd.DataFrame,
     external_benchmark_summary: pd.DataFrame,
@@ -1094,46 +1152,65 @@ def write_evi_benchmark_manuscript_artifacts(
     """Write EVI benchmark manuscript tables and figures from cached CSV summaries."""
     # Deferred import avoids a circular dependency between report and mixed-baseline helpers.
     from benchmark.evi_external import (
+        EXTERNAL_METHOD_LABELS,
+        MERGED_SUMMARY_METHODS,
         interval_sharpness_story_latex,
         plot_interval_sharpness_scatter,
         plot_target_plus_external_panels,
-        target_plus_external_story_latex,
+        target_plus_external_story_table,
     )
 
     n_obs = _main_evi_benchmark_n_obs(benchmark_summary_df)
-    (table_dir / "benchmark_core_main.tex").write_text(
-        benchmark_story_latex(
-            benchmark_summary_df,
-            methods=CORE_METHODS,
-            benchmark_set=UNIVERSAL_BENCHMARK_SET,
-            caption=(
-                f"Necessary-components EVI benchmark on the projected short-record severity suite "
-                f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
-                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median Winkler interval score (IQR) / median APE (IQR) "
-                "summarized over the xi grid. All interval metrics use 95\\% CI "
-                "(alpha = 0.05)."
-            ),
-            label="tab:benchmark-core-main",
-        )
+    evi_story_table = target_plus_external_story_table(
+        benchmark_summary_df,
+        external_benchmark_summary,
+        methods=MERGED_SUMMARY_METHODS,
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
     )
-    (table_dir / "benchmark_targets_main.tex").write_text(
-        target_plus_external_story_latex(
-            benchmark_summary_df,
-            external_benchmark_summary,
-            benchmark_set=UNIVERSAL_BENCHMARK_SET,
+    evi_method_order = [
+        METHOD_LABELS[method] if method in METHOD_LABELS else EXTERNAL_METHOD_LABELS[method]
+        for method in MERGED_SUMMARY_METHODS
+    ]
+    evi_summary_table, evi_groups = _transpose_evi_summary_table(
+        evi_story_table,
+        method_order=evi_method_order,
+    )
+    (table_dir / "benchmark_evi_summary_main.tex").write_text(
+        render_grouped_latex_table(
+            evi_summary_table,
+            row_label="method",
+            groups=evi_groups,
+            second_header_row_label=r"true $\theta$",
+            second_header_row_label_raw=True,
             caption=(
-                f"Target-comparison EVI benchmark on the projected short-record severity suite "
-                f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
-                f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
+                f"Merged EVI benchmark summary on the projected short-record severity suite "
+                f"with theta in {{0.01, 0.10, 0.50, 1.0}}, "
+                f"xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median interval score (IQR) / median APE (IQR) "
-                "summarized over the xi grid. All interval metrics use 95\\% CI "
-                "(alpha = 0.05), but native interval constructions differ across methods, "
-                "so the table is descriptive and is not used to rank cross-class interval calibration."
+                "Rows report methods and columns group representative scenarios by family and "
+                "theta. In each cell, the first line reports median Winkler interval score and "
+                "the second line reports median absolute percentage error, both summarized over "
+                "the xi grid. "
+                "All interval metrics use 95% CI (alpha = 0.05). Across the retained comparison "
+                "roster, sliding-median-FGLS is never the worst performer on median Winkler score "
+                "over the 84 benchmark scenarios."
             ),
-            label="tab:benchmark-targets-main",
+            label="tab:benchmark-evi-summary-main",
+            environment="table",
+            position="p",
+            font_size=r"\tiny",
+            fit_to_width=r"\textwidth",
+            row_label_width=r"0.18\textwidth",
+            tabcolsep="1pt",
+            pair_medians_only=True,
+            group_break_after_rows=[4, 6, 8, 9, 10, 11],
+            group_break_commands_by_row={
+                8: r"\midrule",
+                9: r"\addlinespace[1.5pt]",
+                10: r"\addlinespace[1.5pt]",
+                11: r"\addlinespace[1.5pt]",
+            },
+            arraystretch="1.06",
         )
     )
     (table_dir / "benchmark_interval_main.tex").write_text(
@@ -1214,13 +1291,14 @@ def write_evi_benchmark_manuscript_artifacts(
                 methods=CORE_METHODS,
                 benchmark_set=STRESS_BENCHMARK_SET,
                 caption=(
-                    "Appendix slow-convergence stress suite for the headline EVI workflow. "
+                    "Appendix slow-convergence stress suite for the sliding-median-FGLS EVI workflow. "
                     "The design uses absolute-Student-t moving-maxima q=99 series with "
                     "xi in {0.10, 0.30, 1.0}, theta in {0.10, 0.50, 1.0}, and n_obs=365. "
-                    "Cells report median Winkler interval score (IQR) / median APE (IQR) "
+                    "Cells report median Winkler interval score (IQR) / median absolute percentage "
+                    "error (IQR) "
                     "summarized over the xi grid. The purpose is robustness checking under "
-                    "heavy-tailed but slower-converging block-maxima behavior, not a second "
-                    "headline benchmark."
+                    "heavy-tailed but slower-converging block-maxima behavior, not to define "
+                    "a separate benchmark."
                 ),
                 label="tab:benchmark-stress-main",
             )
@@ -1240,14 +1318,15 @@ def write_evi_benchmark_manuscript_artifacts(
             render_latex_table(
                 evi_record_length_sensitivity_table(record_length_summary),
                 caption=(
-                    "Appendix EVI record-length sensitivity for the headline within-BM "
-                    "severity comparison. The table holds theta fixed at 0.10, compares "
+                    "Appendix EVI record-length sensitivity for the within-BM severity "
+                    "comparison used in the main text. The table holds theta fixed at 0.10, compares "
                     "n_obs in {200, 365, 730} for the Fréchet max-AR and Pareto additive AR(1) "
-                    "families, and reports median Winkler interval score (IQR) / median APE "
-                    "(IQR) across the xi grid for disjoint-median-OLS, sliding-median-OLS, "
+                    "families, and reports median Winkler interval score (IQR) / median absolute "
+                    "percentage error (IQR) across the xi grid for disjoint-median-OLS, "
+                    "sliding-median-OLS, "
                     "and sliding-median-FGLS. The purpose is to delimit how the short-record "
-                    "benchmark narrative transports across nearby record lengths, not to create "
-                    "a second headline benchmark."
+                    "benchmark narrative transports across nearby record lengths, not to define "
+                    "a separate benchmark."
                 ),
                 label="tab:benchmark-record-length-main",
             )
@@ -1296,8 +1375,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
         "benchmark_shrinkage_sensitivity_data": shrinkage_sensitivity_path,
         "benchmark_stress_summary_data": stress_summary_path,
         "benchmark_record_length_sensitivity_data": record_length_summary_path,
-        "benchmark_core_main": table_dir / "benchmark_core_main.tex",
-        "benchmark_targets_main": table_dir / "benchmark_targets_main.tex",
+        "benchmark_evi_summary_main": table_dir / "benchmark_evi_summary_main.tex",
         "benchmark_interval_main": table_dir / "benchmark_interval_main.tex",
         "benchmark_overview_main": table_dir / "benchmark_overview_main.tex",
         "benchmark_stress_main": table_dir / "benchmark_stress_main.tex",

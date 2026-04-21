@@ -38,6 +38,7 @@ from unibm.evi.tail import (
 )
 
 from benchmark.design import (
+    CORE_METHODS,
     ordered_families,
     METHOD_LABELS,
     SimulationConfig,
@@ -81,6 +82,17 @@ TARGET_PLUS_EXTERNAL_METHODS = [
     "max_spectrum_raw",
     "pickands_raw",
     "dedh_moment_raw",
+]
+MERGED_SUMMARY_METHODS = [
+    "sliding_median_fgls",
+    "sliding_median_ols",
+    "disjoint_median_fgls",
+    "disjoint_median_ols",
+    "sliding_mean_fgls",
+    "disjoint_mean_ols",
+    "sliding_mode_fgls",
+    "disjoint_mode_ols",
+    *EXTERNAL_BASELINE_METHODS,
 ]
 INTERVAL_DIAGNOSTIC_METHODS = TARGET_PLUS_EXTERNAL_METHODS
 EXTERNAL_METHOD_LABELS = {
@@ -437,8 +449,8 @@ def external_story_table(
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])} / "
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])}"
+            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
     )
@@ -464,9 +476,23 @@ def _render_story_latex(
     *,
     caption: str,
     label: str,
+    environment: str = "table",
+    position: str = "htbp",
+    font_size: str | None = None,
+    resize_to_width: str | None = None,
+    tabcolsep: str | None = None,
 ) -> str:
     """Render one benchmark story table with the shared LaTeX helper."""
-    return render_latex_table(table, caption=caption, label=label)
+    return render_latex_table(
+        table,
+        caption=caption,
+        label=label,
+        environment=environment,
+        position=position,
+        font_size=font_size,
+        resize_to_width=resize_to_width,
+        tabcolsep=tabcolsep,
+    )
 
 
 def external_story_latex(
@@ -494,7 +520,11 @@ def target_plus_external_story_table(
     methods: Iterable[str] = TARGET_PLUS_EXTERNAL_METHODS,
 ) -> pd.DataFrame:
     """Combine the sliding-FGLS target comparison with external xi baselines."""
-    methods = [method for method in methods if method in TARGET_PLUS_EXTERNAL_METHODS]
+    methods = [
+        method
+        for method in methods
+        if method in METHOD_LABELS or method in EXTERNAL_METHOD_LABELS
+    ]
     combined = _stack_benchmark_summaries(
         internal_summary,
         external_summary,
@@ -518,8 +548,8 @@ def target_plus_external_story_table(
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])} / "
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])}"
+            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
     )
@@ -547,16 +577,32 @@ def target_plus_external_story_latex(
     external_summary: pd.DataFrame,
     *,
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+    methods: Iterable[str] = TARGET_PLUS_EXTERNAL_METHODS,
     caption: str,
     label: str,
+    environment: str = "table",
+    position: str = "htbp",
+    font_size: str | None = None,
+    resize_to_width: str | None = None,
+    tabcolsep: str | None = None,
 ) -> str:
     """Render the mixed target-plus-external comparison as standalone LaTeX."""
     table = target_plus_external_story_table(
         internal_summary,
         external_summary,
         benchmark_set=benchmark_set,
+        methods=methods,
     )
-    return _render_story_latex(table, caption=caption, label=label)
+    return _render_story_latex(
+        table,
+        caption=caption,
+        label=label,
+        environment=environment,
+        position=position,
+        font_size=font_size,
+        resize_to_width=resize_to_width,
+        tabcolsep=tabcolsep,
+    )
 
 
 def interval_sharpness_story_table(

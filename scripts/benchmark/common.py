@@ -80,23 +80,149 @@ def latex_escape(text: object) -> str:
     return value.replace(sentinel, r"\textbackslash{}")
 
 
-def render_latex_table(table: pd.DataFrame, *, caption: str, label: str) -> str:
+def render_latex_table(
+    table: pd.DataFrame,
+    *,
+    caption: str,
+    label: str,
+    environment: str = "table",
+    position: str = "htbp",
+    font_size: str | None = None,
+    resize_to_width: str | None = None,
+    tabcolsep: str | None = None,
+) -> str:
     """Render a small flat table without notebook-specific dependencies."""
     columns = [str(col) for col in table.columns]
     alignment = "ll" + "c" * max(len(columns) - 2, 0)
     lines = [
-        r"\begin{table}[htbp]",
+        rf"\begin{{{environment}}}[{position}]",
         r"\centering",
-        rf"\caption{{{latex_escape(caption)}}}",
-        rf"\label{{{label}}}",
-        rf"\begin{{tabular}}{{{alignment}}}",
-        r"\hline",
-        " & ".join(latex_escape(col) for col in columns) + r" \\",
-        r"\hline",
     ]
+    if font_size is not None:
+        lines.append(font_size)
+    if tabcolsep is not None:
+        lines.append(rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}")
+    lines.extend([rf"\caption{{{latex_escape(caption)}}}", rf"\label{{{label}}}"])
+    if resize_to_width is not None:
+        lines.append(rf"\resizebox{{{resize_to_width}}}{{!}}{{%")
+    lines.extend(
+        [
+            rf"\begin{{tabular}}{{{alignment}}}",
+            r"\hline",
+            " & ".join(latex_escape(col) for col in columns) + r" \\",
+            r"\hline",
+        ]
+    )
     for row in table.itertuples(index=False, name=None):
         lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
-    lines.extend([r"\hline", r"\end{tabular}", r"\end{table}"])
+    lines.extend([r"\hline", r"\end{tabular}"])
+    if resize_to_width is not None:
+        lines.append(r"}")
+    lines.append(rf"\end{{{environment}}}")
+    return "\n".join(lines)
+
+
+def render_grouped_latex_table(
+    table: pd.DataFrame,
+    *,
+    row_label: str,
+    groups: list[tuple[str, list[tuple[str, str]]]],
+    second_header_row_label: str | None = None,
+    second_header_row_label_raw: bool = False,
+    caption: str,
+    label: str,
+    environment: str = "table",
+    position: str = "htbp",
+    font_size: str | None = None,
+    resize_to_width: str | None = None,
+    fit_to_width: str | None = None,
+    row_label_width: str = r"0.18\textwidth",
+    tabcolsep: str | None = None,
+    pair_medians_only: bool = False,
+    group_break_after_rows: list[int] | None = None,
+    group_break_command: str = r"\addlinespace[2pt]",
+    group_break_commands_by_row: Mapping[int, str] | None = None,
+    arraystretch: str | None = None,
+) -> str:
+    """Render a table with one row label column and a two-level grouped header."""
+    flat_columns = [column_key for _, columns in groups for column_key, _ in columns]
+    alignment = "l" + "c" * len(flat_columns)
+    group_breaks = set(group_break_after_rows or [])
+    break_command_map = dict(group_break_commands_by_row or {})
+
+    def _render_row_label(value: object) -> str:
+        text = str(value)
+        if "-" not in text:
+            return r"\shortstack[l]{" + latex_escape(text) + "}"
+        if text.count("-") >= 2:
+            head, tail = text.split("-", maxsplit=1)
+            parts = [f"{head}-", tail]
+            return r"\shortstack[l]{" + r" \\ ".join(latex_escape(part) for part in parts) + "}"
+        if len(text) >= 10:
+            head, tail = text.split("-", maxsplit=1)
+            parts = [f"{head}-", tail]
+            return r"\shortstack[l]{" + r" \\ ".join(latex_escape(part) for part in parts) + "}"
+        return r"\shortstack[l]{" + latex_escape(text) + "}"
+
+    def _render_body_cell(value: object, *, compact_pair: bool = False) -> str:
+        if compact_pair and isinstance(value, str) and " / " in value:
+            parts = [part.strip() for part in value.split(" / ", maxsplit=1)]
+            if pair_medians_only:
+                parts = [part.split(" (", maxsplit=1)[0].strip() for part in parts]
+            return r"\shortstack[c]{" + r" \\ ".join(latex_escape(part) for part in parts) + "}"
+        return latex_escape(value)
+
+    lines = [
+        rf"\begin{{{environment}}}[{position}]",
+        r"\centering",
+    ]
+    if font_size is not None:
+        lines.append(font_size)
+    if tabcolsep is not None:
+        lines.append(rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}")
+    if arraystretch is not None:
+        lines.append(rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}")
+    lines.extend([rf"\caption{{{latex_escape(caption)}}}", rf"\label{{{label}}}"])
+    if resize_to_width is not None:
+        lines.append(rf"\resizebox{{{resize_to_width}}}{{!}}{{%")
+    if fit_to_width is None:
+        tabular_begin = rf"\begin{{tabular}}{{{alignment}}}"
+        tabular_end = r"\end{tabular}"
+    else:
+        x_columns = "".join([r">{\centering\arraybackslash}X" for _ in flat_columns])
+        tabular_begin = (
+            rf"\begin{{tabularx}}{{{fit_to_width}}}"
+            rf"{{>{{\raggedright\arraybackslash}}m{{{row_label_width}}}{x_columns}}}"
+        )
+        tabular_end = r"\end{tabularx}"
+    lines.extend([tabular_begin, r"\hline"])
+    top_header = [latex_escape(row_label)]
+    top_header.extend(
+        rf"\multicolumn{{{len(columns)}}}{{c}}{{{latex_escape(group)}}}"
+        for group, columns in groups
+    )
+    lines.append(" & ".join(top_header) + r" \\")
+    if second_header_row_label is None:
+        rendered_second_header_row_label = ""
+    elif second_header_row_label_raw:
+        rendered_second_header_row_label = second_header_row_label
+    else:
+        rendered_second_header_row_label = latex_escape(second_header_row_label)
+    second_header = [rendered_second_header_row_label] + [
+        latex_escape(column_label) for _, columns in groups for _, column_label in columns
+    ]
+    lines.append(" & ".join(second_header) + r" \\")
+    lines.append(r"\hline")
+    for row_idx, row in enumerate(table.itertuples(index=False, name=None), start=1):
+        rendered_row = [_render_row_label(row[0])]
+        rendered_row.extend(_render_body_cell(value, compact_pair=True) for value in row[1:])
+        lines.append(" & ".join(rendered_row) + r" \\")
+        if row_idx in group_breaks:
+            lines.append(break_command_map.get(row_idx, group_break_command))
+    lines.extend([r"\hline", tabular_end])
+    if resize_to_width is not None:
+        lines.append(r"}")
+    lines.append(rf"\end{{{environment}}}")
     return "\n".join(lines)
 
 
