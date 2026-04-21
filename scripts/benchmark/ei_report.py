@@ -81,6 +81,7 @@ from benchmark.common import (
     interval_contains,
     panel_metric_ylim,
     quantile_agg,
+    render_grouped_latex_table,
     render_latex_table,
 )
 from shared.runtime import status
@@ -138,8 +139,8 @@ def _story_table(
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])} / "
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])}"
+            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
     )
@@ -174,6 +175,18 @@ def ei_targets_story_table(
     """Return the mixed pooled-vs-native EI comparison table."""
     combined = pd.concat([internal_summary, external_summary], ignore_index=True)
     methods = [*EI_TARGET_INTERNAL_METHODS, *EI_EXTERNAL_METHODS]
+    return _story_table(combined, methods=methods, benchmark_set=benchmark_set)
+
+
+def ei_merged_story_table(
+    internal_summary: pd.DataFrame,
+    external_summary: pd.DataFrame,
+    *,
+    benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+) -> pd.DataFrame:
+    """Return the merged EI benchmark table spanning within-BM and external methods."""
+    combined = pd.concat([internal_summary, external_summary], ignore_index=True)
+    methods = [*EI_INTERNAL_METHODS, *EI_EXTERNAL_METHODS]
     return _story_table(combined, methods=methods, benchmark_set=benchmark_set)
 
 
@@ -220,9 +233,23 @@ def ei_story_latex(
     *,
     caption: str,
     label: str,
+    environment: str = "table",
+    position: str = "htbp",
+    font_size: str | None = None,
+    resize_to_width: str | None = None,
+    tabcolsep: str | None = None,
 ) -> str:
     """Render one EI story table as standalone LaTeX."""
-    return render_latex_table(table, caption=caption, label=label)
+    return render_latex_table(
+        table,
+        caption=caption,
+        label=label,
+        environment=environment,
+        position=position,
+        font_size=font_size,
+        resize_to_width=resize_to_width,
+        tabcolsep=tabcolsep,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +312,7 @@ def build_ei_shrinkage_sensitivity_summary(
 
     The sensitivity run reuses the cached synthetic series and pooled-BM EI
     bootstrap bundles. Only the covariance-shrinkage value is varied, and only
-    for the headline sliding-window pooled-FGLS EI workflows.
+    for the retained sliding-window pooled-FGLS EI workflows.
     """
     from benchmark.design import default_ei_simulation_configs
     from benchmark.ei_benchmark import EI_BENCHMARK_RANDOM_STATE
@@ -816,6 +843,55 @@ def _main_ei_benchmark_n_obs(summary: pd.DataFrame) -> int:
     return int(round(float(rows.median())))
 
 
+def _format_ei_xi(value: object) -> str:
+    xi = float(value)
+    if xi < 1.0:
+        return f"{xi:.2f}"
+    return f"{xi:.1f}"
+
+
+def _transpose_ei_summary_table(
+    table: pd.DataFrame,
+    *,
+    method_order: list[str] | None = None,
+) -> tuple[pd.DataFrame, list[tuple[str, list[tuple[str, str]]]]]:
+    """Rotate the merged EI story table to methods-as-rows, scenarios-as-columns."""
+    method_columns = [column for column in table.columns if column not in {"family", "xi_true"}]
+    if method_order is not None:
+        method_columns = [method for method in method_order if method in method_columns]
+    groups: list[tuple[str, list[tuple[str, str]]]] = []
+    scenario_keys: list[tuple[str, str, str]] = []
+    for family in ordered_families(table["family"].tolist()):
+        family_rows = table.loc[table["family"] == family].sort_values("xi_true")
+        group_label = family_label(family)
+        subheaders: list[tuple[str, str]] = []
+        for _, row in family_rows.iterrows():
+            subheader = _format_ei_xi(row["xi_true"])
+            key = f"{family}__{subheader}"
+            scenario_keys.append((key, family, subheader))
+            subheaders.append((key, subheader))
+        groups.append((group_label, subheaders))
+
+    rows: list[dict[str, object]] = []
+    for method in method_columns:
+        record: dict[str, object] = {"method": method}
+        for key, family, subheader in scenario_keys:
+            value = table.loc[
+                (table["family"] == family)
+                & (table["xi_true"].map(_format_ei_xi) == subheader),
+                method,
+            ]
+            record[key] = value.iloc[0] if not value.empty else "NA"
+        rows.append(record)
+
+    transposed = pd.DataFrame(rows)
+    ordered_columns = ["method"] + [key for key, _, _ in scenario_keys]
+    grouped_headers = []
+    for group_label, subheaders in groups:
+        grouped_headers.append((group_label, subheaders))
+    return transposed.loc[:, ordered_columns], grouped_headers
+
+
 def write_ei_benchmark_manuscript_artifacts(
     benchmark_summary: pd.DataFrame,
     external_benchmark_summary: pd.DataFrame,
@@ -826,38 +902,68 @@ def write_ei_benchmark_manuscript_artifacts(
 ) -> None:
     """Write EI benchmark manuscript tables and figures from cached CSV summaries."""
     n_obs = _main_ei_benchmark_n_obs(benchmark_summary)
-    (table_dir / "benchmark_ei_core_main.tex").write_text(
-        ei_story_latex(
-            ei_core_story_table(benchmark_summary, benchmark_set=UNIVERSAL_BENCHMARK_SET),
-            caption=(
-                f"EI core benchmark on the projected short-record persistence suite with "
-                f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median Winkler interval score (IQR) / median APE (IQR) over "
-                "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05)."
-            ),
-            label="tab:benchmark-ei-core-main",
-        )
+    ei_story_table = ei_merged_story_table(
+        benchmark_summary,
+        external_benchmark_summary,
+        benchmark_set=UNIVERSAL_BENCHMARK_SET,
     )
-    (table_dir / "benchmark_ei_targets_main.tex").write_text(
-        ei_story_latex(
-            ei_targets_story_table(
-                benchmark_summary,
-                external_benchmark_summary,
-                benchmark_set=UNIVERSAL_BENCHMARK_SET,
-            ),
+    ei_method_order = [
+        EI_METHOD_LABELS[method]
+        for method in [
+            "northrop_sliding_fgls",
+            "northrop_sliding_ols",
+            "northrop_disjoint_fgls",
+            "northrop_disjoint_ols",
+            "bb_sliding_fgls",
+            "bb_sliding_ols",
+            "bb_disjoint_fgls",
+            "bb_disjoint_ols",
+            "ferro_segers",
+            "k_gaps",
+            "northrop_sliding_native",
+            "bb_sliding_native",
+        ]
+    ]
+    ei_summary_table, ei_groups = _transpose_ei_summary_table(
+        ei_story_table,
+        method_order=ei_method_order,
+    )
+    (table_dir / "benchmark_ei_summary_main.tex").write_text(
+        render_grouped_latex_table(
+            ei_summary_table,
+            row_label="method",
+            groups=ei_groups,
+            second_header_row_label=r"true $\xi$",
+            second_header_row_label_raw=True,
             caption=(
-                f"EI target benchmark on the projected short-record persistence suite with "
-                f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
+                f"Merged EI benchmark summary on the projected short-record persistence suite with "
+                f"xi in {{0.01, 0.50, 1.0, 5.0}}, "
+                f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Cells report median Winkler interval score (IQR) / median APE (IQR) over "
-                "the theta grid. All interval metrics use 95\\% CI (alpha = 0.05), but native "
-                "interval constructions differ across methods, so the table is descriptive and "
-                "is not used to rank cross-class interval calibration."
+                "Rows report methods and columns group representative scenarios by family and xi. "
+                "In each cell, the first line reports median Winkler interval score and the "
+                "second line reports median absolute percentage error, both summarized over "
+                "the theta grid. "
+                "All interval metrics use 95% CI (alpha = 0.05). Across the retained comparison "
+                "roster, Northrop-sliding-FGLS and BB-sliding-FGLS are never the worst performers "
+                "on median Winkler score over the 84 benchmark scenarios."
             ),
-            label="tab:benchmark-ei-targets-main",
+            label="tab:benchmark-ei-summary-main",
+            environment="table",
+            position="p",
+            font_size=r"\tiny",
+            fit_to_width=r"\textwidth",
+            row_label_width=r"0.18\textwidth",
+            tabcolsep="1pt",
+            pair_medians_only=True,
+            group_break_after_rows=[4, 8, 9, 10, 11],
+            group_break_commands_by_row={
+                8: r"\midrule",
+                9: r"\addlinespace[1.5pt]",
+                10: r"\addlinespace[1.5pt]",
+                11: r"\addlinespace[1.5pt]",
+            },
+            arraystretch="1.06",
         )
     )
     interval_table = ei_interval_story_table(
@@ -967,8 +1073,7 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
         "benchmark_ei_summary": benchmark_outputs.summary_path,
         "benchmark_ei_external_summary": benchmark_outputs.external_summary_path,
         "benchmark_ei_shrinkage_sensitivity_data": shrinkage_sensitivity_path,
-        "benchmark_ei_core_main": table_dir / "benchmark_ei_core_main.tex",
-        "benchmark_ei_targets_main": table_dir / "benchmark_ei_targets_main.tex",
+        "benchmark_ei_summary_main": table_dir / "benchmark_ei_summary_main.tex",
         "benchmark_ei_interval_main": table_dir / "benchmark_ei_interval_main.tex",
         "benchmark_ei_overview_main": table_dir / "benchmark_ei_overview_main.tex",
         "benchmark_ei_summary_figure": fig_dir / "benchmark_ei_summary.pdf",

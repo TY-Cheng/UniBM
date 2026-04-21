@@ -1040,12 +1040,12 @@ def application_ei_seasonal_sensitivity_table(bundles: list[ApplicationBundle]) 
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "Headline theta (BB-FGLS)": _format_interval(
+                "$\\theta$ (BB-FGLS)": _format_interval(
                     headline_theta,
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "Seasonal-adjusted theta": _format_interval(
+                "Seasonal-adjusted $\\theta$": _format_interval(
                     seasonal_theta,
                     float(seasonal_bb["theta_lo"]),
                     float(seasonal_bb["theta_hi"]),
@@ -2121,11 +2121,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_summary_table(manuscript_bundles),
             caption=(
-                "Application-side UniBM summary across the curated four-case manuscript subset. "
-                "Cells report the headline sliding-median-FGLS estimate of $\\xi$. Formal EI "
-                "summaries are reported for the streamflow and NFIP claim-wave applications, where "
-                "the headline BB-sliding-FGLS estimate of $\\theta$, the Northrop-sliding-FGLS "
-                "pooled-BM comparator, and the implied mean cluster size $1/\\theta$ are "
+                "Application-side UniBM summary for the four focal case studies. Cells report "
+                "the sliding-median-FGLS estimate of $\\xi$. Formal EI summaries are reported "
+                "for the streamflow and NFIP claim-wave applications, where the BB-sliding-FGLS "
+                "estimate of $\\theta$, the Northrop-sliding-FGLS pooled-BM comparator, and the "
+                "implied mean cluster size $1/\\theta$ are "
                 "substantively interpreted."
             ),
             label="tab:application-summary-main",
@@ -2136,11 +2136,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_design_life_level_table(manuscript_bundles),
             caption=(
-                "Application-side UniBM design-life-level summary across the curated four-case "
-                "manuscript subset. Rows show the shared-$\\xi$ application tau grid "
+                "Application-side UniBM design-life-level summary for the four focal case "
+                "studies. Rows show the shared-$\\xi$ application tau grid "
                 "(`tau = 0.50, 0.90, 0.95, 0.99`) obtained by evaluating the fitted block-maximum "
                 "quantile scaling law at 1-, 10-, and 50-year design-life spans. The `tau = 0.50` "
-                "row is the headline median design-life level, while higher-tau rows are "
+                "row gives the median design-life level, while higher-tau rows are "
                 "increasingly conservative upper design-life levels derived by reusing the same "
                 "plateau and slope with tau-specific intercept shifts. Streamflow rows are on the "
                 "calendar-day basis, while NFIP rows are on the claim-active-day basis."
@@ -2167,7 +2167,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             application_case_audit_table(bundles),
             caption=(
-                "Appendix audit table for the curated four-case manuscript subset. Columns record "
+                "Appendix audit table for the four focal case studies. Columns record "
                 "the observation clock, approximate record span, preprocessing summary, what is "
                 "and is not normalized, and the main stationarity caveat carried into the "
                 "applications discussion."
@@ -2184,8 +2184,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_selection_sensitivity_table(bundles),
             caption=(
-                "Appendix parameter-side local selection-sensitivity summary for the curated "
-                "four-case manuscript subset. Each cell reports the headline xi or theta estimate "
+                "Appendix parameter-side local selection-sensitivity summary for the four focal "
+                "case studies. Each cell reports the reported $\\xi$ or $\\theta$ estimate "
                 "together with the min--max range over the top three scoring EVI plateau windows "
                 "or EI stable windows for the same application. The layered design-life "
                 "uncertainty summary is reported separately in the companion design-life-interval "
@@ -2199,7 +2199,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             application_stationarity_table(bundles),
             caption=(
-                "Appendix stationarity diagnostics for the curated four-case manuscript subset. "
+                "Appendix stationarity diagnostics for the four focal case studies. "
                 "Each row reports Mann--Kendall trend and Pettitt break diagnostics for the "
                 "severity series used in the EVI branch and for its annual maxima. These are "
                 "diagnostics, not a guarantee of stationarity, so all 50-year design-life levels "
@@ -2217,9 +2217,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_scaling_gof_table(bundles),
             caption=(
-                "Appendix scaling-law diagnostics for the curated four-case manuscript subset. "
+                "Appendix scaling-law diagnostics for the four focal case studies. "
                 "Rows report the selected plateau, residual spread, a Shapiro--Wilk residual "
-                "diagnostic, and the top-three-window ranges for xi and the headline median "
+                "diagnostic, and the top-three-window ranges for $\\xi$ and the median "
                 "design-life levels. These ranges summarize local plateau sensitivity rather than "
                 "full post-selection uncertainty. For Florida NFIP, the selected plateau contains "
                 "only five retained points, so the Shapiro--Wilk line should be read as weakly "
@@ -2233,8 +2233,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             application_design_life_interval_table(bundles),
             caption=(
-                "Appendix layered uncertainty summary for the headline median design-life levels "
-                "across the curated four-case manuscript subset. Conditional 95 percent intervals "
+                "Appendix layered uncertainty summary for the median design-life levels across the "
+                "four focal case studies. Conditional 95 percent intervals "
                 "quantify uncertainty within the selected log-log scaling fit, while the plateau "
                 "envelope reports the min--max range across the top three scoring plateau windows. "
                 "Neither component is full post-selection inference. Florida NFIP is retained here "
@@ -2253,11 +2253,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             application_ei_seasonal_sensitivity_table(bundles),
             caption=(
-                "Appendix seasonal EI sensitivity for the curated four-case manuscript subset. "
-                "Rows compare the headline BB-sliding-FGLS persistence estimate with a monthly "
+                "Appendix seasonal EI sensitivity for the four focal case studies. "
+                "Rows compare the BB-sliding-FGLS persistence estimate with a monthly "
                 "empirical-PIT unit-Fréchet seasonal adjustment applied before the EI fit. This "
                 "table is a robustness check on whether seasonal marginal structure changes the "
-                "qualitative clustering interpretation; it is not a replacement for the headline "
+                "qualitative clustering interpretation; it is not a replacement for the main "
                 "calendar-time EI analysis."
             ),
             label="tab:application-ei-seasonal-main",
