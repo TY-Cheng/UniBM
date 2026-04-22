@@ -904,6 +904,10 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
 
 def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     """Build a compact manuscript-facing design-life-level comparison table."""
+    basis_labels = {
+        "calendar_year": "calendar-day",
+        "claim_active_day": "claim-active-day",
+    }
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         table_rows = pd.DataFrame(_application_design_life_level_rows(bundle))
@@ -922,11 +926,14 @@ def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.
             rows.append(
                 {
                     "Application": bundle.spec.label,
-                    "Basis": bundle.spec.design_life_level_basis,
+                    "Basis": basis_labels.get(
+                        bundle.spec.design_life_level_basis,
+                        bundle.spec.design_life_level_basis.replace("_", "-"),
+                    ),
                     "$\\tau$": f"{float(tau):.2f}",
-                    "1y level": _fmt(tau_rows, 1.0),
-                    "10y level": _fmt(tau_rows, 10.0),
-                    "50y level": _fmt(tau_rows, 50.0),
+                    "1-year level": _fmt(tau_rows, 1.0),
+                    "10-year level": _fmt(tau_rows, 10.0),
+                    "50-year level": _fmt(tau_rows, 50.0),
                 }
             )
     return pd.DataFrame(rows)
@@ -2038,16 +2045,19 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_design_life_level_table(manuscript_bundles),
             caption=(
-                "Application-side UniBM design-life-level summary for the four focal case "
-                "studies. Rows show the shared-$\\xi$ application tau grid "
-                "(`tau = 0.50, 0.90, 0.95, 0.99`) obtained by evaluating the fitted block-maximum "
-                "quantile scaling law at 1-, 10-, and 50-year design-life spans. The `tau = 0.50` "
-                "row gives the median design-life level, while higher-tau rows are "
-                "increasingly conservative upper design-life levels derived by reusing the same "
-                "plateau and slope with tau-specific intercept shifts. Streamflow rows are on the "
-                "calendar-day basis, while NFIP rows are on the claim-active-day basis."
+                "Design-life-level summary for the four focal case studies. Rows show the shared-\\(\\tau\\) "
+                "application grid, with \\(\\tau \\in \\{0.50, 0.90, 0.95, 0.99\\}\\), obtained by evaluating "
+                "the fitted block-maximum quantile scaling law at 1-, 10-, and 50-year design-life spans. "
+                "The \\(\\tau=0.50\\) row gives the median design-life level, whereas higher-\\(\\tau\\) rows "
+                "give increasingly conservative upper design-life levels derived by reusing the same plateau "
+                "and slope with \\(\\tau\\)-specific intercept shifts. Streamflow rows are reported on the "
+                "calendar-day basis, whereas NFIP rows are reported on the claim-active-day basis."
             ),
             label="tab:application-design-life-levels-main",
+            header_latex={
+                "$\\tau$": r"$\tau$",
+            },
+            caption_raw=True,
         )
     )
     status("application", "writing application LaTeX EI comparison table")
@@ -2069,7 +2079,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_selection_sensitivity_table(bundles),
             caption=(
-                "Appendix parameter-side local selection-sensitivity summary for the four focal "
+                "Parameter-side local selection-sensitivity summary for the four focal "
                 "case studies. Each cell reports the headline \\(\\xi\\) or \\(\\theta\\) "
                 "estimate together with the min--max range over the three highest-scoring EVI "
                 "plateau windows or EI stable windows under the same fixed selection rule. "
@@ -2092,7 +2102,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 screening_path=usgs_screening_path,
             ),
             caption=(
-                "Appendix disclosure table for the curated USGS streamflow candidate pools. "
+                "USGS streamflow candidate pools for the curated streamflow applications. "
                 "Sites were screened with method-informed criteria: minimum record length 20 years, "
                 "minimum plateau size 5 points, \\(\\xi\\) lower bound at least -0.25, and plateau-maxima "
                 "positive share at least 0.95. Ranking then prioritizes Fréchet-domain support, "

@@ -53,8 +53,12 @@ verify:
 
 docs:
     just sync-env
-    rm -rf docs/_build
-    uv run sphinx-build -b html docs docs/_build/html
+    rm -rf site
+    uv run mkdocs build --strict
+
+docs-serve:
+    just sync-env
+    uv run mkdocs serve
 
 # Setup
 [private]

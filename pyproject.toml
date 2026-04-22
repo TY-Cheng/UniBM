@@ -39,20 +39,23 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/TY-Cheng/UniBM/"
 Repository = "https://github.com/TY-Cheng/UniBM/"
-Documentation = "https://github.com/TY-Cheng/UniBM/tree/main/docs"
+Documentation = "https://ty-cheng.github.io/UniBM/"
 Issues = "https://github.com/TY-Cheng/UniBM/issues"
 Changelog = "https://github.com/TY-Cheng/UniBM/releases"
 
 [dependency-groups]
 dev = [
     "coverage",
-    "furo",
     "ipykernel",
     "jupytext",
+    "mkdocs>=1.6",
+    "mkdocs-autorefs>=1.4",
+    "mkdocs-material>=9.6",
+    "mkdocstrings[python]>=0.29",
     "nbconvert",
+    "pymdown-extensions>=10.14",
     "python-dotenv",
     "ruff",
-    "sphinx>=8",
 ]
 
 [tool.hatch.build]
@@ -85,7 +88,7 @@ explicit = true
 
 [tool.ruff]
 line-length = 99
-extend-exclude = ["docs/_build", "justfile"]
+extend-exclude = ["site", "justfile"]
 
 [tool.ruff.format]
 quote-style = "double"

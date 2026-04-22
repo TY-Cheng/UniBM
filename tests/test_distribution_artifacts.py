@@ -104,7 +104,7 @@ class DistributionArtifactTests(unittest.TestCase):
 
         self.assertIn("Version: 0.1.0", metadata)
         self.assertIn(
-            "Project-URL: Documentation, https://github.com/TY-Cheng/UniBM/tree/main/docs",
+            "Project-URL: Documentation, https://ty-cheng.github.io/UniBM/",
             metadata,
         )
         self.assertIn("Project-URL: Issues, https://github.com/TY-Cheng/UniBM/issues", metadata)

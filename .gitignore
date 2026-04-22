@@ -3,7 +3,7 @@ scratch*
 /tmp/
 /.python-version
 /doc/
-/docs/_build/
+/site/
 /out/
 /data/*
 !/data/metadata/
