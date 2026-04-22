@@ -936,16 +936,16 @@ def write_ei_benchmark_manuscript_artifacts(
             second_header_row_label_raw=True,
             caption=(
                 f"Merged EI benchmark summary on the projected short-record persistence suite with "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, "
-                f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
-                "Rows report methods and columns group representative scenarios by family and xi. "
+                f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
+                f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n\\_obs={n_obs}. "
+                "Rows report methods and columns group representative scenarios by family and \\(\\xi\\). "
                 "In each cell, the first line reports median Winkler interval score and the "
                 "second line reports median absolute percentage error, both summarized over "
-                "the theta grid. "
-                "All interval metrics use 95% CI (alpha = 0.05). Across the retained comparison "
-                "roster, Northrop-sliding-FGLS and BB-sliding-FGLS are never the worst performers "
-                "on median Winkler score over the 84 benchmark scenarios."
+                "the \\(\\theta\\) grid. "
+                "All interval metrics use 95\\% CI (alpha = 0.05). Across the reported methods, "
+                "Northrop-sliding-FGLS and BB-sliding-FGLS are never the worst performers on "
+                "median Winkler score over the 84 benchmark scenarios."
             ),
             label="tab:benchmark-ei-summary-main",
             environment="table",
@@ -963,6 +963,7 @@ def write_ei_benchmark_manuscript_artifacts(
                 11: r"\addlinespace[1.5pt]",
             },
             arraystretch="1.06",
+            caption_raw=True,
         )
     )
     interval_table = ei_interval_story_table(
@@ -982,13 +983,14 @@ def write_ei_benchmark_manuscript_artifacts(
             interval_table,
             caption=(
                 f"EI interval sharpness-versus-calibration summary on the projected EI suite with "
-                f"theta in {{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, "
-                f"xi in {{0.01, 0.50, 1.0, 5.0}}, and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
+                f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), "
+                f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), and the Fréchet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n\\_obs={n_obs}. "
                 "Cells report median 95\\% interval width / "
                 "median coverage / median interval score."
             ),
             label="tab:benchmark-ei-interval-main",
+            caption_raw=True,
         )
     )
     (table_dir / "benchmark_ei_overview_main.tex").write_text(
@@ -997,12 +999,13 @@ def write_ei_benchmark_manuscript_artifacts(
                 benchmark_summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET
             ].copy(),
             caption=(
-                f"Appendix full EI benchmark overview on the projected EI suite with theta in "
-                f"{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0}}, xi in {{0.01, 0.50, 1.0, 5.0}}, "
+                f"Appendix full EI benchmark overview on the projected EI suite with \\(\\theta \\in "
+                f"\\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), \\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
                 f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
-                f"with n_obs={n_obs}."
+                f"with n\\_obs={n_obs}."
             ),
             label="tab:benchmark-ei-overview-main",
+            caption_raw=True,
         )
     )
     plot_ei_core_panels(

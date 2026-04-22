@@ -289,12 +289,20 @@ class ApplicationOutputTests(unittest.TestCase):
             )
 
         self.assertEqual(table.shape[0], 2)
-        self.assertEqual(table.iloc[0]["Selected"], "yes")
-        self.assertEqual(table.iloc[0]["Recommended"], "yes")
-        screening_columns = [column for column in table.columns if "screen" in column.lower()]
-        self.assertEqual(screening_columns, ["Fréchet-domain screen"])
+        self.assertIn("State / site", table.columns)
+        self.assertEqual(table.iloc[0]["Chosen"], "yes")
+        screening_columns = [
+            column
+            for column in table.columns
+            if ("screen" in column.lower()) or ("support" in column.lower())
+        ]
+        self.assertEqual(screening_columns, ["Fréchet support"])
         self.assertEqual(table.iloc[0][screening_columns[0]], "yes")
         self.assertIn("Record years", table.columns)
+        self.assertIn("$\\xi$ lower", table.columns)
+        self.assertNotIn("Preferred", table.columns)
+        self.assertEqual(table.iloc[0]["State / site"], "TX 08066500")
+        self.assertEqual(table.iloc[0]["Station"], "Trinity River at Romayor")
 
     def test_tau_scaling_views_for_fit(self) -> None:
         bundle = _make_standard_bundle()
