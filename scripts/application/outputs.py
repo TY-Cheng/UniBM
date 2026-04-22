@@ -36,7 +36,6 @@ from application.inputs import (
 )
 from application.diagnostics import (
     application_design_life_interval_record,
-    application_design_life_interval_table,
 )
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series, screen_extremal_index_series
@@ -326,6 +325,33 @@ def _format_interval(center: float, lo: float, hi: float) -> str:
     return f"{center:.2f} [{lo:.2f}, {hi:.2f}]"
 
 
+def _format_compact_number(value: float) -> str:
+    """Format one value compactly for manuscript-facing DLL columns."""
+    if not np.isfinite(value):
+        return "NA"
+    magnitude = abs(float(value))
+    if magnitude == 0:
+        return "0"
+    if magnitude >= 1e4 or magnitude < 1e-2:
+        formatted = f"{float(value):.3g}"
+        return formatted.replace("e+0", "e").replace("e+", "e").replace("e0", "e0")
+    if magnitude >= 100:
+        return f"{float(value):.0f}"
+    if magnitude >= 1:
+        return f"{float(value):.2f}"
+    return f"{float(value):.3f}"
+
+
+def _format_compact_interval(center: float, lo: float, hi: float) -> str:
+    """Format one estimate and interval compactly for large DLL magnitudes."""
+    if not (np.isfinite(center) and np.isfinite(lo) and np.isfinite(hi)):
+        return "NA"
+    return (
+        f"{_format_compact_number(center)} "
+        f"[{_format_compact_number(lo)}, {_format_compact_number(hi)}]"
+    )
+
+
 def _save_figure_pair(fig, file_path: Path) -> None:
     """Save the publication figure to the requested path."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,41 +458,6 @@ def _manuscript_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBun
     return sorted(selected, key=lambda bundle: order[bundle.spec.key])
 
 
-def _application_record_span_years(bundle: ApplicationBundle) -> float:
-    """Return the approximate observed record span in years for one application."""
-    index = bundle.prepared.display.series.index
-    span_days = max((index.max() - index.min()).days, 1)
-    return float(span_days / 365.25)
-
-
-def _application_clock_text(bundle: ApplicationBundle) -> str:
-    """Render the severity/persistence observation clocks for one application."""
-    if bundle.spec.provider == "fema":
-        return "severity: active-day; persistence: calendar-day"
-    return "severity: calendar-day; persistence: calendar-day"
-
-
-def _application_preprocessing_text(bundle: ApplicationBundle) -> str:
-    """Render a compact preprocessing summary for one application."""
-    if bundle.spec.provider == "usgs":
-        return "deduplicated daily discharge, nonnegative filter, terminal-year trim"
-    return "annual CPI-U deflation to 2025 USD with active-day severity split"
-
-
-def _application_normalization_text(bundle: ApplicationBundle) -> str:
-    """Render what is and is not normalized for one application."""
-    if bundle.spec.provider == "usgs":
-        return "not exposure-normalized; raw discharge scale"
-    return "inflation-adjusted only; not exposure-normalized portfolio risk"
-
-
-def _application_stationarity_text(bundle: ApplicationBundle) -> str:
-    """Render the main stationarity caveat for one application."""
-    if bundle.spec.provider == "usgs":
-        return "stationary extrapolation is conditional on diagnostics and unchanged regime"
-    return "stationary extrapolation is conditional; inflation adjustment does not remove exposure growth"
-
-
 def _render_wrapped_latex_table(
     table: pd.DataFrame,
     *,
@@ -492,23 +483,6 @@ def _render_wrapped_latex_table(
         lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
     lines.extend([r"\hline", r"\end{tabular}", r"\end{table}"])
     return "\n".join(lines)
-
-
-def application_case_audit_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the manuscript appendix audit table for the curated four applications."""
-    rows: list[dict[str, object]] = []
-    for bundle in _manuscript_bundles(bundles):
-        rows.append(
-            {
-                "Application": bundle.spec.label,
-                "Observation clock": _application_clock_text(bundle),
-                "Record span": f"{_application_record_span_years(bundle):.1f} years",
-                "Preprocessing": _application_preprocessing_text(bundle),
-                "Normalization": _application_normalization_text(bundle),
-                "Stationarity caveat": _application_stationarity_text(bundle),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def _top_penultimate_windows(
@@ -826,16 +800,16 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     """Build the manuscript-facing cross-application summary table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
+        dll_record = application_design_life_interval_record(bundle)
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "Provider": bundle.spec.provider.upper(),
-                "$\\xi$": _format_interval(
+                "xi": _format_interval(
                     float(bundle.evi_fit.slope),
                     float(bundle.evi_fit.confidence_interval[0]),
                     float(bundle.evi_fit.confidence_interval[1]),
                 ),
-                "$\\theta$ (BB-FGLS)": _format_interval(
+                "theta_bb": _format_interval(
                     float("nan")
                     if bundle.ei_bb_sliding_fgls is None
                     else float(bundle.ei_bb_sliding_fgls.theta_hat),
@@ -846,17 +820,6 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     if bundle.ei_bb_sliding_fgls is None
                     else float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "$\\theta$ (Northrop-FGLS)": _format_interval(
-                    float("nan")
-                    if bundle.ei_northrop_sliding_fgls is None
-                    else float(bundle.ei_northrop_sliding_fgls.theta_hat),
-                    float("nan")
-                    if bundle.ei_northrop_sliding_fgls is None
-                    else float(bundle.ei_northrop_sliding_fgls.confidence_interval[0]),
-                    float("nan")
-                    if bundle.ei_northrop_sliding_fgls is None
-                    else float(bundle.ei_northrop_sliding_fgls.confidence_interval[1]),
-                ),
                 "Mean cluster size": (
                     f"{(1.0 / bundle.ei_bb_sliding_fgls.theta_hat):.2f}"
                     if bundle.ei_bb_sliding_fgls is not None
@@ -864,9 +827,63 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     and bundle.ei_bb_sliding_fgls.theta_hat > 0
                     else "NA"
                 ),
+                "10y_dll": _format_compact_interval(
+                    float(dll_record["dll10"]),
+                    float(dll_record["dll10_lo"]),
+                    float(dll_record["dll10_hi"]),
+                ),
+                "50y_dll": _format_compact_interval(
+                    float(dll_record["dll50"]),
+                    float(dll_record["dll50_lo"]),
+                    float(dll_record["dll50_hi"]),
+                ),
             }
         )
     return pd.DataFrame(rows)
+
+
+def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
+    """Render the main application summary as a wrapped tabularx table."""
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\scriptsize",
+        r"\setlength{\tabcolsep}{3pt}",
+        r"\renewcommand{\arraystretch}{1.05}",
+        (
+            r"\caption{Cross-application summary for the four focal case studies. "
+            r"Parameter entries report the severity-side estimate \(\widehat\xi\) and the "
+            r"persistence-side estimate \(\widehat\theta\) with 95 percent confidence "
+            r"intervals. Mean cluster size is reported as the implied point summary "
+            r"\(1/\widehat\theta\), to keep the main-text table compact; its confidence "
+            r"interval is inherited by reciprocal transformation of the reported "
+            r"\(\widehat\theta\) interval. Design-life "
+            r"entries report the median design-life level with its selected-fit 95 percent "
+            r"confidence interval at 10- and 50-year horizons. Streamflow uses the calendar-day basis "
+            r"for both severity and persistence; NFIP uses the positive claim-active-day "
+            r"basis for severity and the zero-filled calendar-day basis for persistence.}"
+        ),
+        r"\label{tab:application-summary-main}",
+        (
+            r"\begin{tabularx}{\textwidth}"
+            r"{>{\raggedright\arraybackslash}p{0.22\textwidth}"
+            r">{\centering\arraybackslash}X"
+            r">{\centering\arraybackslash}X"
+            r">{\centering\arraybackslash}X"
+            r">{\centering\arraybackslash}X"
+            r">{\centering\arraybackslash}X}"
+        ),
+        r"\toprule",
+        (
+            r"Application & $\widehat\xi$ & $\widehat\theta$ "
+            r"& \shortstack[c]{Mean \\ cluster size} & 10y DLL & 50y DLL \\"
+        ),
+        r"\midrule",
+    ]
+    for row in table.itertuples(index=False, name=None):
+        lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
+    lines.extend([r"\bottomrule", r"\end{tabularx}", r"\end{table}"])
+    return "\n".join(lines)
 
 
 def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
@@ -1976,19 +1993,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         save=True,
     )
     status("application", "writing application LaTeX summary table")
+    summary_table = application_summary_table(manuscript_bundles)
     (table_dir / "application_summary_main.tex").write_text(
-        render_latex_table(
-            application_summary_table(manuscript_bundles),
-            caption=(
-                "Application-side UniBM summary for the four focal case studies. Cells report "
-                "the sliding-median-FGLS estimate of $\\xi$. Formal EI summaries are reported "
-                "for the streamflow and NFIP claim-wave applications, where the BB-sliding-FGLS "
-                "estimate of $\\theta$, the Northrop-sliding-FGLS pooled-BM comparator, and the "
-                "implied mean cluster size $1/\\theta$ are "
-                "substantively interpreted."
-            ),
-            label="tab:application-summary-main",
-        )
+        _render_application_summary_main_latex(summary_table)
     )
     status("application", "writing application LaTeX design-life-level table")
     (table_dir / "application_design_life_levels_main.tex").write_text(
@@ -2021,23 +2028,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             label="tab:application-ei-main",
         )
     )
-    status("application", "writing application appendix audit table")
-    (table_dir / "application_case_audit_main.tex").write_text(
-        _render_wrapped_latex_table(
-            application_case_audit_table(bundles),
-            caption=(
-                "Appendix audit table for the four focal case studies. Columns record "
-                "the observation clock, approximate record span, preprocessing summary, what is "
-                "and is not normalized, and the main stationarity caveat carried into the "
-                "applications discussion."
-            ),
-            label="tab:application-case-audit-main",
-            alignments=(
-                "p{0.13\\textwidth}p{0.18\\textwidth}p{0.10\\textwidth}"
-                "p{0.18\\textwidth}p{0.18\\textwidth}p{0.16\\textwidth}"
-            ),
-        )
-    )
     status("application", "writing application appendix selection-sensitivity table")
     (table_dir / "application_selection_sensitivity_main.tex").write_text(
         render_latex_table(
@@ -2046,31 +2036,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "Appendix parameter-side local selection-sensitivity summary for the four focal "
                 "case studies. Each cell reports the reported $\\xi$ or $\\theta$ estimate "
                 "together with the min--max range over the top three scoring EVI plateau windows "
-                "or EI stable windows for the same application. The layered design-life "
-                "uncertainty summary is reported separately in the companion design-life-interval "
-                "appendix table."
+                "or EI stable windows for the same application. These local ranges complement, "
+                "but do not replace, the conditional parameter and design-life intervals reported "
+                "in the main-text application summary table."
             ),
             label="tab:application-selection-sensitivity-main",
-        )
-    )
-    status("application", "writing application appendix median DLL interval table")
-    (table_dir / "application_design_life_intervals_main.tex").write_text(
-        _render_wrapped_latex_table(
-            application_design_life_interval_table(bundles),
-            caption=(
-                "Appendix layered uncertainty summary for the median design-life levels across the "
-                "four focal case studies. Conditional 95 percent intervals "
-                "quantify uncertainty within the selected log-log scaling fit, while the plateau "
-                "envelope reports the min--max range across the top three scoring plateau windows. "
-                "Neither component is full post-selection inference. Florida NFIP is retained here "
-                "as a stress-case diagnostic only; its 50-year line has little actionable design "
-                "content under the stationary working model."
-            ),
-            label="tab:application-design-life-intervals-main",
-            alignments=(
-                "p{0.13\\textwidth}p{0.10\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}"
-                "p{0.13\\textwidth}p{0.11\\textwidth}p{0.14\\textwidth}p{0.13\\textwidth}"
-            ),
         )
     )
     status("application", "writing USGS screening disclosure table")
@@ -2109,12 +2079,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_design_life_levels_main": table_dir
         / "application_design_life_levels_main.tex",
         "application_ei_main": table_dir / "application_ei_main.tex",
-        "application_case_audit_main": table_dir / "application_case_audit_main.tex",
         "application_selection_sensitivity_main": (
             table_dir / "application_selection_sensitivity_main.tex"
-        ),
-        "application_design_life_intervals_main": (
-            table_dir / "application_design_life_intervals_main.tex"
         ),
         "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
     }
@@ -2123,8 +2089,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
 __all__ = [
     "application_ei_table",
     "application_ei_method_rows",
-    "application_case_audit_table",
-    "application_design_life_interval_table",
     "application_method_rows",
     "application_design_life_level_table",
     "application_selection_sensitivity_table",

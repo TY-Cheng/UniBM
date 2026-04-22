@@ -31,12 +31,11 @@ from application.outputs import (
     _tau_scaling_views_for_fit,
     _draw_ei_ax,
     _draw_design_life_levels_ax,
-    application_case_audit_table,
-    application_design_life_interval_table,
     application_ei_method_rows,
     application_design_life_level_table,
     application_method_rows,
     application_selection_sensitivity_table,
+    application_summary_table,
     application_usgs_screening_disclosure_table,
     write_application_figures,
 )
@@ -180,35 +179,6 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(application_ei_method_rows(bundle), [])
 
-    def test_application_case_audit_table_tracks_curated_subset(self) -> None:
-        base_stream_bundle = _make_standard_bundle()
-        stream_bundle = replace(
-            base_stream_bundle,
-            spec=replace(base_stream_bundle.spec, key="tx_streamflow", label="Texas streamflow"),
-        )
-        base_nfip_bundle = _make_nfip_bundle()
-        nfip_bundle = replace(
-            base_nfip_bundle,
-            spec=replace(base_nfip_bundle.spec, key="tx_nfip_claims", label="Texas NFIP claims"),
-        )
-
-        table = application_case_audit_table([nfip_bundle, stream_bundle])
-
-        self.assertEqual(
-            table.columns.tolist(),
-            [
-                "Application",
-                "Observation clock",
-                "Record span",
-                "Preprocessing",
-                "Normalization",
-                "Stationarity caveat",
-            ],
-        )
-        self.assertEqual(table["Application"].tolist(), ["Texas streamflow", "Texas NFIP claims"])
-        self.assertIn("calendar-day", table.iloc[0]["Observation clock"])
-        self.assertIn("not exposure-normalized portfolio risk", table.iloc[1]["Normalization"])
-
     def test_application_selection_sensitivity_table_formats_headline_ranges(self) -> None:
         base_nfip_bundle = _make_nfip_bundle()
         nfip_bundle = replace(
@@ -238,7 +208,7 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertIn("[", table.iloc[0][metric_columns[0]])
         self.assertIn("[", table.iloc[0][metric_columns[1]])
 
-    def test_application_design_life_interval_table_formats_interval_columns(self) -> None:
+    def test_application_summary_table_includes_parameter_and_dll_intervals(self) -> None:
         base_bundle = _make_nfip_bundle()
         nfip_bundle = replace(
             base_bundle,
@@ -250,25 +220,17 @@ class ApplicationOutputTests(unittest.TestCase):
             ),
         )
 
-        table = application_design_life_interval_table([nfip_bundle])
+        table = application_summary_table([nfip_bundle])
 
         self.assertEqual(table.shape[0], 1)
-        ten_year_value_column = next(
-            column
-            for column in table.columns
-            if column.startswith("10y ") and column.endswith("DLL")
-        )
-        fifty_year_value_column = next(
-            column
-            for column in table.columns
-            if column.startswith("50y ") and column.endswith("DLL")
-        )
-        self.assertIn("10y conditional 95% CI", table.columns)
-        self.assertIn("10y plateau envelope", table.columns)
-        self.assertNotEqual(table.iloc[0][ten_year_value_column], "NA")
-        self.assertNotEqual(table.iloc[0][fifty_year_value_column], "NA")
-        self.assertIn("[", table.iloc[0]["10y conditional 95% CI"])
-        self.assertIn("[", table.iloc[0]["50y plateau envelope"])
+        self.assertIn("xi", table.columns)
+        self.assertIn("theta_bb", table.columns)
+        self.assertIn("10y_dll", table.columns)
+        self.assertIn("50y_dll", table.columns)
+        self.assertNotEqual(table.iloc[0]["10y_dll"], "NA")
+        self.assertNotEqual(table.iloc[0]["50y_dll"], "NA")
+        self.assertIn("[", table.iloc[0]["xi"])
+        self.assertIn("[", table.iloc[0]["10y_dll"])
 
     def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

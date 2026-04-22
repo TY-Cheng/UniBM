@@ -90,6 +90,7 @@ def render_latex_table(
     font_size: str | None = None,
     resize_to_width: str | None = None,
     tabcolsep: str | None = None,
+    header_latex: Mapping[str, str] | None = None,
 ) -> str:
     """Render a small flat table without notebook-specific dependencies."""
     columns = [str(col) for col in table.columns]
@@ -109,7 +110,13 @@ def render_latex_table(
         [
             rf"\begin{{tabular}}{{{alignment}}}",
             r"\hline",
-            " & ".join(latex_escape(col) for col in columns) + r" \\",
+            " & ".join(
+                header_latex.get(col, latex_escape(col))
+                if header_latex is not None
+                else latex_escape(col)
+                for col in columns
+            )
+            + r" \\",
             r"\hline",
         ]
     )

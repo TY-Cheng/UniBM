@@ -877,8 +877,7 @@ def _transpose_ei_summary_table(
         record: dict[str, object] = {"method": method}
         for key, family, subheader in scenario_keys:
             value = table.loc[
-                (table["family"] == family)
-                & (table["xi_true"].map(_format_ei_xi) == subheader),
+                (table["family"] == family) & (table["xi_true"].map(_format_ei_xi) == subheader),
                 method,
             ]
             record[key] = value.iloc[0] if not value.empty else "NA"

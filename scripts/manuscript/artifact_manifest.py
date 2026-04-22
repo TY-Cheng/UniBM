@@ -126,14 +126,6 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-case-context-main",
-            placement="main-supporting",
-            generated_by="manuscript source",
-            path=manuscript_dir / "Snippet" / "application_case_context_main.tex",
-            note="Compact main-text context table for the curated four-case subset.",
-            root=workspace_root,
-        ),
-        _table_entry(
             label="tab:application-summary-main",
             placement="main-supporting",
             generated_by="scripts/application/build.py",
@@ -191,24 +183,10 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-case-audit-main",
-            placement="appendix",
-            generated_by="scripts/application/build.py",
-            path=table_dir / "application_case_audit_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
             label="tab:application-selection-sensitivity-main",
             placement="appendix",
             generated_by="scripts/application/build.py",
             path=table_dir / "application_selection_sensitivity_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
-            label="tab:application-design-life-intervals-main",
-            placement="appendix",
-            generated_by="scripts/application/build.py",
-            path=table_dir / "application_design_life_intervals_main.tex",
             root=workspace_root,
         ),
         _table_entry(
