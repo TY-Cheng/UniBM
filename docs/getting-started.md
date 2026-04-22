@@ -1,8 +1,8 @@
 # Getting Started
 
-The reusable statistical package lives in `src/unibm` and is importable as
+The installable package lives in `src/unibm` and is importable as
 `unibm` once the repository environment has been synced. This site focuses on
-the reusable package layer, not on the full repo orchestration under
+the package layer, not on the full repo orchestration under
 `scripts/benchmark` and `scripts/application`.
 
 ## Environment setup
@@ -22,8 +22,7 @@ uv sync --dev
 ```
 
 The repo-level workflow details stay in the repository `README.md` and
-`justfile`. Use this site when you want the reusable `unibm` package API
-itself.
+`justfile`. Use this site when you want the `unibm` package API itself.
 
 ## Package usage
 
@@ -66,8 +65,8 @@ For a quick guide to which returned fields matter most, see
 
 ## Package boundaries
 
-- `unibm.evi` owns the severity-side workflow, design-life mapping, and related
-  plotting/bootstrap helpers.
+- `unibm.evi` owns the severity-side workflow, design-life-level helpers, and
+  related plotting/bootstrap helpers.
 - `unibm.ei` owns the persistence-side workflow, BM-path preparation, and
   threshold/BM EI estimators.
 - `unibm.cdf` contains the public empirical CDF helper used by EI path

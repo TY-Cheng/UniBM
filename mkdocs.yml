@@ -1,5 +1,5 @@
 site_name: UniBM
-site_description: Package-focused documentation for the reusable UniBM statistical core.
+site_description: Package-focused documentation for dependence-aware block-maxima inference in environmental extremes.
 site_url: https://ty-cheng.github.io/UniBM/
 repo_url: https://github.com/TY-Cheng/UniBM
 repo_name: TY-Cheng/UniBM
@@ -8,23 +8,27 @@ strict: true
 
 theme:
   name: material
+  logo: assets/unibm-bamboo-mark.svg
+  favicon: assets/unibm-bamboo-favicon.svg
+  font:
+    text: IBM Plex Sans
+    code: JetBrains Mono
   features:
     - navigation.sections
     - navigation.top
-    - content.action.edit
     - content.code.copy
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: teal
+      primary: blue grey
+      accent: deep orange
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: teal
+      primary: blue grey
+      accent: deep orange
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -80,3 +84,6 @@ markdown_extensions:
 extra_javascript:
   - https://unpkg.com/mermaid@10/dist/mermaid.min.js
   - javascripts/mermaid.js
+
+extra_css:
+  - stylesheets/extra.css

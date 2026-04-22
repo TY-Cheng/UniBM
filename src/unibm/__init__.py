@@ -1,8 +1,8 @@
 """Public UniBM package facade.
 
-The reusable statistical package exposes grouped public namespaces under
-``unibm.evi`` and ``unibm.ei`` together with the standalone helper module
-``unibm.cdf``. Repo-local benchmark, application,
+The package exposes grouped public namespaces under ``unibm.evi`` and
+``unibm.ei`` together with the standalone helper module ``unibm.cdf``.
+Repo-local benchmark, application,
 and notebook orchestration code lives outside the package under
 ``scripts/``.
 """
