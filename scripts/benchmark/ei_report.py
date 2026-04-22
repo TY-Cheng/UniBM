@@ -935,7 +935,7 @@ def write_ei_benchmark_manuscript_artifacts(
             second_header_row_label=r"true $\xi$",
             second_header_row_label_raw=True,
             caption=(
-                f"Consolidated EI benchmark summary on the projected short-record persistence suite with "
+                f"Consolidated EI benchmark summary on the synthetic short-record persistence suite with "
                 f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
                 f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
                 f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
