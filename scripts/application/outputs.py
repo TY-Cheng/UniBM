@@ -873,9 +873,9 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
             r"intervals. Mean cluster size is reported as the implied point summary "
             r"\(1/\widehat\theta\), to keep the main-text table compact; its confidence "
             r"interval is inherited by reciprocal transformation of the reported "
-            r"\(\widehat\theta\) interval. Design-life "
-            r"entries report the median design-life level with its selected-fit 95 percent "
-            r"confidence interval at 10- and 50-year horizons. Streamflow uses the calendar-day basis "
+            r"\(\widehat\theta\) interval. The 10- and 50-year columns report the median "
+            r"design-life level with its selected-fit 95 percent confidence interval. "
+            r"Streamflow uses the calendar-day basis "
             r"for both severity and persistence; NFIP uses the positive claim-active-day "
             r"basis for severity and the zero-filled calendar-day basis for persistence.}"
         ),
@@ -892,7 +892,9 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
         r"\toprule",
         (
             r"Application & $\widehat\xi$ & $\widehat\theta$ "
-            r"& \shortstack[c]{Mean \\ cluster size} & 10y DLL & 50y DLL \\"
+            r"& \shortstack[c]{Mean \\ cluster size} "
+            r"& \shortstack[c]{10y \\ design-life \\ level} "
+            r"& \shortstack[c]{50y \\ design-life \\ level} \\"
         ),
         r"\midrule",
     ]

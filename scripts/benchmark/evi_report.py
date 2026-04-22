@@ -1185,7 +1185,7 @@ def write_evi_benchmark_manuscript_artifacts(
             second_header_row_label=r"true $\theta$",
             second_header_row_label_raw=True,
             caption=(
-                f"Consolidated EVI benchmark summary on the projected short-record severity suite "
+                f"Consolidated EVI benchmark summary on the synthetic short-record severity suite "
                 f"with \\(\\theta \\in \\{{0.01, 0.10, 0.50, 1.0\\}}\\), "
                 f"\\(\\xi \\in \\{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
                 f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
