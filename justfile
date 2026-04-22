@@ -1,5 +1,5 @@
 set shell := ["zsh", "-cu"]
-set dotenv-load := true
+set dotenv-load
 
 default:
     @just --list

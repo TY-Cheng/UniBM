@@ -140,32 +140,11 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             paths=[figure_dir / "benchmark_shrinkage_sensitivity.pdf"],
             root=workspace_root,
         ),
-        _figure_entry(
-            label="fig:benchmark-evi-stress",
-            placement="appendix",
-            generated_by="scripts/benchmark/evi_report.py",
-            paths=[figure_dir / "benchmark_stress_summary.pdf"],
-            root=workspace_root,
-        ),
         _table_entry(
             label="tab:benchmark-evi-summary-main",
             placement="appendix",
             generated_by="scripts/benchmark/evi_report.py",
             path=table_dir / "benchmark_evi_summary_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
-            label="tab:benchmark-stress-main",
-            placement="appendix",
-            generated_by="scripts/benchmark/evi_report.py",
-            path=table_dir / "benchmark_stress_main.tex",
-            root=workspace_root,
-        ),
-        _table_entry(
-            label="tab:benchmark-record-length-main",
-            placement="appendix",
-            generated_by="scripts/benchmark/evi_report.py",
-            path=table_dir / "benchmark_record_length_main.tex",
             root=workspace_root,
         ),
         _figure_entry(
