@@ -17,6 +17,8 @@ class JustfileTests(unittest.TestCase):
     def test_justfile_declares_main_repo_targets(self) -> None:
         text = JUSTFILE.read_text()
         self.assertIn("\nfull workers=", text)
+        self.assertIn("\ndocs:", text)
+        self.assertIn("\ndocs-serve:", text)
         self.assertIn("\nbenchmark workers=", text)
         self.assertIn("\napplication workers=", text)
         self.assertIn("\nvignette:", text)
@@ -32,6 +34,8 @@ class JustfileTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        self.assertIn("docs", result.stdout)
+        self.assertIn("docs-serve", result.stdout)
         self.assertIn("benchmark", result.stdout)
         self.assertIn("application", result.stdout)
         self.assertIn("vignette", result.stdout)

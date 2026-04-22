@@ -935,17 +935,15 @@ def write_ei_benchmark_manuscript_artifacts(
             second_header_row_label=r"true $\xi$",
             second_header_row_label_raw=True,
             caption=(
-                f"Merged EI benchmark summary on the projected short-record persistence suite with "
+                f"Consolidated EI benchmark summary on the projected short-record persistence suite with "
                 f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
-                f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n\\_obs={n_obs}. "
+                f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
+                f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
                 "Rows report methods and columns group representative scenarios by family and \\(\\xi\\). "
                 "In each cell, the first line reports median Winkler interval score and the "
                 "second line reports median absolute percentage error, both summarized over "
                 "the \\(\\theta\\) grid. "
-                "All interval metrics use 95\\% CI (alpha = 0.05). Across the reported methods, "
-                "Northrop-sliding-FGLS and BB-sliding-FGLS are never the worst performers on "
-                "median Winkler score over the 84 benchmark scenarios."
+                "All interval metrics use 95\\% CI (\\(\\alpha = 0.05\\))."
             ),
             label="tab:benchmark-ei-summary-main",
             environment="table",

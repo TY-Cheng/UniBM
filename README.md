@@ -29,7 +29,7 @@ This is the standard **code-repo full rebuild**. It covers:
 - benchmark report generation;
 - USGS site freezing plus application rebuild;
 - vignette regeneration plus in-place notebook execution;
-- unit tests, `src/unibm` coverage, Sphinx docs, and repo-wide formatting normalization.
+- unit tests, `src/unibm` coverage, MkDocs docs, and repo-wide formatting normalization.
 
 If you only want the main workflow blocks individually, use:
 
@@ -51,20 +51,32 @@ The package documentation source lives under `docs/`.
 Build the local HTML site with:
 
 ```bash
-uv run sphinx-build -b html docs docs/_build/html
+uv run mkdocs build --strict
 ```
 
-Use `just docs` for the same build through the repo task runner. `just full`
-also includes a docs rebuild before the cold workflow refresh.
+Serve the docs locally during editing with:
+
+```bash
+uv run mkdocs serve
+```
+
+Use `just docs` and `just docs-serve` for the same workflows through the repo
+task runner. `just full` also includes a docs rebuild before the cold workflow
+refresh.
 
 After the build finishes, open:
 
 ```text
-docs/_build/html/index.html
+site/index.html
 ```
 
-For the docs source on GitHub, browse
-[`docs/`](https://github.com/TY-Cheng/UniBM/tree/main/docs).
+The published package docs are intended to live at:
+
+```text
+https://ty-cheng.github.io/UniBM/
+```
+
+For the docs source on GitHub, browse [`docs/`](https://github.com/TY-Cheng/UniBM/tree/main/docs).
 
 ## Setup
 
@@ -99,6 +111,7 @@ The main task entrypoints are:
 just full
 just verify
 just docs
+just docs-serve
 just benchmark
 just application
 just vignette
@@ -112,7 +125,8 @@ you mainly need to remember are:
 
 - `just full`: fail-fast verify, then cold rebuild of the main code-repo outputs
 - `just verify`: `uv sync --dev` + tests + coverage + `ruff format .`
-- `just docs`: `uv sync --dev` + Sphinx HTML build into `docs/_build/html`
+- `just docs`: `uv sync --dev` + `mkdocs build --strict`
+- `just docs-serve`: `uv sync --dev` + `mkdocs serve`
 - `just benchmark`: benchmark rebuild + benchmark reports
 - `just application`: USGS freeze + application rebuild
 - `just vignette`: sync the paired Jupytext notebook, execute it in place, and format outputs
@@ -153,8 +167,8 @@ uv run coverage report -m
 uv run coverage xml
 uv run coverage html
 uv run ruff format .
-rm -rf docs/_build
-uv run sphinx-build -b html docs docs/_build/html
+rm -rf site
+uv run mkdocs build --strict
 
 mkdir -p out/benchmark/cache
 find out -mindepth 1 -maxdepth 1 ! -name benchmark -exec rm -rf {} +
@@ -185,7 +199,7 @@ Notes:
   executes the paired notebook in place, and then formats tracked `.py` and
   `.ipynb` files.
 - `just verify` expands to `uv sync --dev + tests + coverage + ruff format .`.
-- `just docs` expands to `uv sync --dev + sphinx-build -b html docs docs/_build/html`.
+- `just docs` expands to `uv sync --dev + mkdocs build --strict`.
 - `just full` expands to `verify + docs + clean-generated + benchmark +
   application + vignette`.
 - `just clean-generated` removes generated outputs under `out/` while preserving
@@ -376,32 +390,18 @@ been removed.
 ## API Documentation
 
 For the quick local-docs pointer, see `Docs` near the top of this README. The
-reusable statistical library under `src/unibm/` has a lightweight Sphinx
-site under `docs/`, and the generated HTML entrypoint is
-`docs/_build/html/index.html`.
+reusable statistical library under `src/unibm/` has a lightweight MkDocs site
+under `docs/`, and the generated local HTML entrypoint is `site/index.html`.
 
 The docs include:
 
-- API reference pages for the slim root facade plus the canonical `unibm.evi`
-  and `unibm.ei` packages;
+- API reference pages for the slim root facade plus the exported `unibm.evi`,
+  `unibm.ei`, and `unibm.cdf` namespaces;
 - an `EVI and EI Workflow Guide` overview page;
 - a `Worked Examples` page with small runnable examples for EVI, bootstrap
   backbones, design-life intervals, and EI estimation;
 - a `Reading Returned Objects` page showing which result fields to inspect
   first for EVI and EI fits.
-
-On the EI side, the docs now separate:
-
-- `unibm.ei.preparation` and `unibm.ei.paths` for sample preparation and BM-path construction;
-- `unibm.ei.selection` for stable-window selection/extraction;
-- `unibm.ei.bm` and `unibm.ei.threshold` for the two formal EI estimator families.
-- `unibm.ei.plotting` for library-grade EI path and fit plotting helpers.
-
-On the EVI side, the docs now separate:
-
-- `unibm.evi.estimation` for the canonical UniBM scaling-estimator family;
-- `unibm.evi.tail` for tail/order-statistic xi comparator estimators;
-- `unibm.evi.spectrum` for spectrum-style block-maxima xi comparator estimators.
 
 ## Testing and Coverage
 
@@ -448,7 +448,7 @@ coverage gate is `90%` for `src/unibm/`.
 - `scripts/data_prep/` contains application-specific preprocessing helpers.
 - `data/metadata/application/` contains frozen USGS site selections and the CPI
   deflator table used by the NFIP workflow.
-- `docs/` contains Sphinx docs for the reusable statistical layer.
+- `docs/` contains MkDocs source for the reusable statistical layer.
 - `notebooks/vignette.py` is the Jupytext source of truth for the research
   notebook, and `just vignette` syncs plus executes the paired
   `notebooks/vignette.ipynb` in place.

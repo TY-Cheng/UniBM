@@ -1,0 +1,82 @@
+site_name: UniBM
+site_description: Package-focused documentation for the reusable UniBM statistical core.
+site_url: https://ty-cheng.github.io/UniBM/
+repo_url: https://github.com/TY-Cheng/UniBM
+repo_name: TY-Cheng/UniBM
+edit_uri: edit/main/docs/
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.action.edit
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Getting Started: getting-started.md
+      - Concepts: concepts.md
+      - Worked Examples: worked-examples.md
+      - Reading Returned Objects: reading-returned-objects.md
+  - API Reference:
+      - Public API: api/public-api.md
+      - EVI Namespace: api/evi.md
+      - EI Namespace: api/ei.md
+      - CDF Helper: api/cdf.md
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_root_toc_entry: false
+            show_symbol_type_heading: false
+            show_symbol_type_toc: false
+            members_order: source
+            filters:
+              - "!^_"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - javascripts/mermaid.js
