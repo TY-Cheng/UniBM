@@ -17,6 +17,7 @@ from benchmark.common import (
     add_wilson_bounds,
     interval_contains,
     panel_metric_ylim,
+    render_grouped_latex_table,
     round_up_metric_upper,
     wilson_interval,
 )
@@ -74,6 +75,37 @@ class BenchmarkCommonTests(unittest.TestCase):
             upper_steps={"mape": (0.5, 1.0, 1.5)},
         )
         self.assertEqual(ylim, (0.0, 1.0))
+
+    def test_render_grouped_latex_table_renders_group_headers_and_compact_pairs(self) -> None:
+        table = pd.DataFrame(
+            {
+                "method": ["Northrop-sliding-FGLS", "BB-sliding-FGLS"],
+                "frechet_001": ["0.29 / 0.18", "0.28 / 0.19"],
+                "moving_10": ["0.27 / 0.16", "0.26 / 0.15"],
+            }
+        )
+        latex = render_grouped_latex_table(
+            table,
+            row_label="method",
+            groups=[
+                ("Fréchet max-AR", [("frechet_001", "0.01")]),
+                ("Moving Maxima (q=99)", [("moving_10", "1.0")]),
+            ],
+            second_header_row_label=r"true $\xi$",
+            second_header_row_label_raw=True,
+            caption="Grouped EI summary",
+            label="tab:test-grouped",
+            fit_to_width=r"\textwidth",
+            pair_medians_only=True,
+        )
+
+        self.assertIn(r"\caption{Grouped EI summary}", latex)
+        self.assertIn(r"\label{tab:test-grouped}", latex)
+        self.assertIn(r"\multicolumn{1}{c}{Fréchet max-AR}", latex)
+        self.assertIn(r"\multicolumn{1}{c}{Moving Maxima (q=99)}", latex)
+        self.assertIn(r"true $\xi$ & 0.01 & 1.0 \\", latex)
+        self.assertIn(r"\shortstack[l]{Northrop- \\ sliding-FGLS}", latex)
+        self.assertIn(r"\shortstack[c]{0.29 \\ 0.18}", latex)
 
 
 if __name__ == "__main__":

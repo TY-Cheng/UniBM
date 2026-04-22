@@ -26,9 +26,9 @@ from application.inputs import (
     ensure_usgs_raw_data,
     load_usgs_frozen_sites,
 )
+from application.diagnostics import application_design_life_interval_table
 from application.outputs import (
     application_ei_method_rows,
-    application_design_life_interval_table,
     application_design_life_level_table,
     application_method_rows,
     application_summary_record,

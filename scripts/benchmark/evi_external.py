@@ -521,9 +521,7 @@ def target_plus_external_story_table(
 ) -> pd.DataFrame:
     """Combine the sliding-FGLS target comparison with external xi baselines."""
     methods = [
-        method
-        for method in methods
-        if method in METHOD_LABELS or method in EXTERNAL_METHOD_LABELS
+        method for method in methods if method in METHOD_LABELS or method in EXTERNAL_METHOD_LABELS
     ]
     combined = _stack_benchmark_summaries(
         internal_summary,

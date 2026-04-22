@@ -18,7 +18,10 @@ from benchmark.design import (
     default_evi_simulation_configs,
     parse_moving_maxima_q,
 )
-from benchmark.ei_benchmark import _summary_matches_contract as ei_summary_matches_contract
+from benchmark.ei_benchmark import (
+    _EI_SUMMARY_REQUIRED_COLUMNS,
+    _summary_matches_contract as ei_summary_matches_contract,
+)
 from benchmark.evi_benchmark import (
     _INTERNAL_SUMMARY_REQUIRED_COLUMNS,
     _summary_matches_contract as evi_summary_matches_contract,
@@ -66,6 +69,31 @@ def _make_frame(
 class BenchmarkCacheContractTests(unittest.TestCase):
     def test_benchmark_design_only_accepts_moving_maxima_q99(self) -> None:
         self.assertEqual(parse_moving_maxima_q("moving_maxima_q99"), 99)
+
+    def test_ei_summary_contract_accepts_matching_summary(self) -> None:
+        configs = default_ei_simulation_configs(
+            xi_values=(0.50,),
+            theta_values=(0.25,),
+            families=("frechet_max_ar",),
+            reps=1,
+            n_obs=365,
+        )
+        summary = _make_frame(
+            methods={"northrop_sliding_fgls"},
+            benchmark_set="universal",
+            families=("frechet_max_ar",),
+            xi_values=(0.50,),
+            theta_values=(0.25,),
+            n_obs=365,
+            required_columns=_EI_SUMMARY_REQUIRED_COLUMNS,
+        )
+        self.assertTrue(
+            ei_summary_matches_contract(
+                summary,
+                expected_methods={"northrop_sliding_fgls"},
+                configs=configs,
+            )
+        )
 
     def test_ei_summary_contract_rejects_family_mismatch(self) -> None:
         configs = default_ei_simulation_configs(
@@ -151,6 +179,32 @@ class BenchmarkCacheContractTests(unittest.TestCase):
             ei_summary_matches_contract(
                 summary,
                 expected_methods={"northrop_sliding_fgls"},
+                configs=configs,
+            )
+        )
+
+    def test_evi_summary_contract_accepts_matching_summary(self) -> None:
+        configs = default_evi_simulation_configs(
+            xi_values=(0.10,),
+            theta_values=(0.50,),
+            families=("frechet_max_ar",),
+            reps=1,
+            n_obs=365,
+        )
+        summary = _make_frame(
+            methods={"sliding_median_fgls"},
+            benchmark_set="universal",
+            families=("frechet_max_ar",),
+            xi_values=(0.10,),
+            theta_values=(0.50,),
+            n_obs=365,
+            required_columns=_INTERNAL_SUMMARY_REQUIRED_COLUMNS,
+        )
+        self.assertTrue(
+            evi_summary_matches_contract(
+                summary,
+                required_columns=_INTERNAL_SUMMARY_REQUIRED_COLUMNS,
+                expected_methods={"sliding_median_fgls"},
                 configs=configs,
             )
         )
