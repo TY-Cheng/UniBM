@@ -28,7 +28,7 @@ design-life-level estimates on the original data scale, while
 `design_life_interval` returns the matching conditional interval bounds from
 the fitted coefficient covariance.
 
-## Example 2: Reusable bootstrap backbone
+## Example 2: Bootstrap covariance backbone
 
 ```python
 import numpy as np

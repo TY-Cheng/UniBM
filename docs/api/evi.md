@@ -2,7 +2,7 @@
 
 The exported `unibm.evi` namespace groups the severity-side workflow:
 block extraction and summaries, plateau selection, covariance-aware fitting,
-design-life mapping, plotting helpers, and the published comparator families
+design-life-level helpers, plotting helpers, and the public comparator families
 that remain part of the public package surface.
 
 ::: unibm.evi

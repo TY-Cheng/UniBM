@@ -191,7 +191,7 @@ def evaluate_block_summary_bootstrap_backbone(
     target: str = "quantile",
     quantile: float = 0.5,
 ) -> dict[str, Any]:
-    """Evaluate one block-summary target on a reusable bootstrap backbone."""
+    """Evaluate one block-summary target on a precomputed bootstrap backbone."""
     if backbone is None:
         return {
             "block_sizes": np.asarray([], dtype=int),
@@ -260,7 +260,7 @@ def build_block_summary_bootstrap_backbone(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> BlockSummaryBootstrapBackbone | None:
-    """Precompute the reusable super-block state for UniBM bootstrap fitting."""
+    """Precompute the shared super-block state for UniBM bootstrap fitting."""
     warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
     arr = np.asarray(vec, dtype=float).reshape(-1)
     block_sizes = np.asarray(block_sizes, dtype=int)

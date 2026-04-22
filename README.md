@@ -8,7 +8,7 @@ It exposes two complementary inferential targets:
 - severity via the extreme value index (EVI) and design-life levels
 - persistence via the extremal index (EI)
 
-The reusable package lives under `src/unibm`. Repository-level benchmark,
+The installable package lives under `src/unibm`. Repository-level benchmark,
 application, and vignette workflows are orchestrated through the root
 `justfile`.
 
