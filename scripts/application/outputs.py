@@ -465,20 +465,36 @@ def _render_wrapped_latex_table(
     label: str,
     alignments: str,
     size: str = r"\scriptsize",
+    header_latex: Mapping[str, str] | None = None,
+    caption_raw: bool = False,
+    tabcolsep: str | None = None,
 ) -> str:
     """Render a wider LaTeX table with caller-supplied column widths."""
     columns = [str(col) for col in table.columns]
+    rendered_caption = caption if caption_raw else latex_escape(caption)
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
         size,
-        rf"\caption{{{latex_escape(caption)}}}",
+        rf"\caption{{{rendered_caption}}}",
         rf"\label{{{label}}}",
-        rf"\begin{{tabular}}{{{alignments}}}",
-        r"\hline",
-        " & ".join(latex_escape(col) for col in columns) + r" \\",
-        r"\hline",
     ]
+    if tabcolsep is not None:
+        lines.append(rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}")
+    lines.extend(
+        [
+            rf"\begin{{tabular}}{{{alignments}}}",
+            r"\hline",
+            " & ".join(
+                header_latex.get(col, latex_escape(col))
+                if header_latex is not None
+                else latex_escape(col)
+                for col in columns
+            )
+            + r" \\",
+            r"\hline",
+        ]
+    )
     for row in table.itertuples(index=False, name=None):
         lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
     lines.extend([r"\hline", r"\end{tabular}", r"\end{table}"])
@@ -1810,8 +1826,15 @@ def application_usgs_screening_disclosure_table(
     screening_path: Path,
 ) -> pd.DataFrame:
     """Render the manuscript-facing USGS candidate-pool disclosure table."""
+    def _strip_trailing_state_suffix(name: object) -> str:
+        text = str(name).strip()
+        if len(text) >= 4 and text[-4:-2] == ", " and text[-2:].isalpha():
+            return text[:-4]
+        return text
+
     shortlist = _usgs_site_audit_frame(metadata_dir).copy()
     shortlist["site_no"] = shortlist["site_no"].map(lambda value: str(value).zfill(8))
+    shortlist["station_name"] = shortlist["station_name"].map(_strip_trailing_state_suffix)
     detailed = pd.DataFrame()
     if screening_path.exists():
         try:
@@ -1866,19 +1889,32 @@ def application_usgs_screening_disclosure_table(
     shortlist["xi_lower"] = shortlist["xi_lower"].map(
         lambda value: "NA" if pd.isna(value) else f"{float(value):.2f}"
     )
+    shortlist["state_site"] = shortlist.apply(
+        lambda row: f"{row['state_code']} {row['site_no']}",
+        axis=1,
+    )
     return shortlist.rename(
         columns={
-            "state_code": "State",
-            "site_no": "Site no.",
+            "state_site": "State / site",
             "station_name": "Station",
-            "selected": "Selected",
-            "recommended": "Recommended",
-            "supports_frechet_working_model": "Fréchet-domain screen",
-            "plateau_points": "Plateau points",
+            "selected": "Chosen",
+            "supports_frechet_working_model": "Fréchet support",
+            "plateau_points": "Plateau pts",
             "n_years": "Record years",
-            "xi_lower": "xi lower",
+            "xi_lower": "$\\xi$ lower",
         }
-    )
+    ).loc[
+        :,
+        [
+            "State / site",
+            "Station",
+            "Chosen",
+            "Fréchet support",
+            "Plateau pts",
+            "Record years",
+            "$\\xi$ lower",
+        ],
+    ]
 
 
 def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
@@ -2021,7 +2057,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             caption=(
                 "Application-side extremal-index summary for the formal EI applications only. "
                 "Cells report the BB-sliding-FGLS and Northrop-sliding-FGLS pooled-BM estimates "
-                "together with the K-gaps and Ferro-Segers threshold comparators for the "
+                "together with the K-gaps and Ferro-Segers threshold baseline models for the "
                 "streamflow and NFIP claim-wave case studies. Stable windows are shown for the "
                 "two pooled-BM paths."
             ),
@@ -2034,13 +2070,18 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             application_selection_sensitivity_table(bundles),
             caption=(
                 "Appendix parameter-side local selection-sensitivity summary for the four focal "
-                "case studies. Each cell reports the reported $\\xi$ or $\\theta$ estimate "
-                "together with the min--max range over the top three scoring EVI plateau windows "
-                "or EI stable windows for the same application. These local ranges complement, "
-                "but do not replace, the conditional parameter and design-life intervals reported "
-                "in the main-text application summary table."
+                "case studies. Each cell reports the headline \\(\\xi\\) or \\(\\theta\\) "
+                "estimate together with the min--max range over the three highest-scoring EVI "
+                "plateau windows or EI stable windows under the same fixed selection rule. "
+                "These local ranges complement, but do not replace, the conditional parameter "
+                "and design-life intervals reported in the main-text application summary table."
             ),
             label="tab:application-selection-sensitivity-main",
+            header_latex={
+                "$\\xi$ [range]": r"$\xi$ [range]",
+                "$\\theta$ [range]": r"$\theta$ [range]",
+            },
+            caption_raw=True,
         )
     )
     status("application", "writing USGS screening disclosure table")
@@ -2053,17 +2094,22 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             caption=(
                 "Appendix disclosure table for the curated USGS streamflow candidate pools. "
                 "Sites were screened with method-informed criteria: minimum record length 20 years, "
-                "minimum plateau size 5 points, xi lower bound at least -0.25, and plateau-maxima "
-                "positive share at least 0.95. Ranking then prioritizes recommended status, "
-                "Fréchet-domain support, plateau size, record length, and xi lower bound."
+                "minimum plateau size 5 points, \\(\\xi\\) lower bound at least -0.25, and plateau-maxima "
+                "positive share at least 0.95. Ranking then prioritizes Fréchet-domain support, "
+                "plateau size, record length, and \\(\\xi\\) lower bound."
             ),
             label="tab:application-usgs-screening-main",
             alignments=(
-                "p{0.07\\textwidth}p{0.11\\textwidth}p{0.26\\textwidth}p{0.08\\textwidth}"
-                "p{0.10\\textwidth}p{0.11\\textwidth}p{0.10\\textwidth}p{0.09\\textwidth}"
-                "p{0.08\\textwidth}"
+                "p{0.12\\textwidth}p{0.23\\textwidth}p{0.08\\textwidth}p{0.15\\textwidth}"
+                "p{0.08\\textwidth}p{0.10\\textwidth}p{0.10\\textwidth}"
             ),
             size=r"\tiny",
+            header_latex={
+                "State / site": r"\shortstack[c]{State /\\ site}",
+                "$\\xi$ lower": r"$\xi$ lower",
+            },
+            caption_raw=True,
+            tabcolsep="1pt",
         )
     )
     return {

@@ -1184,16 +1184,16 @@ def write_evi_benchmark_manuscript_artifacts(
             second_header_row_label_raw=True,
             caption=(
                 f"Merged EVI benchmark summary on the projected short-record severity suite "
-                f"with theta in {{0.01, 0.10, 0.50, 1.0}}, "
-                f"xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, and the Fréchet max-AR, moving-maxima q=99, "
-                f"and Pareto additive AR(1) families, with n_obs={n_obs}. "
+                f"with \\(\\theta \\in \\{{0.01, 0.10, 0.50, 1.0\\}}\\), "
+                f"\\(\\xi \\in \\{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}}\\), and the Fréchet max-AR, moving-maxima q=99, "
+                f"and Pareto additive AR(1) families, with n\\_obs={n_obs}. "
                 "Rows report methods and columns group representative scenarios by family and "
-                "theta. In each cell, the first line reports median Winkler interval score and "
+                "\\(\\theta\\). In each cell, the first line reports median Winkler interval score and "
                 "the second line reports median absolute percentage error, both summarized over "
-                "the xi grid. "
-                "All interval metrics use 95% CI (alpha = 0.05). Across the retained comparison "
-                "roster, sliding-median-FGLS is never the worst performer on median Winkler score "
-                "over the 84 benchmark scenarios."
+                "the \\(\\xi\\) grid. "
+                "All interval metrics use 95\\% CI (alpha = 0.05). Across the reported methods, "
+                "sliding-median-FGLS is never the worst performer on median Winkler score over "
+                "the 84 benchmark scenarios."
             ),
             label="tab:benchmark-evi-summary-main",
             environment="table",
@@ -1211,6 +1211,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 11: r"\addlinespace[1.5pt]",
             },
             arraystretch="1.06",
+            caption_raw=True,
         )
     )
     (table_dir / "benchmark_interval_main.tex").write_text(
@@ -1232,12 +1233,13 @@ def write_evi_benchmark_manuscript_artifacts(
         render_latex_table(
             benchmark_table(benchmark_summary_df, benchmark_set=UNIVERSAL_BENCHMARK_SET),
             caption=(
-                f"Appendix full EVI benchmark overview on the projected EVI suite with xi in "
-                f"{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, theta in {{0.01, 0.10, 0.50, 1.0}}, "
+                f"Appendix full EVI benchmark overview on the projected EVI suite with \\(\\xi \\in "
+                f"\\{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}}\\), \\(\\theta \\in \\{{0.01, 0.10, 0.50, 1.0\\}}\\), "
                 f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
-                f"with n_obs={n_obs}."
+                f"with n\\_obs={n_obs}."
             ),
             label="tab:benchmark-overview-main",
+            caption_raw=True,
         )
     )
     plot_benchmark_panels(
@@ -1319,16 +1321,17 @@ def write_evi_benchmark_manuscript_artifacts(
                 evi_record_length_sensitivity_table(record_length_summary),
                 caption=(
                     "Appendix EVI record-length sensitivity for the within-BM severity "
-                    "comparison used in the main text. The table holds theta fixed at 0.10, compares "
-                    "n_obs in {200, 365, 730} for the Fréchet max-AR and Pareto additive AR(1) "
+                    "comparison used in the main text. The table holds \\(\\theta\\) fixed at 0.10, compares "
+                    "n\\_obs in {200, 365, 730} for the Fréchet max-AR and Pareto additive AR(1) "
                     "families, and reports median Winkler interval score (IQR) / median absolute "
-                    "percentage error (IQR) across the xi grid for disjoint-median-OLS, "
+                    "percentage error (IQR) across the \\(\\xi\\) grid for disjoint-median-OLS, "
                     "sliding-median-OLS, "
                     "and sliding-median-FGLS. The purpose is to delimit how the short-record "
                     "benchmark narrative transports across nearby record lengths, not to define "
                     "a separate benchmark."
                 ),
                 label="tab:benchmark-record-length-main",
+                caption_raw=True,
             )
         )
 

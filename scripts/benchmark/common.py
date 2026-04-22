@@ -91,6 +91,7 @@ def render_latex_table(
     resize_to_width: str | None = None,
     tabcolsep: str | None = None,
     header_latex: Mapping[str, str] | None = None,
+    caption_raw: bool = False,
 ) -> str:
     """Render a small flat table without notebook-specific dependencies."""
     columns = [str(col) for col in table.columns]
@@ -103,7 +104,8 @@ def render_latex_table(
         lines.append(font_size)
     if tabcolsep is not None:
         lines.append(rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}")
-    lines.extend([rf"\caption{{{latex_escape(caption)}}}", rf"\label{{{label}}}"])
+    rendered_caption = caption if caption_raw else latex_escape(caption)
+    lines.extend([rf"\caption{{{rendered_caption}}}", rf"\label{{{label}}}"])
     if resize_to_width is not None:
         lines.append(rf"\resizebox{{{resize_to_width}}}{{!}}{{%")
     lines.extend(
@@ -150,6 +152,7 @@ def render_grouped_latex_table(
     group_break_command: str = r"\addlinespace[2pt]",
     group_break_commands_by_row: Mapping[int, str] | None = None,
     arraystretch: str | None = None,
+    caption_raw: bool = False,
 ) -> str:
     """Render a table with one row label column and a two-level grouped header."""
     flat_columns = [column_key for _, columns in groups for column_key, _ in columns]
@@ -189,7 +192,8 @@ def render_grouped_latex_table(
         lines.append(rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}")
     if arraystretch is not None:
         lines.append(rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}")
-    lines.extend([rf"\caption{{{latex_escape(caption)}}}", rf"\label{{{label}}}"])
+    rendered_caption = caption if caption_raw else latex_escape(caption)
+    lines.extend([rf"\caption{{{rendered_caption}}}", rf"\label{{{label}}}"])
     if resize_to_width is not None:
         lines.append(rf"\resizebox{{{resize_to_width}}}{{!}}{{%")
     if fit_to_width is None:

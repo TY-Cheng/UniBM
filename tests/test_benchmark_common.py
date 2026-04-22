@@ -17,6 +17,7 @@ from benchmark.common import (
     add_wilson_bounds,
     interval_contains,
     panel_metric_ylim,
+    render_latex_table,
     render_grouped_latex_table,
     round_up_metric_upper,
     wilson_interval,
@@ -106,6 +107,37 @@ class BenchmarkCommonTests(unittest.TestCase):
         self.assertIn(r"true $\xi$ & 0.01 & 1.0 \\", latex)
         self.assertIn(r"\shortstack[l]{Northrop- \\ sliding-FGLS}", latex)
         self.assertIn(r"\shortstack[c]{0.29 \\ 0.18}", latex)
+        self.assertIn(r"\caption{Grouped EI summary}", latex)
+
+    def test_render_latex_table_supports_raw_caption_and_header_latex(self) -> None:
+        table = pd.DataFrame({"Application": ["Texas streamflow"], "$\\xi$ [range]": ["0.65 [0.59, 0.65]"]})
+
+        latex = render_latex_table(
+            table,
+            caption=r"Appendix \(\xi\) summary",
+            label="tab:test-raw",
+            header_latex={"$\\xi$ [range]": r"$\xi$ [range]"},
+            caption_raw=True,
+        )
+
+        self.assertIn(r"\caption{Appendix \(\xi\) summary}", latex)
+        self.assertIn(r"Application & $\xi$ [range] \\", latex)
+        self.assertNotIn(r"\$\textbackslash{}xi\$", latex)
+
+    def test_render_grouped_latex_table_supports_raw_caption(self) -> None:
+        table = pd.DataFrame({"method": ["A"], "scenario": ["0.10 / 0.20"]})
+
+        latex = render_grouped_latex_table(
+            table,
+            row_label="method",
+            groups=[("Group", [("scenario", "0.10")])],
+            caption=r"Summary with \(\theta\) and \(\xi\)",
+            label="tab:test-grouped-raw",
+            pair_medians_only=True,
+            caption_raw=True,
+        )
+
+        self.assertIn(r"\caption{Summary with \(\theta\) and \(\xi\)}", latex)
 
 
 if __name__ == "__main__":
