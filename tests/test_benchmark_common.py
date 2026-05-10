@@ -110,7 +110,9 @@ class BenchmarkCommonTests(unittest.TestCase):
         self.assertIn(r"\caption{Grouped EI summary}", latex)
 
     def test_render_latex_table_supports_raw_caption_and_header_latex(self) -> None:
-        table = pd.DataFrame({"Application": ["Texas streamflow"], "$\\xi$ [range]": ["0.65 [0.59, 0.65]"]})
+        table = pd.DataFrame(
+            {"Application": ["Texas streamflow"], "$\\xi$ [range]": ["0.65 [0.59, 0.65]"]}
+        )
 
         latex = render_latex_table(
             table,

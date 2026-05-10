@@ -32,6 +32,7 @@ cp .env.example .env
 2. Edit `.env` and set:
 
 - `DIR_WORK` to your local clone of this repository
+- `DIR_DATA` to the external UniBM data root
 - `UV_PROJECT_ENVIRONMENT` to a dedicated external uv environment path
 
 3. Run the lightest repo entrypoint:
@@ -70,10 +71,13 @@ just docs-serve
 The stable top-level entrypoints are:
 
 - `just verify`
+- `just data`
 - `just docs`
 - `just docs-serve`
 - `just full`
 
+`just data` materializes the application raw and derived data inputs under
+`DIR_DATA`.
 `just full` is the full repo rebuild.
 For benchmark, application, vignette, and manuscript-artifact details, see the
 root `justfile`.

@@ -23,18 +23,24 @@ class ConfigPathTests(unittest.TestCase):
             workspace = Path(tmpdir).resolve()
             code_root = workspace / "UniBM"
             artifact_root = workspace / "paper_artifacts"
+            data_root = workspace / "external_data"
             (code_root / "scripts").mkdir(parents=True, exist_ok=True)
             (code_root / "pyproject.toml").write_text("")
             artifact_root.mkdir(parents=True, exist_ok=True)
+            data_root.mkdir(parents=True, exist_ok=True)
 
             with patch.dict(
                 os.environ,
-                {"DIR_MANUSCRIPT": str(artifact_root)},
+                {"DIR_MANUSCRIPT": str(artifact_root), "DIR_DATA": str(data_root)},
                 clear=True,
             ):
                 dirs = resolve_repo_dirs(code_root)
 
             self.assertEqual(dirs["DIR_WORK"], code_root)
+            self.assertEqual(dirs["DIR_DATA"], data_root)
+            self.assertEqual(dirs["DIR_DATA_RAW"], data_root / "raw")
+            self.assertEqual(dirs["DIR_DATA_DERIVED"], data_root / "derived")
+            self.assertEqual(dirs["DIR_DATA_METADATA"], data_root / "metadata")
             self.assertEqual(dirs["DIR_MANUSCRIPT"], artifact_root)
             self.assertEqual(dirs["DIR_MANUSCRIPT_FIGURE"], artifact_root / "Figure")
             self.assertEqual(dirs["DIR_WORKSPACE"], workspace)
@@ -49,6 +55,7 @@ class ConfigPathTests(unittest.TestCase):
                 dirs = resolve_repo_dirs(workspace)
 
             self.assertEqual(dirs["DIR_WORK"], code_root)
+            self.assertEqual(dirs["DIR_DATA"], code_root / "data")
             self.assertEqual(dirs["DIR_WORKSPACE"], workspace)
 
 

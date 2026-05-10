@@ -1,8 +1,9 @@
 """Repository path resolution shared by domain scripts and the vignette.
 
 The code repo and manuscript repo may live either as siblings or with the
-manuscript nested inside the code repo. `DIR_WORK` anchors the code repo, while
-`DIR_MANUSCRIPT` can optionally point to the manuscript repo explicitly.
+manuscript nested inside the code repo. `DIR_WORK` anchors the code repo,
+`DIR_DATA` can point to an external data root, and `DIR_MANUSCRIPT` can
+optionally point to the manuscript repo explicitly.
 """
 
 from __future__ import annotations
@@ -53,6 +54,14 @@ def _resolve_manuscript_root(*, requested_root: Path | None, code_root: Path) ->
     return candidates[0].resolve()
 
 
+def _resolve_data_root(*, code_root: Path) -> Path:
+    """Resolve the data root from an explicit environment path or repo default."""
+    explicit = os.environ.get("DIR_DATA")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return (code_root / "data").resolve()
+
+
 def _common_root(*paths: Path) -> Path:
     """Return the common parent covering all provided paths."""
     return Path(os.path.commonpath([str(path.resolve()) for path in paths]))
@@ -63,19 +72,20 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
     requested_root = Path(dir_work).expanduser().resolve() if dir_work else _DEFAULT_REPO_ROOT
     work = _resolve_code_root(requested_root)
     manuscript = _resolve_manuscript_root(requested_root=requested_root, code_root=work)
+    data_root = _resolve_data_root(code_root=work)
     workspace = _common_root(work, manuscript)
     dirs = {
         "DIR_WORK": work,
         "DIR_WORKSPACE": workspace,
         "DIR_SCRIPTS": work / "scripts",
-        "DIR_DATA": work / "data",
-        "DIR_DATA_RAW": work / "data" / "raw",
-        "DIR_DATA_RAW_GHCN": work / "data" / "raw" / "ghcn",
-        "DIR_DATA_RAW_USGS": work / "data" / "raw" / "usgs",
-        "DIR_DATA_RAW_FEMA": work / "data" / "raw" / "fema",
-        "DIR_DATA_DERIVED": work / "data" / "derived",
-        "DIR_DATA_METADATA": work / "data" / "metadata",
-        "DIR_DATA_METADATA_APPLICATION": work / "data" / "metadata" / "application",
+        "DIR_DATA": data_root,
+        "DIR_DATA_RAW": data_root / "raw",
+        "DIR_DATA_RAW_GHCN": data_root / "raw" / "ghcn",
+        "DIR_DATA_RAW_USGS": data_root / "raw" / "usgs",
+        "DIR_DATA_RAW_FEMA": data_root / "raw" / "fema",
+        "DIR_DATA_DERIVED": data_root / "derived",
+        "DIR_DATA_METADATA": data_root / "metadata",
+        "DIR_DATA_METADATA_APPLICATION": data_root / "metadata" / "application",
         "DIR_OUT": work / "out",
         "DIR_OUT_BENCHMARK": work / "out" / "benchmark",
         "DIR_OUT_BENCHMARK_CACHE": work / "out" / "benchmark" / "cache",

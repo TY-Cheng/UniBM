@@ -1835,6 +1835,7 @@ def application_usgs_screening_disclosure_table(
     screening_path: Path,
 ) -> pd.DataFrame:
     """Render the manuscript-facing USGS candidate-pool disclosure table."""
+
     def _strip_trailing_state_suffix(name: object) -> str:
         text = str(name).strip()
         if len(text) >= 4 and text[-4:-2] == ", " and text[-2:].isalpha():

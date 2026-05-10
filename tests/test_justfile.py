@@ -21,6 +21,7 @@ class JustfileTests(unittest.TestCase):
         self.assertIn("\ndocs-serve:", text)
         self.assertIn("\nbenchmark workers=", text)
         self.assertIn("\napplication workers=", text)
+        self.assertIn("\ndata screening_bootstrap=", text)
         self.assertIn("\nvignette:", text)
 
     def test_just_list_mentions_main_repo_targets_when_available(self) -> None:
@@ -38,6 +39,7 @@ class JustfileTests(unittest.TestCase):
         self.assertIn("docs-serve", result.stdout)
         self.assertIn("benchmark", result.stdout)
         self.assertIn("application", result.stdout)
+        self.assertIn("data", result.stdout)
         self.assertIn("vignette", result.stdout)
 
 

@@ -51,6 +51,11 @@ manuscript workers="6" screening_bootstrap="20": _require-external-uv-env
     UNIBM_APPLICATION_WORKERS={{ workers }} uv run python scripts/application/build.py
     uv run python scripts/manuscript/artifact_manifest.py
 
+data screening_bootstrap="20": _require-external-uv-env
+    just sync-env
+    UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
+    PYTHONPATH=scripts uv run python -c 'from application.inputs import build_application_inputs; from config import resolve_repo_dirs; build_application_inputs(resolve_repo_dirs("."))'
+
 application workers="6" screening_bootstrap="20": _require-external-uv-env
     just sync-env
     UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
