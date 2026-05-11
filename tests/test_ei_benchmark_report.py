@@ -1,6 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: E402
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,6 +29,7 @@ from benchmark.ei_report import (
 class EiBenchmarkReportTests(unittest.TestCase):
     def test_build_ei_shrinkage_sensitivity_summary_emits_expected_grid_and_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = default_ei_simulation_configs(
                 xi_values=(0.50,),
                 theta_values=(0.25,),
@@ -35,11 +37,12 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 n_obs=64,
                 reps=1,
             )
-            summary, output_path = build_ei_shrinkage_sensitivity_summary(
-                root=tmpdir,
-                configs=configs,
-                force=True,
-            )
+            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
+                summary, output_path = build_ei_shrinkage_sensitivity_summary(
+                    root=tmpdir,
+                    configs=configs,
+                    force=True,
+                )
             self.assertEqual(
                 sorted(summary["delta"].dropna().unique().tolist()),
                 list(EI_SHRINKAGE_GRID),

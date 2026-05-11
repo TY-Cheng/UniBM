@@ -1,8 +1,11 @@
 from __future__ import annotations
 # ruff: noqa: E402
 
+import os
+from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import pandas as pd
 
@@ -32,6 +35,7 @@ from benchmark.evi_report import (
 class EviBenchmarkReportTests(unittest.TestCase):
     def test_build_evi_shrinkage_sensitivity_summary_emits_expected_grid_and_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = default_evi_simulation_configs(
                 xi_values=(0.10,),
                 theta_values=(0.50,),
@@ -39,11 +43,12 @@ class EviBenchmarkReportTests(unittest.TestCase):
                 n_obs=64,
                 reps=1,
             )
-            summary, output_path = build_evi_shrinkage_sensitivity_summary(
-                root=tmpdir,
-                configs=configs,
-                force=True,
-            )
+            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
+                summary, output_path = build_evi_shrinkage_sensitivity_summary(
+                    root=tmpdir,
+                    configs=configs,
+                    force=True,
+                )
             self.assertEqual(
                 sorted(summary["delta"].dropna().unique().tolist()),
                 list(EVI_SHRINKAGE_GRID),
@@ -62,6 +67,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
 
     def test_build_evi_record_length_sensitivity_summary_emits_expected_n_obs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs: list[object] = []
             for n_obs in (64, 96):
                 configs.extend(
@@ -73,11 +79,12 @@ class EviBenchmarkReportTests(unittest.TestCase):
                         reps=1,
                     )
                 )
-            summary, output_path = build_evi_record_length_sensitivity_summary(
-                root=tmpdir,
-                configs=configs,
-                force=True,
-            )
+            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
+                summary, output_path = build_evi_record_length_sensitivity_summary(
+                    root=tmpdir,
+                    configs=configs,
+                    force=True,
+                )
             self.assertEqual(sorted(summary["n_obs"].dropna().unique().tolist()), [64, 96])
             self.assertEqual(summary["family"].drop_duplicates().tolist(), ["frechet_max_ar"])
             self.assertIn("median_interval_score", summary.columns)
@@ -128,17 +135,19 @@ class EviBenchmarkReportTests(unittest.TestCase):
 
     def test_build_evi_stress_suite_summary_emits_expected_family(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = stress_evi_simulation_configs(
                 xi_values=(0.10,),
                 theta_values=(0.50,),
                 reps=1,
             )
-            summary, output_path = build_evi_stress_suite_summary(
-                root=tmpdir,
-                configs=configs,
-                force=True,
-                max_workers=1,
-            )
+            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
+                summary, output_path = build_evi_stress_suite_summary(
+                    root=tmpdir,
+                    configs=configs,
+                    force=True,
+                    max_workers=1,
+                )
             self.assertEqual(summary["benchmark_set"].drop_duplicates().tolist(), ["stress"])
             self.assertEqual(
                 summary["family"].drop_duplicates().tolist(),
