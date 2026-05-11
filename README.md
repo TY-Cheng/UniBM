@@ -60,11 +60,10 @@ Useful local docs commands:
 
 ```bash
 just docs
-just docs-serve
 ```
 
-`just docs` builds the static site under `site/`.
-`just docs-serve` launches the local preview server.
+`just docs` builds the static site under `site/` and then launches the local
+preview server.
 
 ## Main repo entrypoints
 
@@ -73,11 +72,11 @@ The stable top-level entrypoints are:
 - `just verify`
 - `just data`
 - `just docs`
-- `just docs-serve`
 - `just full`
 
 `just data` materializes the application raw and derived data inputs under
-`DIR_DATA`.
+`DIR_DATA` on the external disk. The repository intentionally does not use a
+repo-local `data/` directory or symlink.
 `just full` is the full repo rebuild.
 For benchmark, application, vignette, and manuscript-artifact details, see the
 root `justfile`.

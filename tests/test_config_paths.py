@@ -31,7 +31,10 @@ class ConfigPathTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"DIR_MANUSCRIPT": str(artifact_root), "DIR_DATA": str(data_root)},
+                {
+                    "DIR_MANUSCRIPT": str(artifact_root),
+                    "DIR_DATA": str(data_root),
+                },
                 clear=True,
             ):
                 dirs = resolve_repo_dirs(code_root)
@@ -45,18 +48,41 @@ class ConfigPathTests(unittest.TestCase):
             self.assertEqual(dirs["DIR_MANUSCRIPT_FIGURE"], artifact_root / "Figure")
             self.assertEqual(dirs["DIR_WORKSPACE"], workspace)
 
-    def test_workspace_guessing_still_finds_code_root(self) -> None:
+    def test_workspace_guessing_still_finds_code_root_with_external_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir).resolve()
+            code_root = workspace / "UniBM"
+            data_root = workspace.parent / "external_data"
+            (code_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (code_root / "pyproject.toml").write_text("")
+            with patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=True):
+                dirs = resolve_repo_dirs(workspace)
+
+            self.assertEqual(dirs["DIR_WORK"], code_root)
+            self.assertEqual(dirs["DIR_DATA"], data_root)
+            self.assertEqual(dirs["DIR_WORKSPACE"], workspace)
+
+    def test_missing_data_dir_fails_instead_of_using_repo_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir).resolve()
             code_root = workspace / "UniBM"
             (code_root / "scripts").mkdir(parents=True, exist_ok=True)
             (code_root / "pyproject.toml").write_text("")
-            with patch.dict(os.environ, {}, clear=True):
-                dirs = resolve_repo_dirs(workspace)
 
-            self.assertEqual(dirs["DIR_WORK"], code_root)
-            self.assertEqual(dirs["DIR_DATA"], code_root / "data")
-            self.assertEqual(dirs["DIR_WORKSPACE"], workspace)
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "DIR_DATA"):
+                    resolve_repo_dirs(workspace)
+
+    def test_repo_local_data_dir_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir).resolve()
+            code_root = workspace / "UniBM"
+            (code_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (code_root / "pyproject.toml").write_text("")
+
+            with patch.dict(os.environ, {"DIR_DATA": str(code_root / "data")}, clear=True):
+                with self.assertRaisesRegex(ValueError, "outside the code repo"):
+                    resolve_repo_dirs(workspace)
 
 
 if __name__ == "__main__":

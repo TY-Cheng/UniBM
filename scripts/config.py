@@ -2,7 +2,7 @@
 
 The code repo and manuscript repo may live either as siblings or with the
 manuscript nested inside the code repo. `DIR_WORK` anchors the code repo,
-`DIR_DATA` can point to an external data root, and `DIR_MANUSCRIPT` can
+`DIR_DATA` points to the external data root, and `DIR_MANUSCRIPT` can
 optionally point to the manuscript repo explicitly.
 """
 
@@ -54,12 +54,28 @@ def _resolve_manuscript_root(*, requested_root: Path | None, code_root: Path) ->
     return candidates[0].resolve()
 
 
+def _resolve_external_data_env() -> Path:
+    """Resolve the external data root from the canonical DIR_DATA setting."""
+    data_dir = os.environ.get("DIR_DATA")
+    if not data_dir:
+        raise RuntimeError(
+            "Set DIR_DATA=/Volumes/ExternalSSD/data/unibm in .env. "
+            "Repo-local data/ paths are intentionally unsupported."
+        )
+    return Path(data_dir).expanduser().resolve()
+
+
 def _resolve_data_root(*, code_root: Path) -> Path:
-    """Resolve the data root from an explicit environment path or repo default."""
-    explicit = os.environ.get("DIR_DATA")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    return (code_root / "data").resolve()
+    """Resolve the data root, rejecting repo-local data directories and symlinks."""
+    data_root = _resolve_external_data_env()
+    if data_root == code_root or code_root in data_root.parents:
+        raise ValueError(f"DIR_DATA must point outside the code repo: {data_root}")
+    repo_data = code_root / "data"
+    if repo_data.exists() or repo_data.is_symlink():
+        raise RuntimeError(
+            f"Remove repo-local data path before running UniBM data workflows: {repo_data}"
+        )
+    return data_root
 
 
 def _common_root(*paths: Path) -> Path:
