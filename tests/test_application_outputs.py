@@ -27,6 +27,7 @@ from application.build import (
 from application.outputs import (
     _application_observations_per_year,
     _application_design_life_level_rows,
+    _render_application_summary_main_latex,
     _plot_daily_and_annual,
     _tau_scaling_views_for_fit,
     _draw_ei_ax,
@@ -231,6 +232,38 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertNotEqual(table.iloc[0]["50y_dll"], "NA")
         self.assertIn("[", table.iloc[0]["xi"])
         self.assertIn("[", table.iloc[0]["10y_dll"])
+
+    def test_application_summary_table_rescales_design_life_display_units(self) -> None:
+        base_bundle = _make_nfip_bundle()
+        nfip_bundle = replace(
+            base_bundle,
+            spec=replace(
+                base_bundle.spec,
+                key="tx_nfip_claims",
+                label="Texas NFIP claims",
+                provider="fema",
+            ),
+        )
+        fixed_dll_record = {
+            "dll10": 1.01e9,
+            "dll10_lo": 5.10e8,
+            "dll10_hi": 2.01e9,
+            "dll50": 1.24e10,
+            "dll50_lo": 4.91e9,
+            "dll50_hi": 3.14e10,
+        }
+
+        with mock.patch(
+            "application.outputs.application_design_life_interval_record",
+            return_value=fixed_dll_record,
+        ):
+            table = application_summary_table([nfip_bundle])
+
+        self.assertEqual(table.iloc[0]["10y_dll"], "1,010 [510, 2,010]")
+        self.assertEqual(table.iloc[0]["50y_dll"], "12,400 [4,910, 31,400]")
+        rendered = _render_application_summary_main_latex(table)
+        self.assertNotIn("e", table.iloc[0]["10y_dll"])
+        self.assertIn(r"\(10^6\) 2025 U.S. dollars", rendered)
 
     def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

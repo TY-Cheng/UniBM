@@ -352,6 +352,43 @@ def _format_compact_interval(center: float, lo: float, hi: float) -> str:
     )
 
 
+def _format_readable_scaled_number(value: float, *, scale: float) -> str:
+    """Format a rescaled manuscript-table number without scientific notation."""
+    if not np.isfinite(value):
+        return "NA"
+    scaled = float(value) / scale
+    magnitude = abs(scaled)
+    if magnitude == 0:
+        return "0"
+    if magnitude >= 100:
+        return f"{scaled:,.0f}"
+    if magnitude >= 10:
+        return f"{scaled:,.1f}"
+    if magnitude >= 1:
+        return f"{scaled:,.2f}"
+    return f"{scaled:,.3g}"
+
+
+def _format_scaled_interval(center: float, lo: float, hi: float, *, scale: float) -> str:
+    """Format one rescaled estimate and interval for manuscript display."""
+    if not (np.isfinite(center) and np.isfinite(lo) and np.isfinite(hi)):
+        return "NA"
+    return (
+        f"{_format_readable_scaled_number(center, scale=scale)} "
+        f"[{_format_readable_scaled_number(lo, scale=scale)}, "
+        f"{_format_readable_scaled_number(hi, scale=scale)}]"
+    )
+
+
+def _application_summary_design_life_scale(bundle: ApplicationBundle) -> float:
+    """Return display scaling for the main cross-application summary table."""
+    if bundle.spec.provider == "usgs":
+        return 1e3
+    if bundle.spec.provider == "fema":
+        return 1e6
+    return 1.0
+
+
 def _save_figure_pair(fig, file_path: Path) -> None:
     """Save the publication figure to the requested path."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -817,6 +854,7 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         dll_record = application_design_life_interval_record(bundle)
+        design_life_scale = _application_summary_design_life_scale(bundle)
         rows.append(
             {
                 "Application": bundle.spec.label,
@@ -843,15 +881,17 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     and bundle.ei_bb_sliding_fgls.theta_hat > 0
                     else "NA"
                 ),
-                "10y_dll": _format_compact_interval(
+                "10y_dll": _format_scaled_interval(
                     float(dll_record["dll10"]),
                     float(dll_record["dll10_lo"]),
                     float(dll_record["dll10_hi"]),
+                    scale=design_life_scale,
                 ),
-                "50y_dll": _format_compact_interval(
+                "50y_dll": _format_scaled_interval(
                     float(dll_record["dll50"]),
                     float(dll_record["dll50_lo"]),
                     float(dll_record["dll50_hi"]),
+                    scale=design_life_scale,
                 ),
             }
         )
@@ -874,7 +914,10 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
             r"\(1/\widehat\theta\), to keep the main-text table compact; its confidence "
             r"interval is inherited by reciprocal transformation of the reported "
             r"\(\widehat\theta\) interval. The 10- and 50-year columns report the median "
-            r"design-life level with its selected-fit 95 percent confidence interval. "
+            r"design-life level with its selected-fit 95 percent confidence interval, "
+            r"rescaled for readability: streamflow entries are in "
+            r"\(10^3\,\mathrm{ft}^3\,\mathrm{s}^{-1}\), and NFIP entries are in "
+            r"\(10^6\) 2025 U.S. dollars. "
             r"Streamflow uses the calendar-day basis "
             r"for both severity and persistence; NFIP uses the positive claim-active-day "
             r"basis for severity and the zero-filled calendar-day basis for persistence.}"
