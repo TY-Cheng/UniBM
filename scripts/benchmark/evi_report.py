@@ -1193,7 +1193,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 "\\(\\theta\\). In each cell, the first line reports median Winkler interval score and "
                 "the second line reports median absolute percentage error, both summarized over "
                 "the \\(\\xi\\) grid. "
-                "All interval metrics use 95\\% CI (\\(\\alpha = 0.05\\))."
+                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\))."
             ),
             label="tab:benchmark-evi-summary-main",
             environment="table",
@@ -1296,8 +1296,8 @@ def write_evi_benchmark_manuscript_artifacts(
                     "Slow-convergence stress suite for the sliding-median-FGLS EVI workflow. "
                     "The design uses absolute-Student-t moving-maxima \\(q=99\\) series with "
                     "\\(\\xi \\in \\{0.10, 0.30, 1.0\\}\\), \\(\\theta \\in \\{0.10, 0.50, 1.0\\}\\), and \\(n=365\\). "
-                    "Cells report median Winkler interval score (IQR) / median absolute percentage "
-                    "error (IQR) summarized over the \\(\\xi\\) grid. The purpose is robustness checking under "
+                    "Cells report median Winkler interval score and median absolute percentage "
+                    "error, each followed by its interquartile range (IQR), summarized over the \\(\\xi\\) grid. The purpose is robustness checking under "
                     "heavy-tailed but slower-converging block-maxima behavior, not to define "
                     "a separate benchmark."
                 ),
@@ -1323,8 +1323,8 @@ def write_evi_benchmark_manuscript_artifacts(
                     "EVI record-length sensitivity for the within-BM severity "
                     "comparison used in the main text. The table holds \\(\\theta\\) fixed at 0.10, compares "
                     "\\(n \\in \\{200, 365, 730\\}\\) for the Fréchet max-AR and Pareto additive AR(1) "
-                    "families, and reports median Winkler interval score (IQR) / median absolute "
-                    "percentage error (IQR) across the \\(\\xi\\) grid for disjoint-median-OLS, sliding-median-OLS, "
+                    "families, and reports median Winkler interval score and median absolute "
+                    "percentage error, each followed by its interquartile range (IQR), across the \\(\\xi\\) grid for disjoint-median-OLS, sliding-median-OLS, "
                     "and sliding-median-FGLS. The purpose is to delimit how the short-record "
                     "benchmark narrative transports across nearby record lengths, not to define "
                     "a separate benchmark."

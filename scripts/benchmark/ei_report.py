@@ -943,7 +943,7 @@ def write_ei_benchmark_manuscript_artifacts(
                 "In each cell, the first line reports median Winkler interval score and the "
                 "second line reports median absolute percentage error, both summarized over "
                 "the \\(\\theta\\) grid. "
-                "All interval metrics use 95\\% CI (\\(\\alpha = 0.05\\))."
+                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\))."
             ),
             label="tab:benchmark-ei-summary-main",
             environment="table",

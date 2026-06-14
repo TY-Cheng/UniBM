@@ -267,8 +267,8 @@ _display_workflow_svg(ROOT / "docs" / "_static" / "ei_workflow.dot")
 # `mean-disjoint-OLS`, `mode-disjoint-OLS`, `median-disjoint-OLS`, `median-disjoint-FGLS`, `median-sliding-OLS`, and `median-sliding-FGLS`.
 # That single chart shows the baseline target comparison under the simplest disjoint-OLS setup, then isolates what is gained by covariance-aware regression and by sliding blocks for the median target.
 # The second figure fixes the proposed sliding/FGLS setup and compares `median`, `mean`, and `mode` targets together with published xi baselines `Hill`, `max-spectrum`, `Pickands`, and `DEdH moment`.
-# The internal benchmark tables below report `median Winkler interval score (IQR) / median absolute percentage error (IQR)` from bootstrap-assisted Wald CI for each internal method.
-# The mixed internal-versus-external tables also report `median Winkler interval score (IQR) / median absolute percentage error (IQR)`, with the understanding that internal methods use bootstrap-assisted Wald intervals while the external baselines use their native asymptotic Gaussian/Wald intervals.
+# The internal benchmark tables below report median Winkler interval score and median absolute percentage error, each followed by its interquartile range (IQR), from bootstrap-assisted Wald confidence intervals for each internal method.
+# The mixed internal-versus-external tables report the same median-plus-IQR summaries, with the understanding that internal methods use bootstrap-assisted Wald intervals while the external baselines use their native asymptotic Gaussian/Wald intervals.
 # All interval metrics below use 95% confidence intervals, i.e. `alpha = 0.05` in the Winkler score.
 # The main internal figure therefore returns to the simple two-row view:
 # absolute percentage error and Winkler interval score.
@@ -317,7 +317,7 @@ print(
         benchmark,
         methods=CORE_METHODS,
         benchmark_set=BENCHMARK_SET,
-        caption=f"Core EVI benchmark comparison across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median Winkler interval score (IQR) / median absolute percentage error (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+        caption=f"Core EVI benchmark comparison across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median Winkler interval score and median absolute percentage error, each followed by its interquartile range (IQR). All interval metrics use 95% confidence intervals (alpha = 0.05).",
         label="tab:vignette-benchmark-core",
     )
 )
@@ -328,7 +328,7 @@ print(
         benchmark,
         external_benchmark,
         benchmark_set=BENCHMARK_SET,
-        caption=f"Target-comparison EVI benchmark across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median Winkler interval score (IQR) / median absolute percentage error (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+        caption=f"Target-comparison EVI benchmark across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. Cells report median Winkler interval score and median absolute percentage error, each followed by its interquartile range (IQR). All interval metrics use 95% confidence intervals (alpha = 0.05).",
         label="tab:vignette-benchmark-targets",
     )
 )
@@ -382,7 +382,7 @@ print(
         benchmark,
         external_benchmark,
         benchmark_set=BENCHMARK_SET,
-        caption=f"Appendix EVI interval sharpness-versus-calibration summary across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. All interval metrics use 95% CI (alpha = 0.05).",
+        caption=f"Appendix EVI interval sharpness-versus-calibration summary across the xi grid {{{evi_xi_grid}}} at fixed theta in {{{evi_theta_grid}}}. All interval metrics use 95% confidence intervals (alpha = 0.05).",
         label="tab:vignette-benchmark-interval",
     )
 )
@@ -407,10 +407,10 @@ plt.show()
 # OLS or FGLS pooling on `log(1 / theta_hat(b))`,
 # and log-scale Wald intervals.
 # The external EI baselines are:
-# `Ferro-Segers` with Wald CI,
-# `K-gaps` with profile-likelihood CI,
+# `Ferro-Segers` with Wald confidence intervals,
+# `K-gaps` with profile-likelihood confidence intervals,
 # native sliding `Northrop` with adjusted chandwich profile likelihood,
-# and native sliding `BB` with Wald CI.
+# and native sliding `BB` with Wald confidence intervals.
 #
 # The targets panel below keeps the selected pooled BM finalists
 # `BB-disjoint-FGLS` and `BB-sliding-FGLS`
@@ -434,7 +434,7 @@ display(ei_core_table)
 print(
     ei_story_latex(
         ei_core_table,
-        caption=f"EI core benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median Winkler interval score (IQR) / median absolute percentage error (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+        caption=f"EI core benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median Winkler interval score and median absolute percentage error, each followed by its interquartile range (IQR). All interval metrics use 95% confidence intervals (alpha = 0.05).",
         label="tab:vignette-benchmark-ei-core",
     )
 )
@@ -443,7 +443,7 @@ display(ei_target_table)
 print(
     ei_story_latex(
         ei_target_table,
-        caption=f"EI target benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median Winkler interval score (IQR) / median absolute percentage error (IQR). All interval metrics use 95% CI (alpha = 0.05).",
+        caption=f"EI target benchmark across the theta grid {{{ei_theta_grid}}} at fixed xi in {{{ei_xi_grid}}}. Cells report median Winkler interval score and median absolute percentage error, each followed by its interquartile range (IQR). All interval metrics use 95% confidence intervals (alpha = 0.05).",
         label="tab:vignette-benchmark-ei-targets",
     )
 )

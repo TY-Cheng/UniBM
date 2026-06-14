@@ -163,7 +163,7 @@ FAMILY_LABELS = {
     "frechet_max_ar": "Fréchet max-AR",
     MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
     STRESS_MOVING_MAXIMA_FAMILY: f"Abs-Student-t moving maxima (q={MOVING_MAXIMA_Q})",
-    "pareto_additive_ar1": "Pareto additive AR1",
+    "pareto_additive_ar1": "Pareto additive AR(1)",
 }
 FAMILY_ORDER = (
     "frechet_max_ar",

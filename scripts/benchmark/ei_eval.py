@@ -484,7 +484,7 @@ def evaluate_ei_config(
                     )
                 )
             # Native EI comparators follow the original semiparametric BM papers:
-            # use the sliding-blocks version together with each method's own CI.
+            # use the sliding-blocks version together with each method's own confidence interval.
             external_rows.append(
                 _ei_result_row(
                     cfg,
