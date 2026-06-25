@@ -54,7 +54,7 @@ _require-workflow-env: _require-external-uv-env _require-external-data-dir
 
 # Main Entrypoints
 full workers="6" screening_bootstrap="20": _require-workflow-env
-    just verify
+    just test
     just _docs-build
     just clean-generated
     just benchmark "{{ workers }}"
@@ -93,15 +93,22 @@ vignette: _require-workflow-env
     just sync-env
     uv run python -m jupytext --sync notebooks/vignette.py
     uv run python -m nbconvert --to notebook --execute --inplace notebooks/vignette.ipynb
-    uv run ruff format .
+    just format
 
-verify: _require-workflow-env
-    just sync-env
+test:
+    uv sync --dev
     rm -f .coverage
     uv run coverage run -m unittest discover -s tests -p 'test_*.py'
     uv run coverage report -m
     uv run coverage xml
     uv run coverage html
+    uv run ruff format --check .
+    uv run ruff check .
+
+verify: _require-workflow-env
+    just test
+
+format:
     uv run ruff format .
 
 [private]

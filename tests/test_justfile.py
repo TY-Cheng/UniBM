@@ -24,6 +24,10 @@ class JustfileTests(unittest.TestCase):
         self.assertIn("\napplication workers=", text)
         self.assertIn("\ndata screening_bootstrap=", text)
         self.assertIn("\nvignette:", text)
+        self.assertIn("\ntest:", text)
+        self.assertIn("\nformat:", text)
+        self.assertIn("uv run ruff format --check .", text)
+        self.assertIn("uv run ruff check .", text)
 
     def test_justfile_rejects_repo_local_data_paths(self) -> None:
         text = JUSTFILE.read_text()
@@ -49,6 +53,8 @@ class JustfileTests(unittest.TestCase):
         self.assertIn("application", result.stdout)
         self.assertIn("data", result.stdout)
         self.assertIn("vignette", result.stdout)
+        self.assertIn("test", result.stdout)
+        self.assertIn("format", result.stdout)
 
 
 if __name__ == "__main__":

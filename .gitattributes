@@ -2,7 +2,7 @@
 * text=auto eol=lf
 
 # Notebook – explicit LF so diffs stay consistent across OS.
-scripts/vignette.ipynb text eol=lf
+notebooks/vignette.ipynb text eol=lf
 
 # Binary data files – never touch line endings, never attempt text diff.
 *.pkl     binary

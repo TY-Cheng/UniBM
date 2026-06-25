@@ -38,7 +38,6 @@ from unibm.evi.tail import (
 )
 
 from benchmark.design import (
-    CORE_METHODS,
     ordered_families,
     METHOD_LABELS,
     SimulationConfig,

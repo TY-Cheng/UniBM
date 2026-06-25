@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import tarfile
 import tempfile
@@ -13,6 +14,15 @@ except ImportError:  # pragma: no cover
     import _path_setup as test_paths
 
 ROOT = test_paths.ROOT
+_ABOUT_SPEC = importlib.util.spec_from_file_location(
+    "_unibm_about",
+    ROOT / "src" / "unibm" / "__about__.py",
+)
+assert _ABOUT_SPEC is not None
+assert _ABOUT_SPEC.loader is not None
+_ABOUT_MODULE = importlib.util.module_from_spec(_ABOUT_SPEC)
+_ABOUT_SPEC.loader.exec_module(_ABOUT_MODULE)
+PACKAGE_VERSION = _ABOUT_MODULE.__version__
 
 
 class DistributionArtifactTests(unittest.TestCase):
@@ -28,8 +38,8 @@ class DistributionArtifactTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        cls._wheel = next(build_dir.glob("unibm-0.1.0-*.whl"))
-        cls._sdist = next(build_dir.glob("unibm-0.1.0.tar.gz"))
+        cls._wheel = next(build_dir.glob(f"unibm-{PACKAGE_VERSION}-*.whl"))
+        cls._sdist = next(build_dir.glob(f"unibm-{PACKAGE_VERSION}.tar.gz"))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -102,7 +112,7 @@ class DistributionArtifactTests(unittest.TestCase):
             metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
             metadata = wheel.read(metadata_name).decode("utf-8")
 
-        self.assertIn("Version: 0.1.0", metadata)
+        self.assertIn(f"Version: {PACKAGE_VERSION}", metadata)
         self.assertIn(
             "Project-URL: Documentation, https://ty-cheng.github.io/UniBM/",
             metadata,
@@ -117,7 +127,7 @@ class DistributionArtifactTests(unittest.TestCase):
         with tarfile.open(self._sdist, "r:gz") as sdist:
             names = sdist.getnames()
 
-        prefix = "unibm-0.1.0/"
+        prefix = f"unibm-{PACKAGE_VERSION}/"
         self.assertIn(f"{prefix}src/unibm/__init__.py", names)
         self.assertIn(f"{prefix}src/unibm/_block_grid.py", names)
         self.assertIn(f"{prefix}src/unibm/_bootstrap_sampling.py", names)
