@@ -53,6 +53,7 @@ nosetests.xml
 *.py.cover
 
 # Tool caches
+.serena/
 .dmypy.json
 .mypy_cache/
 .ruff_cache/
