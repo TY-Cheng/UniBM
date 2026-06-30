@@ -169,6 +169,13 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
+            label="tab:application-streamflow-gev-check-main",
+            placement="appendix",
+            generated_by="scripts/application/build.py",
+            path=table_dir / "application_streamflow_gev_check_main.tex",
+            root=workspace_root,
+        ),
+        _table_entry(
             label="tab:application-usgs-screening-main",
             placement="appendix",
             generated_by="scripts/application/build.py",

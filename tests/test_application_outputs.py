@@ -27,6 +27,7 @@ from application.build import (
 from application.outputs import (
     _application_observations_per_year,
     _application_design_life_level_rows,
+    _gev_l_moment_return_level,
     _render_application_summary_main_latex,
     _plot_daily_and_annual,
     _tau_scaling_views_for_fit,
@@ -36,6 +37,7 @@ from application.outputs import (
     application_design_life_level_table,
     application_method_rows,
     application_selection_sensitivity_table,
+    application_streamflow_gev_check_table,
     application_summary_table,
     application_usgs_screening_disclosure_table,
     write_application_figures,
@@ -264,6 +266,34 @@ class ApplicationOutputTests(unittest.TestCase):
         rendered = _render_application_summary_main_latex(table)
         self.assertNotIn("e", table.iloc[0]["10y_dll"])
         self.assertIn(r"\(10^6\) 2025 U.S. dollars", rendered)
+
+    def test_gev_l_moment_return_level_is_finite_and_ordered(self) -> None:
+        annual_maxima = pd.Series(
+            [10.0, 12.0, 15.0, 20.0, 30.0, 42.0, 55.0, 70.0],
+            index=range(2000, 2008),
+        )
+
+        q10 = _gev_l_moment_return_level(annual_maxima, 10.0)
+        q50 = _gev_l_moment_return_level(annual_maxima, 50.0)
+
+        self.assertTrue(np.isfinite(q10))
+        self.assertGreater(q50, q10)
+
+    def test_streamflow_gev_check_table_uses_usgs_only(self) -> None:
+        base_bundle = _make_standard_bundle()
+        usgs_bundle = replace(
+            base_bundle,
+            spec=replace(base_bundle.spec, provider="usgs", label="Synthetic streamflow"),
+        )
+
+        table = application_streamflow_gev_check_table([usgs_bundle, _make_nfip_bundle()])
+
+        self.assertEqual(table.shape[0], 1)
+        self.assertEqual(table.iloc[0]["Application"], "Synthetic streamflow")
+        self.assertIn("Annual maxima count", table.columns)
+        self.assertIn("GEV 10y return level", table.columns)
+        self.assertNotEqual(table.iloc[0]["GEV 10y return level"], "NA")
+        self.assertIn("[", table.iloc[0]["UniBM 10y design-life level"])
 
     def test_application_usgs_screening_disclosure_table_reports_screening_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

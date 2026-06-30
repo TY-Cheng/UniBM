@@ -18,6 +18,7 @@ from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+from scipy.special import gamma
 
 if "ipykernel" not in sys.modules:
     matplotlib.use("Agg")
@@ -379,6 +380,34 @@ def _format_scaled_interval(center: float, lo: float, hi: float, *, scale: float
         f"[{_format_readable_scaled_number(lo, scale=scale)}, "
         f"{_format_readable_scaled_number(hi, scale=scale)}]"
     )
+
+
+def _gev_l_moment_return_level(annual_maxima: pd.Series, return_period: float) -> float:
+    """Return an annual-maxima GEV return level from L-moment estimates."""
+    values = np.sort(pd.to_numeric(annual_maxima, errors="coerce").dropna().to_numpy(dtype=float))
+    n = values.size
+    if n < 4:
+        return float("nan")
+    ranks = np.arange(n, dtype=float)
+    b0 = float(np.mean(values))
+    b1 = float(np.mean((ranks / (n - 1)) * values))
+    b2 = float(np.mean((ranks * (ranks - 1) / ((n - 1) * (n - 2))) * values))
+    l1 = b0
+    l2 = 2.0 * b1 - b0
+    l3 = 6.0 * b2 - 6.0 * b1 + b0
+    if not np.isfinite(l2) or l2 <= 0:
+        return float("nan")
+    t3 = l3 / l2
+    c = 2.0 / (3.0 + t3) - np.log(2.0) / np.log(3.0)
+    shape = 7.8590 * c + 2.9554 * c * c
+    if abs(shape) < 1e-8:
+        scale = l2 / np.log(2.0)
+        loc = l1 - 0.5772156649015329 * scale
+        return float(loc - scale * np.log(-np.log(1.0 - 1.0 / return_period)))
+    scale = l2 * shape / (float(gamma(1.0 + shape)) * (1.0 - 2.0 ** (-shape)))
+    loc = l1 - scale * (1.0 - float(gamma(1.0 + shape))) / shape
+    probability = 1.0 - 1.0 / return_period
+    return float(loc + scale / shape * (1.0 - (-np.log(probability)) ** shape))
 
 
 def _application_summary_design_life_scale(bundle: ApplicationBundle) -> float:
@@ -893,6 +922,45 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     float(dll_record["dll50_lo"]),
                     float(dll_record["dll50_hi"]),
                     scale=design_life_scale,
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build the streamflow annual-maxima GEV scale-check table."""
+    rows: list[dict[str, object]] = []
+    for bundle in bundles:
+        if bundle.spec.provider != "usgs":
+            continue
+        dll_record = application_design_life_interval_record(bundle)
+        scale = _application_summary_design_life_scale(bundle)
+        rows.append(
+            {
+                "Application": bundle.spec.label,
+                "Annual maxima count": str(
+                    int(bundle.prepared.display.annual_maxima.dropna().size)
+                ),
+                "GEV 10y return level": _format_readable_scaled_number(
+                    _gev_l_moment_return_level(bundle.prepared.display.annual_maxima, 10.0),
+                    scale=scale,
+                ),
+                "UniBM 10y design-life level": _format_scaled_interval(
+                    float(dll_record["dll10"]),
+                    float(dll_record["dll10_lo"]),
+                    float(dll_record["dll10_hi"]),
+                    scale=scale,
+                ),
+                "GEV 50y return level": _format_readable_scaled_number(
+                    _gev_l_moment_return_level(bundle.prepared.display.annual_maxima, 50.0),
+                    scale=scale,
+                ),
+                "UniBM 50y design-life level": _format_scaled_interval(
+                    float(dll_record["dll50"]),
+                    float(dll_record["dll50_lo"]),
+                    float(dll_record["dll50_hi"]),
+                    scale=scale,
                 ),
             }
         )
@@ -2087,6 +2155,43 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     (table_dir / "application_summary_main.tex").write_text(
         _render_application_summary_main_latex(summary_table)
     )
+    status("application", "writing streamflow GEV plausibility-check table")
+    streamflow_gev_check = application_streamflow_gev_check_table(manuscript_bundles)
+    streamflow_gev_check.to_csv(out_dir / "application_streamflow_gev_check.csv", index=False)
+    (table_dir / "application_streamflow_gev_check_main.tex").write_text(
+        _render_wrapped_latex_table(
+            streamflow_gev_check,
+            caption=(
+                "Streamflow scale check against conventional annual-maxima GEV return levels. "
+                "GEV entries are L-moment point estimates from annual maxima "
+                "\\citep{hosking_lmoments_1990}; UniBM entries are median design-life levels "
+                "with selected-fit 95 percent confidence intervals from the main workflow. "
+                "The two sets of entries answer different questions and are not interpreted as "
+                "validation against each other; the comparison is included only as a hydrology-facing "
+                "plausibility check on the order of magnitude. The annual-maxima-count column reports "
+                "the number of annual maxima used in the GEV fit. Large differences, especially for "
+                "Texas at 50 years, reflect the distinct estimands: UniBM entries are daily-clock "
+                "horizon-maximum quantiles from the selected block-scaling extrapolation, not "
+                "annual-maxima return levels. All discharge entries are in "
+                "\\(10^3\\,\\mathrm{ft}^3\\,\\mathrm{s}^{-1}\\)."
+            ),
+            label="tab:application-streamflow-gev-check-main",
+            alignments=(
+                "p{0.16\\textwidth}p{0.10\\textwidth}p{0.15\\textwidth}"
+                "p{0.20\\textwidth}p{0.15\\textwidth}p{0.20\\textwidth}"
+            ),
+            size=r"\tiny",
+            header_latex={
+                "Annual maxima count": r"\shortstack[c]{Annual\\ maxima\\ count}",
+                "GEV 10y return level": r"\shortstack[c]{GEV 10y\\ return level}",
+                "UniBM 10y design-life level": r"\shortstack[c]{UniBM 10y\\ design-life level}",
+                "GEV 50y return level": r"\shortstack[c]{GEV 50y\\ return level}",
+                "UniBM 50y design-life level": r"\shortstack[c]{UniBM 50y\\ design-life level}",
+            },
+            caption_raw=True,
+            tabcolsep="1pt",
+        )
+    )
     status("application", "writing application LaTeX design-life-level table")
     (table_dir / "application_design_life_levels_main.tex").write_text(
         render_latex_table(
@@ -2178,10 +2283,14 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_methods": out_dir / "application_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
         "application_usgs_site_screening": out_dir / "application_usgs_site_screening.csv",
+        "application_streamflow_gev_check": out_dir / "application_streamflow_gev_check.csv",
         "application_summary_main": table_dir / "application_summary_main.tex",
         "application_design_life_levels_main": table_dir
         / "application_design_life_levels_main.tex",
         "application_ei_main": table_dir / "application_ei_main.tex",
+        "application_streamflow_gev_check_main": (
+            table_dir / "application_streamflow_gev_check_main.tex"
+        ),
         "application_selection_sensitivity_main": (
             table_dir / "application_selection_sensitivity_main.tex"
         ),
@@ -2195,6 +2304,7 @@ __all__ = [
     "application_method_rows",
     "application_design_life_level_table",
     "application_selection_sensitivity_table",
+    "application_streamflow_gev_check_table",
     "application_summary_record",
     "application_summary_table",
     "application_usgs_screening_disclosure_table",
