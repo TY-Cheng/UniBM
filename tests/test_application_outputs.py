@@ -33,8 +33,10 @@ from application.outputs import (
     _tau_scaling_views_for_fit,
     _draw_ei_ax,
     _draw_design_life_levels_ax,
+    _usgs_screening_has_detail,
     application_ei_method_rows,
     application_design_life_level_table,
+    application_extrapolation_table,
     application_method_rows,
     application_selection_sensitivity_table,
     application_streamflow_gev_check_table,
@@ -267,6 +269,25 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertNotIn("e", table.iloc[0]["10y_dll"])
         self.assertIn(r"\(10^6\) 2025 U.S. dollars", rendered)
 
+    def test_application_extrapolation_table_uses_plateau_and_clock(self) -> None:
+        bundle = _make_standard_bundle()
+
+        table = application_extrapolation_table([bundle])
+
+        plateau_lo, plateau_hi = bundle.evi_fit.plateau_bounds
+        observations_per_year = _application_observations_per_year(bundle)
+        b10 = int(np.ceil(observations_per_year * 10.0))
+        b50 = int(np.ceil(observations_per_year * 50.0))
+        self.assertEqual(table.shape[0], 1)
+        self.assertEqual(table.iloc[0]["Application"], "Synthetic")
+        self.assertEqual(table.iloc[0]["Clock"], "calendar day")
+        self.assertEqual(table.iloc[0]["Plateau"], f"{int(plateau_lo)}--{int(plateau_hi)}")
+        self.assertEqual(table.iloc[0]["$b_{10}$"], f"{b10:,}")
+        self.assertEqual(table.iloc[0]["$b_{50}$"], f"{b50:,}")
+        ratio10 = b10 / plateau_hi
+        expected_ratio10 = f"{ratio10:.1f}" if ratio10 < 100.0 else f"{ratio10:.0f}"
+        self.assertEqual(table.iloc[0]["$b_{10}/b_{\\max}$"], expected_ratio10)
+
     def test_gev_l_moment_return_level_is_finite_and_ordered(self) -> None:
         annual_maxima = pd.Series(
             [10.0, 12.0, 15.0, 20.0, 30.0, 42.0, 55.0, 70.0],
@@ -366,6 +387,29 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertNotIn("Preferred", table.columns)
         self.assertEqual(table.iloc[0]["State / site"], "TX 08066500")
         self.assertEqual(table.iloc[0]["Station"], "Trinity River at Romayor")
+
+    def test_usgs_screening_detail_check_rejects_shortlist_only_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "application_usgs_site_screening.csv"
+            pd.DataFrame(
+                [{"state_code": "TX", "site_no": "08066500", "selected": True}]
+            ).to_csv(path, index=False)
+            self.assertFalse(_usgs_screening_has_detail(path))
+
+            pd.DataFrame(
+                [
+                    {
+                        "state_code": "TX",
+                        "site_no": "08066500",
+                        "recommended": True,
+                        "supports_frechet_working_model": True,
+                        "plateau_points": 9,
+                        "n_years": 102.0,
+                        "xi_lower": 0.31,
+                    }
+                ]
+            ).to_csv(path, index=False)
+            self.assertTrue(_usgs_screening_has_detail(path))
 
     def test_tau_scaling_views_for_fit(self) -> None:
         bundle = _make_standard_bundle()

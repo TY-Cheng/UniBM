@@ -36,6 +36,7 @@ from application.inputs import (
     ensure_usgs_raw_data,
     load_usgs_frozen_sites,
 )
+from application.freeze_usgs import freeze_usgs_station_selection
 from application.diagnostics import (
     application_design_life_interval_record,
 )
@@ -74,6 +75,15 @@ _MANUSCRIPT_APPLICATION_KEYS = (
     "tx_nfip_claims",
     "fl_nfip_claims",
 )
+_USGS_SCREENING_DETAIL_COLUMNS = {
+    "state_code",
+    "site_no",
+    "recommended",
+    "supports_frechet_working_model",
+    "plateau_points",
+    "n_years",
+    "xi_lower",
+}
 
 
 @dataclass(frozen=True)
@@ -928,6 +938,72 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _format_extrapolation_ratio(value: float) -> str:
+    """Format a compact design-life-to-plateau ratio for the appendix table."""
+    if not np.isfinite(value):
+        return "NA"
+    return f"{value:.1f}" if abs(value) < 100.0 else f"{value:.0f}"
+
+
+def application_extrapolation_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
+    """Build the manuscript-facing design-life extrapolation-distance table."""
+    clock_labels = {
+        "calendar_year": "calendar day",
+        "claim_active_day": "claim-active day",
+    }
+    rows: list[dict[str, object]] = []
+    for bundle in bundles:
+        plateau_lo, plateau_hi = bundle.evi_fit.plateau_bounds
+        observations_per_year = _application_observations_per_year(bundle)
+        b10 = int(np.ceil(observations_per_year * 10.0))
+        b50 = int(np.ceil(observations_per_year * 50.0))
+        rows.append(
+            {
+                "Application": bundle.spec.label,
+                "Clock": clock_labels.get(
+                    bundle.spec.design_life_level_basis,
+                    bundle.spec.design_life_level_basis.replace("_", "-"),
+                ),
+                "Plateau": f"{int(plateau_lo)}--{int(plateau_hi)}",
+                "$b_{10}$": f"{b10:,}",
+                "$b_{50}$": f"{b50:,}",
+                "$b_{10}/b_{\\max}$": _format_extrapolation_ratio(b10 / float(plateau_hi)),
+                "$b_{50}/b_{\\max}$": _format_extrapolation_ratio(b50 / float(plateau_hi)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
+    """Render the appendix extrapolation-distance table with booktabs."""
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\scriptsize",
+        r"\setlength{\tabcolsep}{4pt}",
+        (
+            r"\caption{Selected severity scaling windows and design-life block sizes for the "
+            r"four application cases. The plateau column reports the retained block-size range "
+            r"used in the median sliding-FGLS severity fit. The \(b_{10}\) and \(b_{50}\) "
+            r"columns are the block sizes implied by the application-specific observation clock. "
+            r"The ratios compare each design-life block size with the upper end of the selected "
+            r"plateau and are included only to make the extrapolation distance explicit.}"
+        ),
+        r"\label{tab:application-extrapolation-main}",
+        r"\begin{tabular}{p{0.23\textwidth}p{0.17\textwidth}rrrrr}",
+        r"\toprule",
+        (
+            r"Application & Clock & Plateau & \(b_{10}\) & \(b_{50}\) "
+            r"& \(b_{10}/b_{\max}\) & \(b_{50}/b_{\max}\) \\"
+        ),
+        r"\midrule",
+    ]
+    for row in table.itertuples(index=False, name=None):
+        lines.append(" & ".join(latex_escape(value) for value in row) + r" \\")
+    lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
+    return "\n".join(lines)
+
+
 def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     """Build the streamflow annual-maxima GEV scale-check table."""
     rows: list[dict[str, object]] = []
@@ -976,14 +1052,14 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
         r"\setlength{\tabcolsep}{3pt}",
         r"\renewcommand{\arraystretch}{1.05}",
         (
-            r"\caption{Cross-application summary for the four focal case studies. "
+            r"\caption{Cross-application summary for the four application cases. "
             r"Parameter entries report the severity-side estimate \(\widehat\xi\) and the "
             r"persistence-side estimate \(\widehat\theta\) with 95 percent confidence "
             r"intervals. Mean cluster size is reported as the implied point summary "
             r"\(1/\widehat\theta\), to keep the main-text table compact; its confidence "
             r"interval is inherited by reciprocal transformation of the reported "
             r"\(\widehat\theta\) interval. The 10- and 50-year columns report the median "
-            r"design-life level with its selected-fit 95 percent confidence interval, "
+            r"design-life level with its conditional 95 percent confidence interval from the selected fit, "
             r"rescaled for readability: streamflow entries are in "
             r"\(10^3\,\mathrm{ft}^3\,\mathrm{s}^{-1}\), and NFIP entries are in "
             r"\(10^6\) 2025 U.S. dollars. "
@@ -1941,6 +2017,17 @@ def _yes_no_or_na(value: object) -> str:
     return "yes" if bool(value) else "no"
 
 
+def _usgs_screening_has_detail(path: Path) -> bool:
+    """Return whether the USGS screening CSV contains detailed screening columns."""
+    if not path.exists():
+        return False
+    try:
+        columns = set(pd.read_csv(path, nrows=0).columns)
+    except Exception:
+        return False
+    return _USGS_SCREENING_DETAIL_COLUMNS.issubset(columns)
+
+
 def application_usgs_screening_disclosure_table(
     *,
     metadata_dir: Path,
@@ -1963,16 +2050,7 @@ def application_usgs_screening_disclosure_table(
             detailed = pd.read_csv(screening_path)
         except Exception:
             detailed = pd.DataFrame()
-    required = {
-        "state_code",
-        "site_no",
-        "recommended",
-        "supports_frechet_working_model",
-        "plateau_points",
-        "n_years",
-        "xi_lower",
-    }
-    if required.issubset(detailed.columns):
+    if _USGS_SCREENING_DETAIL_COLUMNS.issubset(detailed.columns):
         detailed = detailed.loc[
             :,
             [
@@ -2052,6 +2130,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     table_dir.mkdir(parents=True, exist_ok=True)
     metadata_app_dir.mkdir(parents=True, exist_ok=True)
     ensure_application_metadata(metadata_app_dir)
+    usgs_screening_path = out_dir / "application_usgs_site_screening.csv"
+    if not _usgs_screening_has_detail(usgs_screening_path):
+        status("application", "refreshing detailed USGS site screening table")
+        usgs_screening_path = freeze_usgs_station_selection(root)["screening"]
 
     status("application", "ensuring raw inputs")
     raw_paths = {
@@ -2126,12 +2208,6 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         out_dir / "application_design_life_intervals.csv",
         index=False,
     )
-    usgs_screening_path = out_dir / "application_usgs_site_screening.csv"
-    if not usgs_screening_path.exists():
-        _usgs_site_audit_frame(metadata_app_dir).to_csv(
-            usgs_screening_path,
-            index=False,
-        )
     pd.DataFrame(method_rows).sort_values(["application", "tau", "method"]).to_csv(
         out_dir / "application_methods.csv",
         index=False,
@@ -2155,21 +2231,20 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     (table_dir / "application_summary_main.tex").write_text(
         _render_application_summary_main_latex(summary_table)
     )
-    status("application", "writing streamflow GEV plausibility-check table")
+    status("application", "writing streamflow GEV scale-comparison table")
     streamflow_gev_check = application_streamflow_gev_check_table(manuscript_bundles)
     streamflow_gev_check.to_csv(out_dir / "application_streamflow_gev_check.csv", index=False)
     (table_dir / "application_streamflow_gev_check_main.tex").write_text(
         _render_wrapped_latex_table(
             streamflow_gev_check,
             caption=(
-                "Streamflow scale check against conventional annual-maxima GEV return levels. "
+                "Streamflow scale comparison against conventional annual-maxima GEV return levels. "
                 "GEV entries are L-moment point estimates from annual maxima "
                 "\\citep{hosking_lmoments_1990}; UniBM entries are median design-life levels "
-                "with selected-fit 95 percent confidence intervals from the main workflow. "
-                "The two sets of entries answer different questions and are not interpreted as "
-                "validation against each other; the comparison is included only as a hydrology-facing "
-                "plausibility check on the order of magnitude. The annual-maxima-count column reports "
-                "the number of annual maxima used in the GEV fit. Large differences, especially for "
+                "with conditional 95 percent confidence intervals from the selected fit. "
+                "The two sets of entries answer different questions and are not used to validate "
+                "one another. The comparison is included only to place the streamflow estimates "
+                "beside a familiar annual-maxima scale. Large differences, particularly for "
                 "Texas at 50 years, reflect the distinct estimands: UniBM entries are daily-clock "
                 "horizon-maximum quantiles from the selected block-scaling extrapolation, not "
                 "annual-maxima return levels. All discharge entries are in "
@@ -2231,8 +2306,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_selection_sensitivity_table(bundles),
             caption=(
-                "Parameter-side local selection-sensitivity summary for the four focal "
-                "case studies. Each cell reports the headline \\(\\xi\\) or \\(\\theta\\) "
+                "Local selection sensitivity for the application-side parameter estimates. "
+                "Each cell reports the selected \\(\\xi\\) or \\(\\theta\\) "
                 "estimate together with the min--max range over the three highest-scoring EVI "
                 "plateau windows or EI stable windows under the same fixed selection rule. "
                 "These local ranges complement, but do not replace, the conditional parameter "
@@ -2246,6 +2321,12 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             caption_raw=True,
         )
     )
+    status("application", "writing application extrapolation-distance table")
+    (table_dir / "application_extrapolation_main.tex").write_text(
+        _render_application_extrapolation_main_latex(
+            application_extrapolation_table(manuscript_bundles)
+        )
+    )
     status("application", "writing USGS screening disclosure table")
     (table_dir / "application_usgs_screening_main.tex").write_text(
         _render_wrapped_latex_table(
@@ -2254,8 +2335,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 screening_path=usgs_screening_path,
             ),
             caption=(
-                "USGS streamflow candidate pools for the curated streamflow applications. "
-                "Sites were screened with method-informed criteria: minimum record length 20 years, "
+                "USGS streamflow candidate pools for the reported streamflow applications. "
+                "Sites were screened with pre-specified criteria: minimum record length 20 years, "
                 "minimum plateau size 5 points, \\(\\xi\\) lower bound at least -0.25, and plateau-maxima "
                 "positive share at least 0.95. Ranking then prioritizes Fréchet-domain support, "
                 "plateau size, record length, and \\(\\xi\\) lower bound."
@@ -2294,6 +2375,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_selection_sensitivity_main": (
             table_dir / "application_selection_sensitivity_main.tex"
         ),
+        "application_extrapolation_main": table_dir / "application_extrapolation_main.tex",
         "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
     }
 
@@ -2303,6 +2385,7 @@ __all__ = [
     "application_ei_method_rows",
     "application_method_rows",
     "application_design_life_level_table",
+    "application_extrapolation_table",
     "application_selection_sensitivity_table",
     "application_streamflow_gev_check_table",
     "application_summary_record",

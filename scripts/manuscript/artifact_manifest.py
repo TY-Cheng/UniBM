@@ -169,6 +169,13 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
+            label="tab:application-extrapolation-main",
+            placement="appendix",
+            generated_by="scripts/application/build.py",
+            path=table_dir / "application_extrapolation_main.tex",
+            root=workspace_root,
+        ),
+        _table_entry(
             label="tab:application-streamflow-gev-check-main",
             placement="appendix",
             generated_by="scripts/application/build.py",
@@ -185,7 +192,7 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
     ]
     payload = {
         "paper_scope": "curated four-case manuscript subset",
-        "workspace_root": str(workspace_root),
+        "workspace_root": _relative(workspace_root, root=workspace_root),
         "code_repo_root": _relative(repo_root, root=workspace_root),
         "manuscript_repo_root": _relative(manuscript_dir, root=workspace_root),
         "manuscript_source": _relative(manuscript_dir / "0_manuscript.tex", root=workspace_root),
