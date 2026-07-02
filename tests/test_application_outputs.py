@@ -391,9 +391,9 @@ class ApplicationOutputTests(unittest.TestCase):
     def test_usgs_screening_detail_check_rejects_shortlist_only_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "application_usgs_site_screening.csv"
-            pd.DataFrame(
-                [{"state_code": "TX", "site_no": "08066500", "selected": True}]
-            ).to_csv(path, index=False)
+            pd.DataFrame([{"state_code": "TX", "site_no": "08066500", "selected": True}]).to_csv(
+                path, index=False
+            )
             self.assertFalse(_usgs_screening_has_detail(path))
 
             pd.DataFrame(
