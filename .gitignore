@@ -25,7 +25,6 @@ __pycache__/
 MANIFEST
 build/
 dist/
-uv.lock
 *.egg
 *.egg-info/
 
@@ -42,9 +41,8 @@ venv/
 .coverage.*
 .hypothesis/
 .nox/
-.pytest_cache/
 .tox/
-.cache
+.cache/
 cover/
 coverage.xml
 htmlcov/
@@ -56,7 +54,6 @@ nosetests.xml
 .serena/
 .dmypy.json
 .mypy_cache/
-.ruff_cache/
 dmypy.json
 
 # IPython

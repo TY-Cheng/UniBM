@@ -144,7 +144,7 @@ def _fit_scaling_model(
     if curve is None:
         curve = block_summary_curve(
             arr,
-            np.asarray(block_sizes, dtype=int),
+            block_sizes,
             sliding=sliding,
             quantile=quantile,
             target=target,

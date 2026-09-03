@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .._block_grid import validate_block_sizes
 from .._validation import as_1d_float_array, warn_on_negative_values, warn_on_nonpositive_values
 from .._window_ops import sliding_window_extreme_valid
 from .models import BlockSummaryCurve
@@ -39,12 +40,13 @@ def block_summary_curve(
     target: str = "quantile",
 ) -> BlockSummaryCurve:
     """Summarize block maxima over multiple block sizes."""
-    warn_on_negative_values(vec, context="block_summary_curve", stacklevel=3)
-    block_sizes = np.asarray(block_sizes, dtype=int)
+    arr = as_1d_float_array(vec)
+    warn_on_negative_values(arr, context="block_summary_curve", stacklevel=3)
+    block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
     values = np.empty(block_sizes.size, dtype=float)
     counts = np.empty(block_sizes.size, dtype=int)
     for idx, block_size in enumerate(block_sizes):
-        maxima = block_maxima(vec=vec, block_size=int(block_size), sliding=sliding)
+        maxima = block_maxima(vec=arr, block_size=int(block_size), sliding=sliding)
         counts[idx] = maxima.size
         values[idx] = summarize_block_maxima(maxima, target=target, quantile=quantile)
     excluded = values[np.isfinite(values) & (values <= 0) & (counts > 0)]

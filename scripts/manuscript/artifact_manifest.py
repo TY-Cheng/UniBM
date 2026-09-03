@@ -17,14 +17,21 @@ if __package__ in {None, ""}:
 
 import json
 from pathlib import Path
+import subprocess
 
 from config import resolve_repo_dirs
+from data_prep.constants import ANALYSIS_END_DATE
 from shared.runtime import status
 
 
 def _relative(path: Path, *, root: Path) -> str:
     """Return a stable repo-relative path for manifest serialization."""
     return str(path.resolve().relative_to(root.resolve()))
+
+
+def _git_output(repo_root: Path, *args: str) -> str:
+    """Return one Git query result for provenance serialization."""
+    return subprocess.check_output(["git", *args], cwd=repo_root, text=True).strip()
 
 
 def _figure_entry(
@@ -192,6 +199,11 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
     ]
     payload = {
         "paper_scope": "curated four-case manuscript subset",
+        "analysis_end_date": ANALYSIS_END_DATE,
+        "code_commit": _git_output(repo_root, "rev-parse", "HEAD"),
+        "code_worktree_dirty": bool(
+            _git_output(repo_root, "status", "--porcelain", "--untracked-files=normal")
+        ),
         "workspace_root": _relative(workspace_root, root=workspace_root),
         "code_repo_root": _relative(repo_root, root=workspace_root),
         "manuscript_repo_root": _relative(manuscript_dir, root=workspace_root),

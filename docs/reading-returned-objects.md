@@ -39,7 +39,7 @@ from unibm.ei.preparation import prepare_ei_bundle
 from unibm.ei.bm import estimate_pooled_bm_ei
 
 sample = np.random.default_rng(21).pareto(2.0, 4096) + 1.0
-bundle = prepare_ei_bundle(sample)
+bundle = prepare_ei_bundle(sample, allow_zeros=False)
 fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
 ```
 

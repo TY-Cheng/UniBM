@@ -22,6 +22,10 @@ def select_penultimate_window(
     n = x.size
     if n < min_points:
         raise ValueError("Not enough positive block summaries to select a plateau.")
+    if x.ndim != 1 or y.ndim != 1 or y.size != n:
+        raise ValueError("log_block_sizes and log_values must be matching one-dimensional arrays.")
+    if not np.all(np.isfinite(x)) or np.any(np.diff(x) <= 0):
+        raise ValueError("log_block_sizes must be finite and strictly increasing.")
     lo = int(np.floor(n * trim_fraction))
     hi = n - lo
     lo = min(lo, max(n - min_points, 0))

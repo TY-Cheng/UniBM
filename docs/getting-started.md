@@ -9,7 +9,7 @@ the package layer, not on the full repo orchestration under
 
 ```bash
 cp .env.example .env
-just verify
+just check
 ```
 
 Top-level `just` tasks load `.env` automatically and sync the development
@@ -51,9 +51,14 @@ The shortest EI package workflow is:
 from unibm.ei.preparation import prepare_ei_bundle
 from unibm.ei.bm import estimate_pooled_bm_ei
 
-bundle = prepare_ei_bundle(sample)
+bundle = prepare_ei_bundle(sample, allow_zeros=False)
 ei_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
 ```
+
+Set `allow_zeros=True` only for a regularly spaced series whose observed zeros
+must remain part of the calendar-day clock. With `False`, the input must already
+be a strictly positive series on the caller's chosen clock. Missing or non-finite
+observations are rejected in both modes rather than silently removed.
 
 The scalar/vector outputs from `estimate_design_life_level` are point
 estimates on the original response scale.

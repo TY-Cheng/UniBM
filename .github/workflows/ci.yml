@@ -27,13 +27,10 @@ jobs:
           enable-cache: true
 
       - name: Sync development environment
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Run unit tests with coverage
-        run: uv run coverage run -m unittest discover -s tests -p 'test_*.py'
-
-      - name: Report coverage
-        run: uv run coverage report -m
+        run: uv run pytest -n auto --cov=src/unibm --cov-report=term-missing --cov-fail-under=89
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -58,7 +55,7 @@ jobs:
           enable-cache: true
 
       - name: Sync development environment
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Build MkDocs site
         run: uv run mkdocs build --strict

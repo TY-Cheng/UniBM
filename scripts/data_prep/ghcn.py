@@ -18,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .constants import ANALYSIS_END_DATE
+
 
 GHCN_COLUMNS = ["station_id", "date", "element", "value", "mflag", "qflag", "sflag", "obstime"]
 
@@ -123,6 +125,7 @@ def prepare_precipitation_series(
 ) -> PreparedSeries:
     """Prepare a wet-season precipitation series from daily GHCN data."""
     df = read_ghcn_station_csv(path)
+    df = df[df["date"] <= ANALYSIS_END_DATE]
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
     precipitation = _drop_partial_terminal_year(precipitation)
     precipitation = precipitation[precipitation.index.month.isin(wet_season_months)]
@@ -139,6 +142,7 @@ def prepare_precipitation_series(
             "station_name": "Houston William P Hobby AP",
             "unit": "mm",
             "wet_season_months": wet_season_months,
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
 
@@ -151,6 +155,7 @@ def prepare_hot_dry_series(
 ) -> PreparedSeries:
     """Construct a scalar hot-dry severity index from daily temperature and precipitation."""
     df = read_ghcn_station_csv(path)
+    df = df[df["date"] <= ANALYSIS_END_DATE]
     tmax = _extract_ghcn_element(df, "TMAX", scale=10.0)
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
     date_index = pd.date_range(
@@ -198,6 +203,7 @@ def prepare_hot_dry_series(
             "unit": "dimensionless severity",
             "warm_season_months": warm_season_months,
             "rolling_days": rolling_days,
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
 

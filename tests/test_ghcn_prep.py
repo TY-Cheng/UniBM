@@ -9,6 +9,7 @@ import pandas as pd
 from scripts.data_prep.ghcn import (
     ghcn_station_data_needs_refresh,
     prepare_hot_dry_series,
+    prepare_precipitation_series,
     read_ghcn_station_csv,
 )
 
@@ -68,6 +69,31 @@ class GhcnPrepTests(unittest.TestCase):
 
             self.assertFalse(prepared.series.empty)
             self.assertEqual(int(prepared.series.index.year.max()), 2021)
+
+    def test_analysis_cutoff_makes_live_station_updates_inert(self) -> None:
+        def write_station(path: Path, end_date: str) -> None:
+            lines: list[str] = []
+            for date in pd.date_range("2022-01-01", end_date, freq="D"):
+                year_offset = date.year - 2022
+                tmax = 250 + 5 * year_offset + date.dayofyear % 20
+                precipitation = 50 - 5 * year_offset + date.dayofyear % 10
+                lines.append(f"USW00000001,{date:%Y%m%d},TMAX,{tmax},,,,\n")
+                lines.append(f"USW00000001,{date:%Y%m%d},PRCP,{precipitation},,,,\n")
+            path.write_text("".join(lines), encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            through_2025 = root / "through_2025.csv"
+            through_2026 = root / "through_2026.csv"
+            write_station(through_2025, "2025-12-31")
+            write_station(through_2026, "2026-12-31")
+
+            for prepare in (prepare_precipitation_series, prepare_hot_dry_series):
+                expected = prepare(through_2025)
+                actual = prepare(through_2026)
+
+                pd.testing.assert_series_equal(actual.series, expected.series)
+                self.assertEqual(actual.metadata["analysis_end_date"], "2025-12-31")
 
 
 if __name__ == "__main__":

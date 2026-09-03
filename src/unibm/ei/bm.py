@@ -112,25 +112,26 @@ def _build_bm_estimate(
     """Pool one BM path either by OLS or by FGLS on the transformed scale."""
     selected_levels, selected_z = extract_stable_path_window(path)
     covariance = None
-    used_gls = False
     if bootstrap_result is not None:
         raw_cov = bootstrap_result.get("covariance")
-        boot_levels = np.asarray(bootstrap_result.get("block_sizes", []), dtype=int)
-        if (
-            raw_cov is not None
-            and raw_cov.shape == (selected_levels.size, selected_levels.size)
-            and np.array_equal(boot_levels, selected_levels)
-        ):
-            covariance = raw_cov
-            used_gls = True
+        boot_levels = np.asarray(bootstrap_result.get("block_sizes", []), dtype=int).reshape(-1)
+        if raw_cov is not None:
+            raw_covariance = np.atleast_2d(np.asarray(raw_cov, dtype=float))
+            if raw_covariance.shape == (boot_levels.size, boot_levels.size):
+                lookup = {int(level): idx for idx, level in enumerate(boot_levels)}
+                if all(int(level) in lookup for level in selected_levels):
+                    selected_idx = np.asarray(
+                        [lookup[int(level)] for level in selected_levels], dtype=int
+                    )
+                    covariance = raw_covariance[np.ix_(selected_idx, selected_idx)]
+    if regression == "FGLS" and covariance is None:
+        raise ValueError("FGLS requires bootstrap covariance covering every selected block size.")
     z_hat, se, ci_variant = _pooled_z_fit(
         selected_z,
         covariance=covariance if regression == "FGLS" else None,
         covariance_shrinkage=covariance_shrinkage,
     )
     theta_hat = float(np.exp(-z_hat))
-    if regression == "FGLS" and not used_gls:
-        ci_variant = "ols"
     return ExtremalIndexEstimate(
         method=method,
         theta_hat=theta_hat,
@@ -286,6 +287,8 @@ def estimate_pooled_bm_ei(
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> ExtremalIndexEstimate:
     """Estimate `theta` by pooling an observed BM path over a stable window."""
+    if regression not in {"OLS", "FGLS"}:
+        raise ValueError("regression must be 'OLS' or 'FGLS'.")
     path = bundle.paths[(base_path, sliding)]
     method = f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}"
     return _build_bm_estimate(

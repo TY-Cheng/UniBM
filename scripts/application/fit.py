@@ -6,20 +6,17 @@ from concurrent.futures import ProcessPoolExecutor
 import os
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from unibm.ei import (
     EiPreparedBundle,
     ExtremalIndexEstimate,
+    bootstrap_bm_ei_path,
     estimate_ferro_segers,
     estimate_k_gaps,
     estimate_pooled_bm_ei,
-    extract_stable_path_window,
     prepare_ei_bundle,
 )
-from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
-from unibm.ei.bootstrap import bootstrap_bm_ei_path_draws
 from unibm.evi import estimate_evi_quantile
 from application.specs import (
     APPLICATION_EI_BOOTSTRAP_REPS,
@@ -54,51 +51,6 @@ def _build_application_bundle_worker(
     return build_application_bundle(spec, inputs)
 
 
-def _bootstrap_ei_path_draws(
-    series: pd.Series,
-    *,
-    ei_bundle: EiPreparedBundle,
-    allow_zeros: bool,
-    reps: int = APPLICATION_EI_BOOTSTRAP_REPS,
-    random_state: int = APPLICATION_RANDOM_STATE,
-) -> dict[tuple[str, bool], np.ndarray]:
-    """Bootstrap the application EI z-path variants from one circular sample bank."""
-    sample_bank = draw_circular_block_bootstrap_samples(
-        series.to_numpy(dtype=float),
-        reps=reps,
-        random_state=random_state,
-    )
-    return bootstrap_bm_ei_path_draws(
-        sample_bank.samples,
-        block_sizes=ei_bundle.block_sizes,
-        path_keys=(("bb", True), ("northrop", True)),
-        allow_zeros=allow_zeros,
-    )
-
-
-def _materialize_ei_bootstrap_result(
-    ei_bundle: EiPreparedBundle,
-    path_draws: dict[tuple[str, bool], np.ndarray],
-    *,
-    base_path: str,
-    sliding: bool,
-) -> dict[str, np.ndarray | None]:
-    """Build one pooled-BM FGLS covariance summary aligned to a selected path."""
-    selected_levels, _ = extract_stable_path_window(ei_bundle.paths[(base_path, sliding)])
-    full_levels = np.asarray(ei_bundle.block_sizes, dtype=int)
-    selected_idx = [int(np.flatnonzero(full_levels == level)[0]) for level in selected_levels]
-    selected_draws = path_draws[(base_path, sliding)][:, selected_idx]
-    valid_draws = selected_draws[np.all(np.isfinite(selected_draws), axis=1)]
-    covariance = None
-    if valid_draws.shape[0] >= 2:
-        covariance = np.atleast_2d(np.cov(valid_draws, rowvar=False))
-    return {
-        "block_sizes": selected_levels,
-        "samples": valid_draws,
-        "covariance": covariance,
-    }
-
-
 def fit_application_ei_estimates(
     series: pd.Series,
     *,
@@ -112,25 +64,18 @@ def fit_application_ei_estimates(
     ei_bundle = prepare_ei_bundle(series.values, allow_zeros=allow_zeros)
     if label is not None:
         status(status_prefix, f"bootstrapping EI covariance for {label}")
-    path_draws = _bootstrap_ei_path_draws(
-        series,
-        ei_bundle=ei_bundle,
-        allow_zeros=allow_zeros,
-        reps=APPLICATION_EI_BOOTSTRAP_REPS,
-        random_state=APPLICATION_RANDOM_STATE,
-    )
-    bb_bootstrap_result = _materialize_ei_bootstrap_result(
-        ei_bundle,
-        path_draws,
-        base_path="bb",
-        sliding=True,
-    )
-    northrop_bootstrap_result = _materialize_ei_bootstrap_result(
-        ei_bundle,
-        path_draws,
-        base_path="northrop",
-        sliding=True,
-    )
+    bootstrap_results = {
+        base_path: bootstrap_bm_ei_path(
+            ei_bundle.values,
+            base_path=base_path,
+            sliding=True,
+            block_sizes=ei_bundle.block_sizes,
+            reps=APPLICATION_EI_BOOTSTRAP_REPS,
+            random_state=APPLICATION_RANDOM_STATE,
+            allow_zeros=allow_zeros,
+        )
+        for base_path in ("bb", "northrop")
+    }
     if label is not None:
         status(status_prefix, f"fitting BB-sliding-FGLS EI for {label}")
     bb_sliding_fgls = estimate_pooled_bm_ei(
@@ -138,7 +83,7 @@ def fit_application_ei_estimates(
         base_path="bb",
         sliding=True,
         regression="FGLS",
-        bootstrap_result=bb_bootstrap_result,
+        bootstrap_result=bootstrap_results["bb"],
     )
     if label is not None:
         status(status_prefix, f"fitting Northrop-sliding-FGLS EI for {label}")
@@ -147,7 +92,7 @@ def fit_application_ei_estimates(
         base_path="northrop",
         sliding=True,
         regression="FGLS",
-        bootstrap_result=northrop_bootstrap_result,
+        bootstrap_result=bootstrap_results["northrop"],
     )
     if label is not None:
         status(status_prefix, f"fitting K-gaps EI comparator for {label}")

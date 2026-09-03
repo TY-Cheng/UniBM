@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ import pandas as pd
 from scripts.data_prep.usgs import (
     _extract_usgs_daily_series,
     _normalize_site_no,
+    download_usgs_daily_discharge,
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
@@ -78,6 +80,32 @@ class UsgsPrepTests(unittest.TestCase):
             ).to_csv(path, index=False, compression="gzip")
 
             self.assertTrue(usgs_daily_discharge_needs_refresh(path))
+
+    def test_analysis_cutoff_applies_to_download_and_preparation(self) -> None:
+        self.assertEqual(
+            inspect.signature(download_usgs_daily_discharge).parameters["end_date"].default,
+            "2025-12-31",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usgs_02236000.csv.gz"
+            index = pd.date_range("2025-01-01", "2026-12-31", freq="D")
+            pd.DataFrame(
+                {
+                    "date": index.strftime("%Y-%m-%d"),
+                    "discharge_cfs": [10.0] * index.size,
+                    "site_no": ["02236000"] * index.size,
+                    "station_name": ["Station"] * index.size,
+                }
+            ).to_csv(path, index=False, compression="gzip")
+
+            prepared = prepare_usgs_streamflow_series(
+                path,
+                state_code="FL",
+                site_no="02236000",
+            )
+
+            self.assertEqual(prepared.series.index.max(), pd.Timestamp("2025-12-31"))
+            self.assertEqual(prepared.metadata["analysis_end_date"], "2025-12-31")
 
 
 if __name__ == "__main__":

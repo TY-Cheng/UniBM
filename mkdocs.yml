@@ -66,15 +66,9 @@ plugins:
               - "!^_"
 
 markdown_extensions:
-  - admonition
-  - attr_list
-  - footnotes
-  - md_in_html
   - toc:
       permalink: true
-  - pymdownx.details
   - pymdownx.highlight
-  - pymdownx.inlinehilite
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -82,7 +76,7 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
 
 extra_javascript:
-  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - https://unpkg.com/mermaid@10.9.8/dist/mermaid.min.js
   - javascripts/mermaid.js
 
 extra_css:

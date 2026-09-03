@@ -69,6 +69,32 @@ class FemaPrepTests(unittest.TestCase):
             ).to_csv(valid, index=False, compression="gzip")
             self.assertFalse(nfip_claims_needs_refresh(valid, state_code="TX"))
 
+    def test_analysis_cutoff_excludes_later_claims_and_is_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claims_path = root / "claims.csv.gz"
+            cpi_path = root / "cpi.csv"
+            pd.DataFrame(
+                {
+                    "state": ["TX", "TX"],
+                    "dateOfLoss": ["2025-12-31", "2026-01-01"],
+                    "amountPaidOnBuildingClaim": [100.0, 200.0],
+                }
+            ).to_csv(claims_path, index=False, compression="gzip")
+            pd.DataFrame({"year": [2025, 2026], "cpi_2025_base": [100.0, 102.0]}).to_csv(
+                cpi_path, index=False
+            )
+
+            prepared = prepare_nfip_claim_series(
+                claims_path,
+                state_code="TX",
+                cpi_table_path=cpi_path,
+            )
+
+            for series in prepared.values():
+                self.assertEqual(series.series.index.max(), pd.Timestamp("2025-12-31"))
+                self.assertEqual(series.metadata["analysis_end_date"], "2025-12-31")
+
 
 if __name__ == "__main__":
     unittest.main()

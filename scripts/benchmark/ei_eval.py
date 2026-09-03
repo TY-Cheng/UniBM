@@ -281,7 +281,11 @@ def _load_or_compute_ei_bootstrap_bundle(
         bootstrap_reps=reps,
         random_state=random_state,
     )
-    full_draws = bootstrap_bm_ei_path_draws(raw_bootstrap_samples, block_sizes=bundle.block_sizes)
+    full_draws = bootstrap_bm_ei_path_draws(
+        raw_bootstrap_samples,
+        block_sizes=bundle.block_sizes,
+        allow_zeros=False,
+    )
     results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
     for key in EI_BM_PATH_KEYS:
         base_path, sliding = key
@@ -446,7 +450,7 @@ def evaluate_ei_config(
     external_rows: list[dict[str, Any]] = []
     series_bank = load_or_simulate_series_bank(cfg, random_state=random_state, cache_dir=cache_dir)
     for rep, vec in enumerate(series_bank):
-        bundle = prepare_ei_bundle(vec)
+        bundle = prepare_ei_bundle(vec, allow_zeros=False)
         cache_key = f"{cfg.scenario}__seed{random_state}__rep{rep:04d}"
         bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
             vec,

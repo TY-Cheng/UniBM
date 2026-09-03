@@ -38,7 +38,7 @@ cp .env.example .env
 3. Run the lightest repo entrypoint:
 
 ```bash
-just verify
+just check
 ```
 
 Top-level `just` tasks load `.env` automatically and sync the development
@@ -47,7 +47,7 @@ first and then run:
 
 ```bash
 set -a; source .env; set +a
-uv sync --dev
+uv sync --locked --dev
 ```
 
 ## Documentation
@@ -69,11 +69,15 @@ preview server.
 
 The stable top-level entrypoints are:
 
-- `just verify`
+- `just check`
+- `just check-full`
 - `just data`
 - `just docs`
 - `just full`
 
+`just check` runs tests affected by local changes in parallel, then checks all
+formatting and lint rules. `just check-full` runs the complete parallel test
+suite with the coverage gate.
 `just data` materializes the application raw and derived data inputs under
 `DIR_DATA` on the external disk. The repository intentionally does not use a
 repo-local `data/` directory or symlink.

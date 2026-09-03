@@ -53,7 +53,6 @@ class EiBootstrapTests(unittest.TestCase):
         bootstrap_samples = np.vstack(
             [
                 values,
-                np.full(values.size, np.nan, dtype=float),
                 np.roll(values, 3),
             ]
         )
@@ -65,12 +64,29 @@ class EiBootstrapTests(unittest.TestCase):
             block_sizes=block_sizes,
             allow_zeros=True,
         )
-        self.assertEqual(draws[("bb", True)].shape, (3, 4))
-        self.assertTrue(np.isnan(draws[("bb", True)][1]).all())
+        self.assertEqual(draws[("bb", True)].shape, (2, 4))
         for key in draws:
             np.testing.assert_allclose(draws[key], baseline_draws[key], equal_nan=True)
 
-    def test_bootstrap_bm_ei_path_returns_expected_shape(self) -> None:
+        invalid_samples = bootstrap_samples.copy()
+        invalid_samples[0, 10] = np.nan
+        with self.assertRaisesRegex(ValueError, "finite"):
+            bootstrap_bm_ei_path_draws(
+                invalid_samples,
+                block_sizes=block_sizes,
+                allow_zeros=True,
+            )
+        with self.assertRaises(TypeError):
+            bootstrap_bm_ei_path_draws(bootstrap_samples, block_sizes=block_sizes)
+
+        with self.assertRaisesRegex(ValueError, "block_sizes"):
+            bootstrap_bm_ei_path_draws(
+                bootstrap_samples,
+                block_sizes=np.array([4.0, 8.5, 16.0, 32.0]),
+                allow_zeros=True,
+            )
+
+    def test_bootstrap_bm_ei_path_returns_covariance_on_full_grid(self) -> None:
         values = self._zero_inflated_sample()
         block_sizes = np.array([4, 8, 16, 32], dtype=int)
         boot = bootstrap_bm_ei_path(
@@ -83,6 +99,8 @@ class EiBootstrapTests(unittest.TestCase):
             allow_zeros=True,
         )
         self.assertEqual(boot["samples"].shape, (4, 4))
+        self.assertEqual(boot["covariance"].shape, (4, 4))
+        self.assertTrue(np.all(np.isfinite(boot["covariance"])))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import warnings
 
 import numpy as np
 
+from .._block_grid import validate_block_sizes
 from .._validation import warn_on_negative_values
 from .._window_ops import circular_sliding_window_maximum
 
@@ -263,8 +264,8 @@ def build_block_summary_bootstrap_backbone(
     """Precompute the shared super-block state for UniBM bootstrap fitting."""
     warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
     arr = np.asarray(vec, dtype=float).reshape(-1)
-    block_sizes = np.asarray(block_sizes, dtype=int)
-    if np.sum(np.isfinite(arr)) < 64 or block_sizes.size == 0 or reps < 2:
+    block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
+    if np.sum(np.isfinite(arr)) < 64 or reps < 2:
         return None
     max_block_size = int(block_sizes.max())
     if super_block_size is None:
@@ -340,15 +341,16 @@ def circular_block_summary_bootstrap(
     random_state: int | None = 0,
 ) -> dict[str, Any]:
     """Bootstrap one block-summary target by resampling time-series super-blocks."""
-    block_sizes = np.asarray(block_sizes, dtype=int)
-    if block_sizes.size == 0 or reps < 2:
+    arr = np.asarray(vec, dtype=float).reshape(-1)
+    block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
+    if reps < 2:
         return {
             "block_sizes": block_sizes,
             "samples": np.empty((0, block_sizes.size)),
             "covariance": None,
         }
     backbone = build_block_summary_bootstrap_backbone(
-        vec=vec,
+        vec=arr,
         block_sizes=block_sizes,
         sliding=sliding,
         reps=reps,
