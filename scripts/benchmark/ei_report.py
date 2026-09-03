@@ -361,7 +361,7 @@ def build_ei_shrinkage_sensitivity_summary(
             cache_dir=cache_dir,
         )
         for rep, vec in enumerate(series_bank):
-            bundle = prepare_ei_bundle(vec)
+            bundle = prepare_ei_bundle(vec, allow_zeros=False)
             cache_key = f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}"
             bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
                 vec,

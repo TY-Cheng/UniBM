@@ -42,6 +42,9 @@ class EiThresholdTests(unittest.TestCase):
         self.assertGreater(raw_hi, 0.6)
         theta_lo, theta_hi = _log_scale_theta_interval(np.log(2.0), 0.1)
         self.assertGreater(theta_hi, theta_lo)
+        boundary_lo, boundary_hi = _log_scale_theta_interval(0.01, 0.1)
+        self.assertAlmostEqual(boundary_lo, np.exp(-0.206))
+        self.assertEqual(boundary_hi, 1.0)
         invalid_theta_interval = _log_scale_theta_interval(np.nan, 0.1)
         self.assertTrue(np.isnan(invalid_theta_interval[0]))
         self.assertTrue(_intervals_overlap((0.1, 0.4), (0.3, 0.8)))
@@ -129,7 +132,9 @@ class EiThresholdTests(unittest.TestCase):
         self.assertTrue(np.isfinite(zero_gap_candidate.theta_hat))
 
         bundle = prepare_ei_bundle(
-            self._positive_sample(), block_sizes=np.array([4, 8, 16, 32], dtype=int)
+            self._positive_sample(),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            allow_zeros=False,
         )
         ferro = estimate_ferro_segers(bundle)
         kgaps = estimate_k_gaps(bundle)

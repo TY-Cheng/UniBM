@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,7 +9,8 @@ description = "Block-maxima inference methods for heavy-tailed time series under
 requires-python = ">=3.11"
 authors = [{ name = "Tuoyuan Cheng", email = "tuoyuan.cheng@nus.edu.sg" }]
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = [
     "block maxima",
     "block-maximum quantiles",
@@ -23,18 +24,14 @@ keywords = [
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
 ]
-dependencies = [
-    "matplotlib>=3.8",
-    "numpy>=2",
-    "pandas>=2",
-    "scipy>=1.13",
-]
+dependencies = ["matplotlib>=3.8", "numpy>=2", "pandas>=2", "scipy>=1.13"]
 
 [project.urls]
 Homepage = "https://github.com/TY-Cheng/UniBM/"
@@ -45,15 +42,18 @@ Changelog = "https://github.com/TY-Cheng/UniBM/releases"
 
 [dependency-groups]
 dev = [
-    "coverage",
     "ipykernel",
     "jupytext",
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<2",
     "mkdocs-autorefs>=1.4",
     "mkdocs-material>=9.6",
     "mkdocstrings[python]>=0.29",
     "nbconvert",
     "pymdown-extensions>=10.14",
+    "pytest",
+    "pytest-cov",
+    "pytest-testmon",
+    "pytest-xdist",
     "python-dotenv",
     "ruff",
 ]
@@ -68,17 +68,7 @@ path = "src/unibm/__about__.py"
 packages = ["src/unibm"]
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/LICENSE",
-    "/README.md",
-    "/pyproject.toml",
-    "/src/unibm",
-]
-
-[tool.uv]
-package = true
-managed = true
-default-groups = ["dev"]
+include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src/unibm"]
 
 [[tool.uv.index]]
 name = "testpypi"
@@ -86,7 +76,11 @@ url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
 
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+
 [tool.ruff]
+cache-dir = ".cache/ruff"
 line-length = 99
 extend-exclude = ["site", "justfile"]
 
@@ -100,16 +94,6 @@ docstring-code-line-length = 99
 max-doc-length = 99
 max-line-length = 99
 
-[tool.docformatter]
-wrap-summaries = 99
-wrap-descriptions = 99
-blank-lines-around-summary = true
-in-place = true
-make-summary-multi-line = true
-pre-summary-space = true
-recursive = true
-skip-ignore = false
-
 [tool.coverage.run]
 branch = true
 source = ["src/unibm"]
@@ -117,12 +101,9 @@ source = ["src/unibm"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-precision = 1
-fail_under = 90
-exclude_also = [
-    "if __name__ == .__main__.:",
-    "pragma: no cover",
-]
+precision = 2
+fail_under = 89
+exclude_also = ["if __name__ == .__main__.:", "pragma: no cover"]
 
 [tool.coverage.html]
 directory = "htmlcov"

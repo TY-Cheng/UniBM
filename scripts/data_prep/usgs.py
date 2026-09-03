@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 
+from .constants import ANALYSIS_END_DATE
 from .ghcn import PreparedSeries
 
 USGS_DV_ENDPOINT = "https://waterservices.usgs.gov/nwis/dv/"
@@ -153,7 +154,7 @@ def download_usgs_daily_discharge(
     output_path: Path | str,
     *,
     start_date: str | None = DEFAULT_USGS_START_DATE,
-    end_date: str | None = None,
+    end_date: str | None = ANALYSIS_END_DATE,
 ) -> Path:
     """Download one USGS daily-discharge series and save it as a compact CSV.GZ file."""
     params = {
@@ -255,6 +256,7 @@ def prepare_usgs_streamflow_series(
     )
     series = series[np.isfinite(series) & (series >= 0)]
     series = series[~series.index.duplicated(keep="last")].sort_index()
+    series = series.loc[:ANALYSIS_END_DATE]
     series = _drop_partial_terminal_year(series)
     annual_maxima = series.groupby(series.index.year).max()
     resolved_site = str(site_no) if site_no is not None else str(df["site_no"].iloc[0])
@@ -274,6 +276,7 @@ def prepare_usgs_streamflow_series(
             "station_name": resolved_name,
             "state_code": str(state_code).upper(),
             "unit": "cfs",
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
 

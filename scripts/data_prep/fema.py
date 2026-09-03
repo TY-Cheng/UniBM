@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 
+from .constants import ANALYSIS_END_DATE
 from .ghcn import PreparedSeries
 
 OPENFEMA_NFIP_CLAIMS_ENDPOINT = "https://www.fema.gov/api/open/v2/FimaNfipClaims"
@@ -22,7 +23,7 @@ OPENFEMA_TIMEOUT_SECONDS = 60
 OPENFEMA_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 OPENFEMA_MAX_RETRIES = 6
 OPENFEMA_RETRY_BASE_SECONDS = 2.0
-DEFAULT_NFIP_END_DATE = "2025-12-31"
+DEFAULT_NFIP_END_DATE = ANALYSIS_END_DATE
 
 
 def _extract_openfema_records(payload: dict[str, object]) -> list[dict[str, object]]:
@@ -298,6 +299,7 @@ def prepare_nfip_claim_series(
     )
     claims = claims[
         claims["dateOfLoss"].notna()
+        & (claims["dateOfLoss"] <= ANALYSIS_END_DATE)
         & np.isfinite(claims["amountPaidOnBuildingClaim"])
         & (claims["amountPaidOnBuildingClaim"] >= 0)
     ].copy()
@@ -329,6 +331,7 @@ def prepare_nfip_claim_series(
             "unit": "2025 USD",
             "series_role": "display",
             "series_basis": "calendar_day",
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
     evi = PreparedSeries(
@@ -343,6 +346,7 @@ def prepare_nfip_claim_series(
             "unit": "2025 USD",
             "series_role": "evi",
             "series_basis": "claim_active_day",
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
     ei = PreparedSeries(
@@ -357,6 +361,7 @@ def prepare_nfip_claim_series(
             "unit": "2025 USD",
             "series_role": "ei",
             "series_basis": "calendar_day",
+            "analysis_end_date": ANALYSIS_END_DATE,
         },
     )
     return {"display": display, "evi": evi, "ei": ei}

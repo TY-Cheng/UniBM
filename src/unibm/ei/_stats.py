@@ -34,7 +34,7 @@ def _log_scale_theta_interval(
     """Back-transform a central 95% Wald interval from `z = log(1/theta)`."""
     if not np.isfinite(z_hat) or not np.isfinite(standard_error) or standard_error < 0:
         return (float("nan"), float("nan"))
-    z_lo = float(z_hat - Z_CRIT_95 * standard_error)
+    z_lo = max(0.0, float(z_hat - Z_CRIT_95 * standard_error))
     z_hi = float(z_hat + Z_CRIT_95 * standard_error)
     return (float(np.exp(-z_hi)), float(np.exp(-z_lo)))
 

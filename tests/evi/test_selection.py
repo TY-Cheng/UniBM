@@ -70,6 +70,12 @@ class EviSelectionTests(unittest.TestCase):
     def test_select_penultimate_window_validates_input(self) -> None:
         with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
             select_penultimate_window(np.array([1.0, 2.0]), np.array([1.0, 2.0]), min_points=3)
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            select_penultimate_window(
+                np.log(np.array([4.0, 8.0, 8.0, 16.0])),
+                np.arange(4.0),
+                min_points=3,
+            )
 
     def test_select_penultimate_window_supports_two_point_window(self) -> None:
         plateau = select_penultimate_window(

@@ -73,17 +73,56 @@ class EiPathsTests(unittest.TestCase):
         values[mask] = rs.gamma(shape=2.5, scale=2.0, size=int(mask.sum()))
         return values
 
-    def test_series_filters_validate_expected_support(self) -> None:
+    def test_series_validation_preserves_positions_and_rejects_invalid_support(self) -> None:
         positive = _finite_positive_series(np.arange(1.0, 40.0, dtype=float))
         nonnegative = _finite_nonnegative_series(
             np.concatenate([[0.0], np.arange(1.0, 40.0, dtype=float)])
         )
-        self.assertEqual(positive.size, 39)
-        self.assertEqual(nonnegative.size, 40)
-        with self.assertRaisesRegex(ValueError, "at least 32 positive finite observations"):
+        np.testing.assert_array_equal(positive, np.arange(1.0, 40.0, dtype=float))
+        np.testing.assert_array_equal(
+            nonnegative,
+            np.concatenate([[0.0], np.arange(1.0, 40.0, dtype=float)]),
+        )
+
+        invalid_positive = np.arange(1.0, 40.0, dtype=float)
+        invalid_positive[10] = np.nan
+        with self.assertRaisesRegex(ValueError, "finite"):
+            _finite_positive_series(invalid_positive)
+        with self.assertRaisesRegex(ValueError, "strictly positive"):
+            _finite_positive_series(np.concatenate([[0.0], np.arange(1.0, 40.0)]))
+
+        invalid_nonnegative = np.arange(40.0, dtype=float)
+        invalid_nonnegative[10] = np.inf
+        with self.assertRaisesRegex(ValueError, "finite"):
+            _finite_nonnegative_series(invalid_nonnegative)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            _finite_nonnegative_series(np.concatenate([[-1.0], np.arange(39.0)]))
+
+        with self.assertRaisesRegex(ValueError, "at least 32 observations"):
             _finite_positive_series(np.arange(1.0, 10.0, dtype=float))
-        with self.assertRaisesRegex(ValueError, "at least 32 finite non-negative observations"):
+        with self.assertRaisesRegex(ValueError, "at least 32 observations"):
             _finite_nonnegative_series(np.arange(10.0, dtype=float))
+
+    def test_prepare_bundle_requires_clock_choice_and_valid_block_grid(self) -> None:
+        values = self._positive_sample()
+        with self.assertRaises(TypeError):
+            prepare_ei_bundle(values)
+
+        invalid_grids = {
+            "fractional": np.array([4.0, 8.5, 16.0, 32.0]),
+            "duplicate": np.array([4, 8, 8, 16, 32]),
+            "unsorted": np.array([4, 16, 8, 32]),
+            "too small": np.array([1, 4, 8, 16, 32]),
+            "too large": np.array([4, 8, 16, 32, values.size + 1]),
+        }
+        for label, block_sizes in invalid_grids.items():
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, "block_sizes"):
+                    prepare_ei_bundle(
+                        values,
+                        block_sizes=block_sizes,
+                        allow_zeros=False,
+                    )
 
     def test_prepare_bundle_and_allow_zeros_path(self) -> None:
         values = self._zero_inflated_sample()
@@ -116,6 +155,12 @@ class EiPathsTests(unittest.TestCase):
         )
         self.assertEqual(window, baseline_window)
         np.testing.assert_array_equal(mask, baseline_mask)
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            select_stable_path_window(
+                np.array([4, 16, 8, 32], dtype=int),
+                z_path,
+                min_points=3,
+            )
 
         sample = self._positive_sample()
         paths = _build_bm_paths_from_values(sample, block_sizes)

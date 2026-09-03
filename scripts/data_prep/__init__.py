@@ -1,5 +1,6 @@
 """Dataset-specific preparation helpers for manuscript applications."""
 
+from .constants import ANALYSIS_END_DATE
 from .fema import (
     download_nfip_claims_state,
     load_cpi_2025_base,
@@ -20,6 +21,7 @@ from .usgs import (
 )
 
 __all__ = [
+    "ANALYSIS_END_DATE",
     "PreparedSeries",
     "download_nfip_claims_state",
     "download_usgs_daily_discharge",

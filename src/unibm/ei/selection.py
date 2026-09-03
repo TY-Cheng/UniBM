@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .._block_grid import validate_block_sizes
 from .._numeric import prefix_sum
 from .models import EiPathBundle, EiStableWindow
 
@@ -18,8 +19,10 @@ def select_stable_path_window(
     curvature_penalty: float = 0.5,
 ) -> tuple[EiStableWindow, np.ndarray]:
     """Choose the most stable contiguous block-size window on the transformed EI path."""
-    levels = np.asarray(block_sizes, dtype=int)
+    levels = validate_block_sizes(block_sizes)
     z = np.asarray(z_path, dtype=float)
+    if z.ndim != 1 or z.size != levels.size:
+        raise ValueError("z_path must be one-dimensional and match block_sizes.")
     mask = np.isfinite(z)
     levels = levels[mask]
     z = z[mask]

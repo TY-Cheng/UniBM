@@ -5,7 +5,7 @@ from unittest import mock
 
 import numpy as np
 
-from unibm._block_grid import generate_block_sizes
+from unibm._block_grid import generate_block_sizes, validate_block_sizes
 from unibm.evi._regression import (
     _aligned_bootstrap_covariance,
     _fit_linear_model,
@@ -41,6 +41,23 @@ class EviEstimationTests(unittest.TestCase):
             geom=False,
         )
         np.testing.assert_allclose(block_sizes, np.array([4, 8, 12, 16, 20]))
+
+    def test_validate_block_sizes_rejects_invalid_custom_grids(self) -> None:
+        np.testing.assert_array_equal(
+            validate_block_sizes(np.array([4.0, 8.0, 16.0]), n_obs=32),
+            np.array([4, 8, 16]),
+        )
+        invalid_grids = (
+            np.array([4.0, 8.5, 16.0]),
+            np.array([4, 8, 8, 16]),
+            np.array([4, 16, 8, 32]),
+            np.array([1, 4, 8]),
+            np.array([4, 8, 33]),
+        )
+        for block_sizes in invalid_grids:
+            with self.subTest(block_sizes=block_sizes):
+                with self.assertRaisesRegex(ValueError, "block_sizes"):
+                    validate_block_sizes(block_sizes, n_obs=32)
 
     def test_fit_linear_model_and_bootstrap_covariance_alignment(self) -> None:
         x = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)

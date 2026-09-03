@@ -28,7 +28,7 @@ class UniBmPackageSmokeTests(unittest.TestCase):
 
     def test_top_level_package_import_supports_minimal_formal_ei_workflow(self) -> None:
         sample = self._sample(seed=654)
-        bundle = prepare_ei_bundle(sample)
+        bundle = prepare_ei_bundle(sample, allow_zeros=False)
         fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
 
         self.assertTrue(np.isfinite(fit.theta_hat))

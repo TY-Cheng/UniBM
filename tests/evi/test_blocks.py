@@ -41,6 +41,12 @@ class EviBlocksTests(unittest.TestCase):
         self.assertFalse(np.any(zero_curve.positive_mask))
         self.assertTrue(any("non-positive" in str(w.message) for w in caught_zeros))
 
+        with self.assertRaisesRegex(ValueError, "block_sizes"):
+            block_summary_curve(
+                np.arange(1.0, 65.0),
+                np.array([4.0, 8.5, 16.0]),
+            )
+
     def test_quantile_summary_label_behaves_as_expected(self) -> None:
         self.assertEqual(_quantile_summary_label(0.5), "median")
         self.assertEqual(_quantile_summary_label(0.8), "quantile_tau_0.80")

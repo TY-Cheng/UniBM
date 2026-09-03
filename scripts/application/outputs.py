@@ -43,6 +43,7 @@ from application.diagnostics import (
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series, screen_extremal_index_series
 from application.specs import (
+    APPLICATION_EI_BOOTSTRAP_REPS,
     APPLICATION_EI_METHOD_IDS,
     APPLICATION_EVI_METHOD_IDS,
     APPLICATION_DESIGN_LIFE_TAUS,
@@ -56,9 +57,9 @@ from benchmark.common import latex_escape
 from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
 from unibm.ei import (
     EiStableWindow,
+    bootstrap_bm_ei_path,
     estimate_pooled_bm_ei,
 )
-from unibm.ei.bootstrap import bootstrap_bm_ei_path_draws
 from unibm.evi import (
     DEFAULT_CURVATURE_PENALTY,
     ScalingFit,
@@ -66,7 +67,6 @@ from unibm.evi import (
     estimate_target_scaling,
     target_stability_summary,
 )
-from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
 
 
 _MANUSCRIPT_APPLICATION_KEYS = (
@@ -713,62 +713,22 @@ def _top_ei_windows(
     return windows
 
 
-def _bootstrap_ei_path_draws_for_bundle(
-    bundle: ApplicationBundle,
-) -> dict[tuple[str, bool], np.ndarray]:
-    """Bootstrap the four BM EI z-path variants for one application bundle."""
-    assert bundle.ei_bundle is not None
-    sample_bank = draw_circular_block_bootstrap_samples(
-        bundle.prepared.ei.series.to_numpy(dtype=float),
-        reps=120,
-        random_state=APPLICATION_RANDOM_STATE,
-    )
-    return bootstrap_bm_ei_path_draws(
-        sample_bank.samples,
-        block_sizes=bundle.ei_bundle.block_sizes,
-        allow_zeros=bundle.spec.ei_allow_zeros,
-    )
-
-
-def _materialize_application_ei_bootstrap_result(
-    selected_levels: np.ndarray,
-    *,
-    bundle: ApplicationBundle,
-    path_draws: dict[tuple[str, bool], np.ndarray],
-    base_path: str,
-    sliding: bool,
-) -> dict[str, np.ndarray | None]:
-    """Build one pooled-BM covariance bundle aligned to an explicit EI window."""
-    assert bundle.ei_bundle is not None
-    full_levels = np.asarray(bundle.ei_bundle.block_sizes, dtype=int)
-    selected_idx = [int(np.flatnonzero(full_levels == level)[0]) for level in selected_levels]
-    selected_draws = path_draws[(base_path, sliding)][:, selected_idx]
-    valid_draws = selected_draws[np.all(np.isfinite(selected_draws), axis=1)]
-    covariance = None
-    if valid_draws.shape[0] >= 2:
-        covariance = np.atleast_2d(np.cov(valid_draws, rowvar=False))
-    return {
-        "block_sizes": np.asarray(selected_levels, dtype=int),
-        "samples": valid_draws,
-        "covariance": covariance,
-    }
-
-
 def _fit_ei_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> list[object]:
     """Refit the headline BB-sliding-FGLS EI workflow across the top stable windows."""
     if bundle.ei_bundle is None or bundle.ei_bb_sliding_fgls is None:
         return []
     path = bundle.ei_bundle.paths[("bb", True)]
-    path_draws = _bootstrap_ei_path_draws_for_bundle(bundle)
+    bootstrap_result = bootstrap_bm_ei_path(
+        bundle.ei_bundle.values,
+        base_path="bb",
+        sliding=True,
+        block_sizes=bundle.ei_bundle.block_sizes,
+        reps=APPLICATION_EI_BOOTSTRAP_REPS,
+        random_state=APPLICATION_RANDOM_STATE,
+        allow_zeros=bundle.spec.ei_allow_zeros,
+    )
     variants = []
     for window, selected_levels, score in _top_ei_windows(path, top_k=top_k):
-        bootstrap_result = _materialize_application_ei_bootstrap_result(
-            selected_levels,
-            bundle=bundle,
-            path_draws=path_draws,
-            base_path="bb",
-            sliding=True,
-        )
         updated_path = replace(
             path,
             stable_window=window,

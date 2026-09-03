@@ -83,6 +83,12 @@ class EviBootstrapTests(unittest.TestCase):
     def test_build_and_evaluate_backbone(self) -> None:
         sample = self._positive_sample(size=512)
         block_sizes = np.array([4, 8, 16], dtype=int)
+        with self.assertRaisesRegex(ValueError, "block_sizes"):
+            build_block_summary_bootstrap_backbone(
+                sample,
+                np.array([4.0, 8.5, 16.0]),
+                reps=4,
+            )
         self.assertIsNone(build_block_summary_bootstrap_backbone(sample[:32], block_sizes, reps=1))
         backbone = build_block_summary_bootstrap_backbone(
             sample,
