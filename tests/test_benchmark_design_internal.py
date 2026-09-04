@@ -1,16 +1,8 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 import unittest
 
 import numpy as np
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from benchmark.design import FGLS_BOOTSTRAP_REPS, fit_methods_for_series
 from unibm.evi import (
@@ -112,7 +104,3 @@ class BenchmarkDesignInternalTests(unittest.TestCase):
                 (obs_fit.plateau.start, obs_fit.plateau.stop),
                 (exp_fit.plateau.start, exp_fit.plateau.stop),
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

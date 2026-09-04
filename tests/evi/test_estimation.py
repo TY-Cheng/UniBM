@@ -196,7 +196,10 @@ class EviEstimationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "At least 32 finite observations"):
             _fit_scaling_model(np.array([1.0, 2.0, 3.0]), target="quantile")
-        with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
+        with (
+            self.assertWarnsRegex(RuntimeWarning, "non-positive block summaries"),
+            self.assertRaisesRegex(ValueError, "Not enough positive block summaries"),
+        ):
             _fit_scaling_model(np.zeros(64, dtype=float), target="quantile")
 
     def test_prediction_and_design_life_level_helpers(self) -> None:

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from json import JSONDecodeError
 import json
-import os
 from pathlib import Path
-import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -17,6 +15,7 @@ import pandas as pd
 
 from .constants import ANALYSIS_END_DATE
 from .ghcn import PreparedSeries
+from ._io import write_csv_gz_atomic
 
 USGS_DV_ENDPOINT = "https://waterservices.usgs.gov/nwis/dv/"
 DEFAULT_USGS_START_DATE = "1900-01-01"
@@ -61,15 +60,33 @@ def _timeseries_stat_code(item: dict[str, object]) -> str | None:
     return None
 
 
-def _drop_partial_terminal_year(series: pd.Series, *, min_fraction: float = 0.9) -> pd.Series:
-    """Drop the final year when it looks materially incomplete."""
-    if series.empty:
-        return series
-    last_year = int(series.index.year.max())
-    mask_last = series.index.year == last_year
-    if mask_last.sum() < min_fraction * 365:
-        return series.loc[~mask_last]
-    return series
+def _continuous_daily_suffix(series: pd.Series) -> pd.Series:
+    """Return the longest gap-free daily suffix ending at the analysis cutoff."""
+    cutoff = pd.Timestamp(ANALYSIS_END_DATE)
+    if series.empty or cutoff not in series.index:
+        raise ValueError(
+            f"USGS daily series must include the analysis cutoff {ANALYSIS_END_DATE}."
+        )
+    expected = pd.date_range(series.index.min(), cutoff, freq="D")
+    missing = expected.difference(series.index)
+    start = series.index.min() if missing.empty else missing.max() + pd.Timedelta(days=1)
+    suffix = series.loc[start:cutoff]
+    if not suffix.index.equals(pd.date_range(start, cutoff, freq="D")):
+        raise ValueError("USGS daily series did not contain a continuous suffix.")
+    return suffix
+
+
+def _complete_water_year_maxima(series: pd.Series) -> pd.Series:
+    """Return daily-mean discharge maxima for complete Oct--Sep water years."""
+    maxima: dict[int, float] = {}
+    water_years = series.index.year + (series.index.month >= 10).astype(int)
+    for water_year in sorted(set(int(year) for year in water_years)):
+        start = pd.Timestamp(year=water_year - 1, month=10, day=1)
+        stop = pd.Timestamp(year=water_year, month=9, day=30)
+        values = series.loc[start:stop]
+        if values.index.equals(pd.date_range(start, stop, freq="D")):
+            maxima[water_year] = float(values.max())
+    return pd.Series(maxima, dtype=float).rename_axis("water_year")
 
 
 def _extract_usgs_daily_series(payload: dict[str, object]) -> tuple[pd.Series, str]:
@@ -154,9 +171,11 @@ def download_usgs_daily_discharge(
     output_path: Path | str,
     *,
     start_date: str | None = DEFAULT_USGS_START_DATE,
-    end_date: str | None = ANALYSIS_END_DATE,
+    end_date: str = ANALYSIS_END_DATE,
 ) -> Path:
     """Download one USGS daily-discharge series and save it as a compact CSV.GZ file."""
+    if not end_date:
+        raise ValueError("end_date must be explicit; live-default downloads are unsupported.")
     params = {
         "format": "json",
         "sites": str(site_no),
@@ -166,8 +185,7 @@ def download_usgs_daily_discharge(
     }
     if start_date is not None:
         params["startDT"] = start_date
-    if end_date is not None:
-        params["endDT"] = end_date
+    params["endDT"] = end_date
     url = f"{USGS_DV_ENDPOINT}?{urlencode(params)}"
     payload = _open_usgs_json_with_retries(url, site_no=str(site_no))
     series, station_name = _extract_usgs_daily_series(payload)
@@ -179,24 +197,7 @@ def download_usgs_daily_discharge(
             "station_name": station_name,
         }
     )
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=output_path.parent,
-        prefix=f"{output_path.stem}.",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-    try:
-        frame.to_csv(tmp_path, index=False, compression="gzip")
-        os.replace(tmp_path, output_path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except FileNotFoundError:
-                pass
+    write_csv_gz_atomic(frame, output_path)
     return output_path
 
 
@@ -239,7 +240,7 @@ def prepare_usgs_streamflow_series(
     site_no: str | None = None,
     station_name: str | None = None,
 ) -> PreparedSeries:
-    """Prepare one full-year daily-discharge application series."""
+    """Prepare one gap-free daily-discharge application series."""
     df = read_usgs_daily_discharge_csv(path)
     if df.empty:
         raise ValueError("USGS streamflow file did not contain any rows.")
@@ -256,9 +257,8 @@ def prepare_usgs_streamflow_series(
     )
     series = series[np.isfinite(series) & (series >= 0)]
     series = series[~series.index.duplicated(keep="last")].sort_index()
-    series = series.loc[:ANALYSIS_END_DATE]
-    series = _drop_partial_terminal_year(series)
-    annual_maxima = series.groupby(series.index.year).max()
+    series = _continuous_daily_suffix(series.loc[:ANALYSIS_END_DATE])
+    annual_maxima = _complete_water_year_maxima(series)
     resolved_site = str(site_no) if site_no is not None else str(df["site_no"].iloc[0])
     resolved_name = (
         str(station_name)
@@ -277,6 +277,10 @@ def prepare_usgs_streamflow_series(
             "state_code": str(state_code).upper(),
             "unit": "cfs",
             "analysis_end_date": ANALYSIS_END_DATE,
+            "continuity_start": str(series.index.min().date()),
+            "continuity_end": str(series.index.max().date()),
+            "maxima_period": "water_year",
+            "maxima_measurement": "daily_mean_discharge",
         },
     )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
+from functools import cache
 import tempfile
 import unittest
 from unittest import mock
@@ -10,13 +10,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from data_prep.ghcn import PreparedSeries
 from application.build import (
@@ -43,6 +36,7 @@ from application.outputs import (
     application_summary_table,
     application_usgs_screening_disclosure_table,
     write_application_figures,
+    write_application_web_figure,
 )
 from application.specs import APPLICATION_DESIGN_LIFE_TAUS, APPLICATION_RANDOM_STATE
 from benchmark.design import fit_methods_for_series
@@ -59,6 +53,7 @@ def _make_prepared(series: pd.Series, *, name: str, provider: str, role: str) ->
     )
 
 
+@cache
 def _make_standard_bundle() -> object:
     rng = np.random.default_rng(7)
     index = pd.date_range("2000-01-01", periods=365 * 24, freq="D")
@@ -80,6 +75,7 @@ def _make_standard_bundle() -> object:
     return build_application_bundle(spec, inputs)
 
 
+@cache
 def _make_evi_only_bundle() -> object:
     rng = np.random.default_rng(13)
     index = pd.date_range("2001-01-01", periods=365 * 16, freq="D")
@@ -102,6 +98,7 @@ def _make_evi_only_bundle() -> object:
     return build_application_bundle(spec, inputs)
 
 
+@cache
 def _make_nfip_bundle() -> object:
     rng = np.random.default_rng(11)
     index = pd.date_range("2005-01-01", periods=365 * 20, freq="D")
@@ -139,6 +136,18 @@ def _make_nfip_bundle() -> object:
 
 
 class ApplicationOutputTests(unittest.TestCase):
+    def test_nfip_active_day_rate_uses_retained_calendar_window(self) -> None:
+        bundle = _make_nfip_bundle()
+        display = bundle.prepared.display.series
+        evi = bundle.prepared.evi.series
+        expected_years = (display.index.max() - display.index.min()).days / 365.25
+
+        self.assertLess(evi.index.max(), display.index.max())
+        self.assertAlmostEqual(
+            _application_observations_per_year(bundle),
+            evi.size / expected_years,
+        )
+
     def test_application_method_rows_default_to_headline_median_only(self) -> None:
         bundle = _make_standard_bundle()
 
@@ -311,7 +320,7 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(table.shape[0], 1)
         self.assertEqual(table.iloc[0]["Application"], "Synthetic streamflow")
-        self.assertIn("Annual maxima count", table.columns)
+        self.assertIn("Water-year maxima count", table.columns)
         self.assertIn("GEV 10y return level", table.columns)
         self.assertNotEqual(table.iloc[0]["GEV 10y return level"], "NA")
         self.assertIn("[", table.iloc[0]["UniBM 10y design-life level"])
@@ -326,6 +335,9 @@ class ApplicationOutputTests(unittest.TestCase):
   "TX": [
     {"site_no": "08066500", "station_name": "Trinity River at Romayor, TX"},
     {"site_no": "08114000", "station_name": "Brazos River at Richmond, TX"}
+  ],
+  "FL": [
+    {"site_no": "02366500", "station_name": "Choctawhatchee River near Bruce, FL"}
   ]
 }
 """.strip()
@@ -338,12 +350,28 @@ class ApplicationOutputTests(unittest.TestCase):
     "station_name": "Trinity River at Romayor, TX",
     "state_code": "TX",
     "screening_source": "freeze_usgs_station_selection"
+  },
+  "FL": {
+    "site_no": "02366500",
+    "station_name": "Choctawhatchee River near Bruce, FL",
+    "state_code": "FL",
+    "screening_source": "freeze_usgs_station_selection"
   }
 }
 """.strip()
             )
             pd.DataFrame(
                 [
+                    {
+                        "state_code": "FL",
+                        "site_no": "02366500",
+                        "station_name": "Choctawhatchee River near Bruce, FL",
+                        "recommended": True,
+                        "supports_frechet_working_model": True,
+                        "plateau_points": 5,
+                        "n_years": 41.6,
+                        "xi_lower": 0.05,
+                    },
                     {
                         "state_code": "TX",
                         "site_no": "08066500",
@@ -372,21 +400,21 @@ class ApplicationOutputTests(unittest.TestCase):
                 screening_path=screening_path,
             )
 
-        self.assertEqual(table.shape[0], 2)
+        self.assertEqual(table.shape[0], 3)
         self.assertIn("State / site", table.columns)
-        self.assertEqual(table.iloc[0]["Chosen"], "yes")
+        tx = table.loc[table["State / site"] == "TX 08066500"].iloc[0]
+        self.assertEqual(tx["Chosen"], "yes")
         screening_columns = [
             column
             for column in table.columns
             if ("screen" in column.lower()) or ("support" in column.lower())
         ]
         self.assertEqual(screening_columns, ["Fréchet support"])
-        self.assertEqual(table.iloc[0][screening_columns[0]], "yes")
+        self.assertEqual(tx[screening_columns[0]], "yes")
         self.assertIn("Record years", table.columns)
         self.assertIn("$\\xi$ lower", table.columns)
         self.assertNotIn("Preferred", table.columns)
-        self.assertEqual(table.iloc[0]["State / site"], "TX 08066500")
-        self.assertEqual(table.iloc[0]["Station"], "Trinity River at Romayor")
+        self.assertEqual(tx["Station"], "Trinity River at Romayor")
 
     def test_usgs_screening_detail_check_rejects_shortlist_only_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -510,6 +538,16 @@ class ApplicationOutputTests(unittest.TestCase):
             composite_path = fig_dir / "application_composite_synthetic.pdf"
             self.assertTrue(composite_path.exists())
             self.assertGreater(composite_path.stat().st_size, 0)
+
+    def test_write_application_web_figure_writes_browser_ready_png(self) -> None:
+        bundle = _make_evi_only_bundle()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            web_dir = Path(tmpdir)
+            write_application_web_figure(bundle, web_dir)
+            web_path = web_dir / "synthetic_evi_only.png"
+            self.assertTrue(web_path.exists())
+            self.assertGreater(web_path.stat().st_size, 0)
 
     def test_write_application_figures_use_design_life_filename(self) -> None:
         bundle = _make_standard_bundle()
@@ -650,7 +688,3 @@ class ApplicationOutputTests(unittest.TestCase):
             ),
             "annual max building payouts\n(inflation-adjusted 2025 USD)",
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

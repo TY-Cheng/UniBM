@@ -9,14 +9,8 @@ import unibm
 from unibm import evi
 from unibm import ei as ei_module
 
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-ROOT = test_paths.ROOT
+ROOT = Path(__file__).resolve().parents[1]
 SRC_UNIBM = ROOT / "src" / "unibm"
-TEXT_SCAN_SUFFIXES = {".py", ".rst", ".md"}
 FORBIDDEN_IMPORT_PREFIXES = (
     "scripts",
     "application",
@@ -153,14 +147,9 @@ class UniBmPackageStructureTests(unittest.TestCase):
                     msg=f"{path} imports repo-workflow module {target!r}",
                 )
 
-    def test_repo_contains_no_removed_flat_import_statements(self) -> None:
-        skip_roots = {ROOT / "docs" / "_build", ROOT / "dist"}
-        for path in ROOT.rglob("*"):
-            if not path.is_file() or path.suffix not in TEXT_SCAN_SUFFIXES:
-                continue
-            if any(skip_root in path.parents for skip_root in skip_roots):
-                continue
-            if path.suffix == ".py":
+    def test_source_tree_contains_no_removed_flat_import_statements(self) -> None:
+        for source_root in (ROOT / "src", ROOT / "scripts", ROOT / "tests"):
+            for path in source_root.rglob("*.py"):
                 imports = _import_targets(path)
                 self.assertNotIn("unibm.core", imports, msg=f"{path} still imports flat core")
                 self.assertNotIn(

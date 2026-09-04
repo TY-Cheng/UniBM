@@ -54,13 +54,11 @@ def sliding_window_extreme_valid(
     window: int,
     *,
     reducer: Reducer,
-    use_fast_path: bool = True,
 ) -> np.ndarray:
     """Return sliding-window extrema, dropping windows with non-finite inputs."""
     arr = _as_1d_float_array(vec)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
-    del use_fast_path
     fill_value = -np.inf if reducer == "max" else np.inf
     safe = np.where(np.isfinite(arr), arr, fill_value)
     extrema = _rolling_extreme_finite(safe, window, reducer=reducer)
@@ -70,8 +68,6 @@ def sliding_window_extreme_valid(
 def circular_sliding_window_maximum(
     vec: np.ndarray | list[float],
     window: int,
-    *,
-    use_fast_path: bool = False,
 ) -> np.ndarray:
     """Return circular sliding maxima for one segment.
 
@@ -82,7 +78,6 @@ def circular_sliding_window_maximum(
     arr = _as_1d_float_array(vec)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
-    del use_fast_path
     wrapped = np.concatenate([arr, arr[: window - 1]])
     safe = np.where(np.isnan(wrapped), -np.inf, wrapped)
     maxima = _rolling_extreme_finite(safe, window, reducer="max")[: arr.size]

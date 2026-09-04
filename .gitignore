@@ -5,14 +5,41 @@ scratch*
 /doc/
 /site/
 /out/
-/data/
 *.pkl
 *.csv.gz
 *.npz
 
-# Notebook artifacts
-.ipynb_checkpoints/
-!/notebooks/vignette.ipynb
+# Canonical provider snapshots (derived data and download chunks stay ignored)
+/data/*
+!/data/README.md
+!/data/raw/
+/data/raw/*
+!/data/raw/cpi/
+/data/raw/cpi/*
+!/data/raw/cpi/cpi_u_monthly.csv
+!/data/raw/fema/
+/data/raw/fema/*
+!/data/raw/fema/nfip_claims_fl.csv.gz
+!/data/raw/fema/nfip_claims_tx.csv.gz
+!/data/raw/ghcn/
+/data/raw/ghcn/*
+!/data/raw/ghcn/USW00012918.csv.gz
+!/data/raw/ghcn/USW00023183.csv.gz
+!/data/raw/usgs/
+/data/raw/usgs/*
+!/data/raw/usgs/usgs_02236000.csv.gz
+!/data/raw/usgs/usgs_02320500.csv.gz
+!/data/raw/usgs/usgs_02366500.csv.gz
+!/data/raw/usgs/usgs_08066500.csv.gz
+!/data/raw/usgs/usgs_08114000.csv.gz
+!/data/raw/usgs/usgs_08158000.csv.gz
+!/data/metadata/
+/data/metadata/*
+!/data/metadata/sources.json
+!/data/metadata/application/
+/data/metadata/application/*
+!/data/metadata/application/usgs_candidate_sites.json
+!/data/metadata/application/usgs_frozen_sites.json
 
 # Python runtime
 __pycache__/

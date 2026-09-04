@@ -184,7 +184,7 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             np.array([], dtype=float),
         )
         np.testing.assert_allclose(
-            circular_sliding_window_maximum([1.0, 4.0, 2.0], 2, use_fast_path=True),
+            circular_sliding_window_maximum([1.0, 4.0, 2.0], 2),
             np.array([4.0, 4.0, 2.0]),
         )
         np.testing.assert_allclose(

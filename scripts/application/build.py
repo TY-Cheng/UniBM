@@ -44,6 +44,7 @@ from application.outputs import (
     plot_application_target_stability,
     plot_application_time_series,
     write_application_figures,
+    write_application_web_figure,
 )
 from application.specs import (
     APPLICATIONS,
@@ -83,6 +84,7 @@ __all__ = [
     "plot_application_target_stability",
     "plot_application_time_series",
     "write_application_figures",
+    "write_application_web_figure",
 ]
 
 

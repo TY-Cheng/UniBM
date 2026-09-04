@@ -13,20 +13,24 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import tempfile
 from typing import Any
+from urllib.request import urlretrieve
 
 import numpy as np
 import pandas as pd
 
 from .constants import ANALYSIS_END_DATE
+from ._io import write_csv_gz_atomic
 
 
 GHCN_COLUMNS = ["station_id", "date", "element", "value", "mflag", "qflag", "sflag", "obstime"]
+GHCN_BY_STATION_ENDPOINT = "https://www.ncei.noaa.gov/pub/data/ghcn/daily/by_station"
 
 
 @dataclass(frozen=True)
 class PreparedSeries:
-    """A prepared univariate series plus annual maxima and provenance metadata."""
+    """A prepared univariate series plus comparison maxima and provenance metadata."""
 
     name: str
     value_name: str
@@ -57,10 +61,31 @@ def read_ghcn_station_csv(path: Path | str) -> pd.DataFrame:
     return df
 
 
+def download_ghcn_station(station_file: str, output_path: Path | str) -> Path:
+    """Download one GHCN station extract truncated at the shared cutoff."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".csv.gz", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        urlretrieve(f"{GHCN_BY_STATION_ENDPOINT}/{station_file}", tmp_path)
+        frame = pd.read_csv(tmp_path, header=None, names=GHCN_COLUMNS, low_memory=False)
+        dates = pd.to_numeric(frame["date"], errors="coerce")
+        cutoff = int(ANALYSIS_END_DATE.replace("-", ""))
+        frame = frame.loc[dates <= cutoff]
+        if frame.empty:
+            raise ValueError(f"GHCN station {station_file} has no data through the cutoff.")
+        write_csv_gz_atomic(frame, output_path, header=False)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    return output_path
+
+
 def ghcn_station_data_needs_refresh(
     path: Path | str,
     *,
     required_elements: tuple[str, ...] = (),
+    expected_station_id: str | None = None,
     min_rows: int = 365,
     min_span_days: int = 365 * 5,
 ) -> bool:
@@ -92,6 +117,10 @@ def ghcn_station_data_needs_refresh(
         available = {str(element) for element in df["element"].dropna().astype(str).unique()}
         if not set(required_elements).issubset(available):
             return True
+    if expected_station_id is not None:
+        station_ids = set(df["station_id"].dropna().astype(str).unique())
+        if station_ids != {expected_station_id}:
+            return True
     return False
 
 
@@ -99,22 +128,59 @@ def _extract_ghcn_element(df: pd.DataFrame, element: str, *, scale: float) -> pd
     """Extract one quality-controlled GHCN element as a dated numeric series."""
     sub = df.loc[df["element"] == element].copy()
     sub = sub[sub["qflag"].isna()]
+    values = pd.to_numeric(sub["value"], errors="coerce").replace(-9999, np.nan) / scale
     series = pd.Series(
-        sub["value"].astype(float).to_numpy() / scale,
+        values.to_numpy(),
         index=pd.DatetimeIndex(sub["date"]),
     )
     return series[~series.index.duplicated(keep="last")].sort_index()
 
 
-def _drop_partial_terminal_year(series: pd.Series, *, min_fraction: float = 0.9) -> pd.Series:
-    """Drop the last calendar year if it appears substantially incomplete."""
-    if series.empty:
-        return series
-    last_year = int(series.index.year.max())
-    mask_last = series.index.year == last_year
-    if mask_last.sum() < min_fraction * 365:
-        return series.loc[~mask_last]
-    return series
+def _season_index(year: int, months: tuple[int, ...]) -> pd.DatetimeIndex:
+    """Return every calendar day in one declared within-year season."""
+    if (
+        not months
+        or tuple(sorted(set(months))) != months
+        or any(month < 1 or month > 12 for month in months)
+    ):
+        raise ValueError(
+            "season months must be unique, strictly increasing integers from 1 to 12."
+        )
+    year_index = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D")
+    return year_index[year_index.month.isin(months)]
+
+
+def _complete_season_suffix_years(
+    requirements: tuple[tuple[pd.Series, int], ...],
+    months: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Return the consecutive complete-season suffix ending in the cutoff year."""
+    if not requirements or any(series.empty for series, _ in requirements):
+        raise ValueError("GHCN inputs must contain the required elements.")
+    cutoff_year = pd.Timestamp(ANALYSIS_END_DATE).year
+    earliest_year = max(int(series.index.min().year) for series, _ in requirements)
+    complete: list[int] = []
+    for year in range(cutoff_year, earliest_year - 1, -1):
+        season = _season_index(year, months)
+        valid = True
+        for series, lookback_days in requirements:
+            required = (
+                pd.date_range(season.min() - pd.Timedelta(days=lookback_days), season.max())
+                if lookback_days
+                else season
+            )
+            values = series.reindex(required)
+            if values.isna().any() or not np.all(np.isfinite(values.to_numpy(dtype=float))):
+                valid = False
+                break
+        if not valid:
+            if complete:
+                break
+            raise ValueError(f"GHCN season {cutoff_year} is incomplete at the analysis cutoff.")
+        complete.append(year)
+    if not complete:
+        raise ValueError("GHCN inputs contain no complete seasons.")
+    return tuple(reversed(complete))
 
 
 def prepare_precipitation_series(
@@ -127,8 +193,10 @@ def prepare_precipitation_series(
     df = read_ghcn_station_csv(path)
     df = df[df["date"] <= ANALYSIS_END_DATE]
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
-    precipitation = _drop_partial_terminal_year(precipitation)
-    precipitation = precipitation[precipitation.index.month.isin(wet_season_months)]
+    years = _complete_season_suffix_years(((precipitation, 0),), wet_season_months)
+    precipitation = precipitation[
+        precipitation.index.year.isin(years) & precipitation.index.month.isin(wet_season_months)
+    ]
     if min_wet_day_mm > 0:
         precipitation = precipitation.clip(lower=min_wet_day_mm)
     annual_maxima = precipitation.groupby(precipitation.index.year).max()
@@ -143,6 +211,9 @@ def prepare_precipitation_series(
             "unit": "mm",
             "wet_season_months": wet_season_months,
             "analysis_end_date": ANALYSIS_END_DATE,
+            "season_start_year": years[0],
+            "season_end_year": years[-1],
+            "maxima_period": "season",
         },
     )
 
@@ -158,18 +229,22 @@ def prepare_hot_dry_series(
     df = df[df["date"] <= ANALYSIS_END_DATE]
     tmax = _extract_ghcn_element(df, "TMAX", scale=10.0)
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
+    years = _complete_season_suffix_years(
+        ((tmax, 0), (precipitation, rolling_days - 1)),
+        warm_season_months,
+    )
+    first_season = _season_index(years[0], warm_season_months)
+    last_season = _season_index(years[-1], warm_season_months)
     date_index = pd.date_range(
-        max(tmax.index.min(), precipitation.index.min()),
-        min(tmax.index.max(), precipitation.index.max()),
+        first_season.min() - pd.Timedelta(days=rolling_days - 1),
+        last_season.max(),
         freq="D",
     )
-    coverage = _drop_partial_terminal_year(pd.Series(0.0, index=date_index))
-    date_index = pd.DatetimeIndex(coverage.index)
     tmax = tmax.reindex(date_index)
-    precipitation = precipitation.reindex(date_index).fillna(0.0)
+    precipitation = precipitation.reindex(date_index)
     rolling_precipitation = precipitation.rolling(
         rolling_days,
-        min_periods=max(7, rolling_days // 3),
+        min_periods=rolling_days,
     ).sum()
     daily = pd.DataFrame(
         {
@@ -179,7 +254,7 @@ def prepare_hot_dry_series(
         },
         index=date_index,
     )
-    daily = daily[daily.index.month.isin(warm_season_months)]
+    daily = daily[daily.index.year.isin(years) & daily.index.month.isin(warm_season_months)]
     daily["doy"] = daily.index.dayofyear
     tmax_mean = daily.groupby("doy")["tmax_c"].transform("mean")
     tmax_sd = daily.groupby("doy")["tmax_c"].transform("std").replace(0, np.nan)
@@ -190,7 +265,6 @@ def prepare_hot_dry_series(
         [np.inf, -np.inf], np.nan
     )
     severity = hot_anomaly.clip(lower=0).fillna(0) + dry_anomaly.clip(lower=0).fillna(0)
-    severity = severity[severity > 0]
     annual_maxima = severity.groupby(severity.index.year).max()
     return PreparedSeries(
         name="warm-season hot-dry severity",
@@ -203,7 +277,11 @@ def prepare_hot_dry_series(
             "unit": "dimensionless severity",
             "warm_season_months": warm_season_months,
             "rolling_days": rolling_days,
+            "rolling_min_periods": rolling_days,
             "analysis_end_date": ANALYSIS_END_DATE,
+            "season_start_year": years[0],
+            "season_end_year": years[-1],
+            "maxima_period": "season",
         },
     )
 
@@ -224,8 +302,8 @@ def materialize_derived_series(
     phoenix = prepare_hot_dry_series(phoenix_path)
     houston_file = output_dir / "houston_hobby_precipitation.csv.gz"
     phoenix_file = output_dir / "phoenix_hot_dry_severity.csv.gz"
-    houston.to_frame().to_csv(houston_file, compression="gzip")
-    phoenix.to_frame().to_csv(phoenix_file, compression="gzip")
+    write_csv_gz_atomic(houston.to_frame().reset_index(), houston_file)
+    write_csv_gz_atomic(phoenix.to_frame().reset_index(), phoenix_file)
     metadata = {
         "houston_hobby_precipitation": {
             **houston.metadata,
@@ -240,7 +318,7 @@ def materialize_derived_series(
             "source_url": "https://www.ncei.noaa.gov/pub/data/ghcn/daily/by_station/USW00023183.csv.gz",
         },
     }
-    with (metadata_dir / "sources.json").open("w") as fh:
+    with (metadata_dir / "weather_derived_sources.json").open("w") as fh:
         json.dump(metadata, fh, indent=2)
     return {
         "houston_hobby_precipitation": houston_file,

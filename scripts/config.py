@@ -1,9 +1,8 @@
-"""Repository path resolution shared by domain scripts and the vignette.
+"""Repository path resolution shared by domain scripts.
 
 The code repo and manuscript repo may live either as siblings or with the
-manuscript nested inside the code repo. `DIR_WORK` anchors the code repo,
-`DIR_DATA` points to the external data root, and `DIR_MANUSCRIPT` can
-optionally point to the manuscript repo explicitly.
+manuscript nested inside the code repo. Code and data roots are derived from
+this file; `DIR_MANUSCRIPT` can optionally point to the manuscript repo.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from dotenv import load_dotenv
 
 _FALLBACK_REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(_FALLBACK_REPO_ROOT / ".env")
-_DEFAULT_REPO_ROOT = Path(os.environ.get("DIR_WORK", _FALLBACK_REPO_ROOT)).expanduser().resolve()
+_DEFAULT_REPO_ROOT = _FALLBACK_REPO_ROOT
 
 
 def _looks_like_code_repo(path: Path) -> bool:
@@ -54,28 +53,9 @@ def _resolve_manuscript_root(*, requested_root: Path | None, code_root: Path) ->
     return candidates[0].resolve()
 
 
-def _resolve_external_data_env() -> Path:
-    """Resolve the external data root from the canonical DIR_DATA setting."""
-    data_dir = os.environ.get("DIR_DATA")
-    if not data_dir:
-        raise RuntimeError(
-            "Set DIR_DATA=/Volumes/ExternalSSD/data/unibm in .env. "
-            "Repo-local data/ paths are intentionally unsupported."
-        )
-    return Path(data_dir).expanduser().resolve()
-
-
 def _resolve_data_root(*, code_root: Path) -> Path:
-    """Resolve the data root, rejecting repo-local data directories and symlinks."""
-    data_root = _resolve_external_data_env()
-    if data_root == code_root or code_root in data_root.parents:
-        raise ValueError(f"DIR_DATA must point outside the code repo: {data_root}")
-    repo_data = code_root / "data"
-    if repo_data.exists() or repo_data.is_symlink():
-        raise RuntimeError(
-            f"Remove repo-local data path before running UniBM data workflows: {repo_data}"
-        )
-    return data_root
+    """Return the repository-local canonical data root."""
+    return code_root / "data"
 
 
 def _common_root(*paths: Path) -> Path:
@@ -84,7 +64,7 @@ def _common_root(*paths: Path) -> Path:
 
 
 def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
-    """Return the canonical repo directories and export them to the environment."""
+    """Return the canonical repository directories."""
     requested_root = Path(dir_work).expanduser().resolve() if dir_work else _DEFAULT_REPO_ROOT
     work = _resolve_code_root(requested_root)
     manuscript = _resolve_manuscript_root(requested_root=requested_root, code_root=work)
@@ -99,6 +79,7 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
         "DIR_DATA_RAW_GHCN": data_root / "raw" / "ghcn",
         "DIR_DATA_RAW_USGS": data_root / "raw" / "usgs",
         "DIR_DATA_RAW_FEMA": data_root / "raw" / "fema",
+        "DIR_DATA_RAW_CPI": data_root / "raw" / "cpi",
         "DIR_DATA_DERIVED": data_root / "derived",
         "DIR_DATA_METADATA": data_root / "metadata",
         "DIR_DATA_METADATA_APPLICATION": data_root / "metadata" / "application",
@@ -110,6 +91,4 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
         "DIR_MANUSCRIPT_FIGURE": manuscript / "Figure",
         "DIR_MANUSCRIPT_TABLE": manuscript / "Table",
     }
-    for key, value in dirs.items():
-        os.environ[key] = str(value)
     return dirs

@@ -42,13 +42,10 @@ Changelog = "https://github.com/TY-Cheng/UniBM/releases"
 
 [dependency-groups]
 dev = [
-    "ipykernel",
-    "jupytext",
     "mkdocs>=1.6,<2",
     "mkdocs-autorefs>=1.4",
     "mkdocs-material>=9.6",
     "mkdocstrings[python]>=0.29",
-    "nbconvert",
     "pymdown-extensions>=10.14",
     "pytest",
     "pytest-cov",
@@ -78,6 +75,7 @@ explicit = true
 
 [tool.pytest.ini_options]
 cache_dir = ".cache/pytest"
+pythonpath = ["src", "scripts"]
 
 [tool.ruff]
 cache-dir = ".cache/ruff"

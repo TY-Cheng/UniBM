@@ -1,17 +1,9 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 from contextlib import redirect_stdout
 import io
 import unittest
 from unittest import mock
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from shared.runtime import resolve_bool_env, resolve_int_env, status
 
@@ -42,7 +34,3 @@ class WorkflowRuntimeTests(unittest.TestCase):
             self.assertFalse(resolve_bool_env("BOOL_ENV", default=True))
         with mock.patch.dict("os.environ", {"BOOL_ENV": "unexpected"}, clear=False):
             self.assertTrue(resolve_bool_env("BOOL_ENV", default=True))
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -15,7 +13,9 @@ import numpy as np
 import pandas as pd
 
 from .constants import ANALYSIS_END_DATE
+from .cpi import CPI_2025_ANNUAL_AVERAGE, CPI_U_SERIES_ID
 from .ghcn import PreparedSeries
+from ._io import write_csv_gz_atomic
 
 OPENFEMA_NFIP_CLAIMS_ENDPOINT = "https://www.fema.gov/api/open/v2/FimaNfipClaims"
 OPENFEMA_PAGE_SIZE = 5_000
@@ -106,8 +106,8 @@ def _download_nfip_claims_window(
                 f"state eq '{state_code}' and dateOfLoss ge '{start_date}' "
                 f"and dateOfLoss le '{end_date}' and amountPaidOnBuildingClaim ge 0"
             ),
-            "$orderby": "dateOfLoss",
-            "$select": "state,dateOfLoss,amountPaidOnBuildingClaim",
+            "$orderby": "dateOfLoss,id",
+            "$select": "id,state,dateOfLoss,amountPaidOnBuildingClaim",
             "$skip": str(skip),
             "$top": str(page_size),
         }
@@ -128,8 +128,11 @@ def _download_nfip_claims_window(
         skip += len(page)
         time.sleep(1.0)
     if not records:
-        return pd.DataFrame(columns=["state", "dateOfLoss", "amountPaidOnBuildingClaim"])
-    return pd.DataFrame.from_records(records)
+        return pd.DataFrame(columns=["id", "state", "dateOfLoss", "amountPaidOnBuildingClaim"])
+    frame = pd.DataFrame.from_records(records)
+    if "id" not in frame or frame["id"].isna().any() or frame["id"].duplicated().any():
+        raise ValueError("OpenFEMA response must contain one unique id per claim.")
+    return frame
 
 
 def _load_nfip_chunk_if_valid(path: Path) -> pd.DataFrame | None:
@@ -137,31 +140,10 @@ def _load_nfip_chunk_if_valid(path: Path) -> pd.DataFrame | None:
         frame = pd.read_csv(path, parse_dates=["dateOfLoss"])
     except Exception:
         return None
-    required = {"state", "dateOfLoss", "amountPaidOnBuildingClaim"}
+    required = {"id", "state", "dateOfLoss", "amountPaidOnBuildingClaim"}
     if not required.issubset(frame.columns):
         return None
     return frame
-
-
-def _write_csv_gz_atomic(frame: pd.DataFrame, output_path: Path) -> None:
-    """Atomically write one compressed CSV."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=output_path.parent,
-        prefix=f"{output_path.stem}.",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-    try:
-        frame.to_csv(tmp_path, index=False, compression="gzip")
-        os.replace(tmp_path, output_path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def nfip_claims_needs_refresh(
@@ -239,42 +221,49 @@ def download_nfip_claims_state(
             end_date=year_end,
             page_size=page_size,
         )
-        _write_csv_gz_atomic(frame, chunk_path)
+        write_csv_gz_atomic(frame, chunk_path)
         print(f"[fema] {state_code} {year}: wrote {len(frame)} rows to {chunk_path}", flush=True)
         yearly_frames.append(frame)
     frame = pd.concat(yearly_frames, ignore_index=True)
     if frame.empty:
         raise ValueError(f"No OpenFEMA NFIP claims were returned for state={state_code!r}.")
-    frame = frame.sort_values("dateOfLoss").reset_index(drop=True)
-    _write_csv_gz_atomic(frame, output_path)
+    frame = frame.sort_values(["dateOfLoss", "id"]).reset_index(drop=True)
+    write_csv_gz_atomic(frame.drop(columns="id"), output_path)
     print(f"[fema] wrote {len(frame)} rows to {output_path}", flush=True)
     return output_path
 
 
 def read_nfip_claims_csv(path: Path | str) -> pd.DataFrame:
     """Read one compact NFIP claims CSV.GZ file."""
-    return pd.read_csv(path, parse_dates=["dateOfLoss"])
-
-
-def load_cpi_2025_base(path: Path | str) -> pd.Series:
-    """Load the fixed annual CPI-U deflator table with 2025 equal to 100."""
     frame = pd.read_csv(path)
-    if "year" not in frame.columns or "cpi_2025_base" not in frame.columns:
-        raise ValueError("CPI table must contain 'year' and 'cpi_2025_base' columns.")
-    return pd.Series(
-        frame["cpi_2025_base"].astype(float).to_numpy(),
-        index=frame["year"].astype(int).to_numpy(),
-        dtype=float,
-    )
+    frame["dateOfLoss"] = pd.to_datetime(
+        frame["dateOfLoss"], errors="coerce", utc=True
+    ).dt.tz_localize(None)
+    return frame
+
+
+def load_monthly_cpi(path: Path | str) -> pd.Series:
+    """Load monthly not-seasonally-adjusted CPI-U observations."""
+    frame = pd.read_csv(path)
+    if "date" not in frame.columns or "cpi_u" not in frame.columns:
+        raise ValueError("CPI table must contain 'date' and 'cpi_u' columns.")
+    months = pd.to_datetime(frame["date"], errors="raise").dt.to_period("M")
+    values = pd.to_numeric(frame["cpi_u"], errors="raise").astype(float)
+    if months.duplicated().any() or not np.all(np.isfinite(values) & (values > 0)):
+        raise ValueError("CPI table must contain one finite positive value per month.")
+    return pd.Series(values.to_numpy(), index=pd.PeriodIndex(months, name="month"), dtype=float)
 
 
 def _deflate_to_2025_usd(
-    amounts: pd.Series, *, dates: pd.Series, cpi_2025: pd.Series
+    amounts: pd.Series, *, dates: pd.Series, monthly_cpi: pd.Series
 ) -> pd.Series:
-    """Convert nominal claim payouts to 2025 USD using a fixed annual CPI table."""
-    years = dates.dt.year.astype(int)
-    deflator = years.map(cpi_2025)
-    return amounts.astype(float) * (100.0 / deflator.astype(float))
+    """Convert nominal claim payouts to 2025 USD using loss-month CPI-U."""
+    months = dates.dt.to_period("M")
+    deflator = months.map(monthly_cpi)
+    if deflator.isna().any():
+        missing = ", ".join(str(month) for month in sorted(set(months[deflator.isna()])))
+        raise ValueError(f"CPI table is missing claim months: {missing}.")
+    return amounts.astype(float) * (CPI_2025_ANNUAL_AVERAGE / deflator.astype(float))
 
 
 def prepare_nfip_claim_series(
@@ -303,22 +292,27 @@ def prepare_nfip_claim_series(
         & np.isfinite(claims["amountPaidOnBuildingClaim"])
         & (claims["amountPaidOnBuildingClaim"] >= 0)
     ].copy()
-    cpi_2025 = load_cpi_2025_base(cpi_table_path)
+    monthly_cpi = load_monthly_cpi(cpi_table_path)
     claims["amount_real_2025"] = _deflate_to_2025_usd(
         claims["amountPaidOnBuildingClaim"],
         dates=claims["dateOfLoss"],
-        cpi_2025=cpi_2025,
+        monthly_cpi=monthly_cpi,
     )
     claims = claims[np.isfinite(claims["amount_real_2025"])].copy()
     daily = (
         claims.groupby(claims["dateOfLoss"].dt.normalize())["amount_real_2025"].sum().sort_index()
     )
-    full_index = pd.date_range(daily.index.min(), daily.index.max(), freq="D")
+    full_index = pd.date_range(daily.index.min(), ANALYSIS_END_DATE, freq="D")
     zero_filled = daily.reindex(full_index, fill_value=0.0).astype(float)
     positive_only = zero_filled[zero_filled > 0].astype(float)
     state_label = (
         "Florida" if state_code == "FL" else "Texas" if state_code == "TX" else state_code
     )
+    cpi_metadata = {
+        "cpi_series_id": CPI_U_SERIES_ID,
+        "cpi_frequency": "monthly",
+        "cpi_base_2025_annual_average": CPI_2025_ANNUAL_AVERAGE,
+    }
     display = PreparedSeries(
         name=f"{state_label} daily NFIP building payouts",
         value_name="building_payout_2025usd",
@@ -332,6 +326,7 @@ def prepare_nfip_claim_series(
             "series_role": "display",
             "series_basis": "calendar_day",
             "analysis_end_date": ANALYSIS_END_DATE,
+            **cpi_metadata,
         },
     )
     evi = PreparedSeries(
@@ -347,6 +342,7 @@ def prepare_nfip_claim_series(
             "series_role": "evi",
             "series_basis": "claim_active_day",
             "analysis_end_date": ANALYSIS_END_DATE,
+            **cpi_metadata,
         },
     )
     ei = PreparedSeries(
@@ -362,6 +358,7 @@ def prepare_nfip_claim_series(
             "series_role": "ei",
             "series_basis": "calendar_day",
             "analysis_end_date": ANALYSIS_END_DATE,
+            **cpi_metadata,
         },
     )
     return {"display": display, "evi": evi, "ei": ei}
@@ -370,7 +367,7 @@ def prepare_nfip_claim_series(
 __all__ = [
     "OPENFEMA_NFIP_CLAIMS_ENDPOINT",
     "download_nfip_claims_state",
-    "load_cpi_2025_base",
+    "load_monthly_cpi",
     "nfip_claims_needs_refresh",
     "prepare_nfip_claim_series",
     "read_nfip_claims_csv",

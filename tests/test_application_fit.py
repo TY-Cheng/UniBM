@@ -1,5 +1,4 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 import os
 import unittest
@@ -7,13 +6,6 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from application.fit import (
     _application_worker_count,
@@ -114,7 +106,3 @@ class ApplicationFitTests(unittest.TestCase):
                 self.assertEqual(os.environ.get("OMP_NUM_THREADS"), "1")
                 self.assertEqual(os.environ.get("OPENBLAS_NUM_THREADS"), "1")
                 self.assertEqual(os.environ.get("MKL_NUM_THREADS"), "1")
-
-
-if __name__ == "__main__":
-    unittest.main()

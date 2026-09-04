@@ -1,5 +1,4 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 import os
 import unittest
@@ -7,13 +6,6 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from application.screening import screen_extreme_series
 
@@ -44,7 +36,3 @@ class ApplicationScreeningTests(unittest.TestCase):
 
         self.assertGreater(review.n_obs, 0)
         self.assertTrue(np.isfinite(review.xi_hat))
-
-
-if __name__ == "__main__":
-    unittest.main()

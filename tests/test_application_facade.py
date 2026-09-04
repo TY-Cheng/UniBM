@@ -1,17 +1,9 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 import unittest
 
 import numpy as np
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 import application.build as application
 from data_prep.ghcn import PreparedSeries
@@ -78,7 +70,3 @@ class ApplicationFacadeTests(unittest.TestCase):
         self.assertNotEqual(table.loc[0, "Mean cluster size"], "NA")
         self.assertIn("[", table.loc[0, "10y_dll"])
         self.assertIn("[", table.loc[0, "50y_dll"])
-
-
-if __name__ == "__main__":
-    unittest.main()

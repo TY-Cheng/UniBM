@@ -40,6 +40,12 @@ nav:
       - Concepts: concepts.md
       - Worked Examples: worked-examples.md
       - Reading Returned Objects: reading-returned-objects.md
+  - Cases:
+      - Overview: cases/index.md
+      - Climate extremes: cases/climate-extremes.md
+      - Streamflow: cases/streamflow.md
+      - NFIP claims: cases/nfip-claims.md
+  - Validation: validation.md
   - API Reference:
       - Public API: api/public-api.md
       - EVI Namespace: api/evi.md

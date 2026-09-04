@@ -1,4 +1,4 @@
-"""Shared import/bootstrap helpers for direct workflow execution and notebooks."""
+"""Shared import/bootstrap helpers for direct workflow execution."""
 
 from __future__ import annotations
 
@@ -28,19 +28,4 @@ def ensure_scripts_on_path_from_entry(entry_file: str | Path) -> Path:
     return _prepend_repo_import_paths(repo_root)
 
 
-def bootstrap_notebook_scripts_dir(start: str | Path | None = None) -> Path:
-    """Locate and prepend the repository ``scripts/`` and ``src/`` directories."""
-    current = Path.cwd().resolve() if start is None else Path(start).resolve()
-    for candidate in (current, *current.parents):
-        scripts_dir = candidate / "scripts"
-        if (scripts_dir / "config.py").exists():
-            return _prepend_repo_import_paths(candidate)
-    raise FileNotFoundError(
-        "Could not locate scripts/config.py from the current notebook session."
-    )
-
-
-__all__ = [
-    "bootstrap_notebook_scripts_dir",
-    "ensure_scripts_on_path_from_entry",
-]
+__all__ = ["ensure_scripts_on_path_from_entry"]

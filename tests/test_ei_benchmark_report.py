@@ -1,20 +1,11 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
-import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
 
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from benchmark.design import default_ei_simulation_configs
 from benchmark.ei_eval import run_ei_benchmark
@@ -29,7 +20,6 @@ from benchmark.ei_report import (
 class EiBenchmarkReportTests(unittest.TestCase):
     def test_build_ei_shrinkage_sensitivity_summary_emits_expected_grid_and_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = default_ei_simulation_configs(
                 xi_values=(0.50,),
                 theta_values=(0.25,),
@@ -37,12 +27,11 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 n_obs=64,
                 reps=1,
             )
-            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
-                summary, output_path = build_ei_shrinkage_sensitivity_summary(
-                    root=tmpdir,
-                    configs=configs,
-                    force=True,
-                )
+            summary, output_path = build_ei_shrinkage_sensitivity_summary(
+                root=tmpdir,
+                configs=configs,
+                force=True,
+            )
             self.assertEqual(
                 sorted(summary["delta"].dropna().unique().tolist()),
                 list(EI_SHRINKAGE_GRID),
@@ -79,6 +68,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
             )
             fig_dir = Path(tmpdir) / "figures"
             table_dir = Path(tmpdir) / "tables"
+            web_dir = Path(tmpdir) / "web"
             fig_dir.mkdir(parents=True, exist_ok=True)
             table_dir.mkdir(parents=True, exist_ok=True)
             with (
@@ -98,6 +88,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
                     shrinkage_sensitivity_summary=None,
                     fig_dir=fig_dir,
                     table_dir=table_dir,
+                    web_dir=web_dir,
                 )
 
             summary_path = table_dir / "benchmark_ei_summary_main.tex"
@@ -126,6 +117,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 internal_summary,
                 title="",
                 file_path=fig_dir / "benchmark_ei_summary.pdf",
+                web_path=web_dir / "ei_benchmark.png",
                 save=True,
             )
             target_panels.assert_called_once_with(
@@ -148,7 +140,3 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 save=True,
             )
             shrinkage_panels.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

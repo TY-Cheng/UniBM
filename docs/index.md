@@ -17,6 +17,9 @@
         <a class="unibm-button unibm-button-secondary" href="worked-examples/">
           See runnable examples
         </a>
+        <a class="unibm-button unibm-button-secondary" href="cases/">
+          Explore case studies
+        </a>
       </div>
     </div>
     <aside class="unibm-panel unibm-panel-secondary">
@@ -31,8 +34,8 @@
           <span><code>unibm</code>, <code>unibm.evi</code>, <code>unibm.ei</code>, and <code>unibm.cdf</code>.</span>
         </div>
         <div class="unibm-metric">
-          <strong>Repo workflow</strong>
-          <span>Benchmarks, applications, and notebooks stay behind the root <a href="https://github.com/TY-Cheng/UniBM/blob/main/justfile">justfile</a>.</span>
+          <strong>Six case studies</strong>
+          <span>Climate extremes, streamflow, and NFIP claims with frozen evidence and explicit limits.</span>
         </div>
       </div>
     </aside>
@@ -60,6 +63,29 @@
   </a>
 </div>
 
+<p class="unibm-section-label">Evidence in use</p>
+
+<div class="unibm-domain-grid">
+  <a class="unibm-domain-card unibm-domain-climate" href="cases/climate-extremes/">
+    <span class="unibm-domain-index">01</span>
+    <h3>Climate extremes</h3>
+    <p>Houston precipitation and a compound Phoenix hot–dry severity index.</p>
+    <span class="unibm-domain-meta">GHCN · EVI only</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-streamflow" href="cases/streamflow/">
+    <span class="unibm-domain-index">02</span>
+    <h3>Streamflow</h3>
+    <p>Texas and Florida daily discharge on the calendar-day clock.</p>
+    <span class="unibm-domain-meta">USGS · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-nfip" href="cases/nfip-claims/">
+    <span class="unibm-domain-index">03</span>
+    <h3>NFIP claims</h3>
+    <p>Inflation-adjusted building payouts as impact-side stress records.</p>
+    <span class="unibm-domain-meta">OpenFEMA · EVI + EI</span>
+  </a>
+</div>
+
 <p class="unibm-section-label">API Surface</p>
 
 <div class="unibm-card-grid">
@@ -82,8 +108,9 @@
 </div>
 
 <p class="unibm-note">
-  This site is intentionally package-focused. Repository-level orchestration for
-  benchmarks, applications, and notebook rebuilds remains in the root
+  This site is package-first. Case figures and validation summaries are frozen
+  outputs: the browser renders them but never downloads data or fits a model.
+  Repository-level orchestration remains in the root
   <a href="https://github.com/TY-Cheng/UniBM/blob/main/README.md">README</a>
   and
   <a href="https://github.com/TY-Cheng/UniBM/blob/main/justfile">justfile</a>.

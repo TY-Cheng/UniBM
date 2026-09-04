@@ -111,7 +111,7 @@ APPLICATIONS = (
         figure_stem="houston_precipitation",
         raw_key="USW00012918.csv.gz",
         ylabel="precipitation (mm)",
-        time_series_title="Houston wet-season daily precipitation and annual maxima",
+        time_series_title="Houston wet-season daily precipitation and seasonal maxima",
         scaling_title="Houston sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=183.0,
@@ -126,7 +126,7 @@ APPLICATIONS = (
         figure_stem="phoenix_hotdry",
         raw_key="USW00023183.csv.gz",
         ylabel="hot-dry severity",
-        time_series_title="Phoenix warm-season hot-dry severity and annual maxima",
+        time_series_title="Phoenix warm-season hot-dry severity and seasonal maxima",
         scaling_title="Phoenix sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=214.0,
@@ -142,7 +142,7 @@ APPLICATIONS = (
         figure_stem="tx_streamflow",
         raw_key="TX",
         ylabel="discharge (cfs)",
-        time_series_title="Texas daily discharge and annual maxima",
+        time_series_title="Texas daily discharge and water-year maxima",
         scaling_title="Texas streamflow sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
@@ -156,7 +156,7 @@ APPLICATIONS = (
         figure_stem="fl_streamflow",
         raw_key="FL",
         ylabel="discharge (cfs)",
-        time_series_title="Florida daily discharge and annual maxima",
+        time_series_title="Florida daily discharge and water-year maxima",
         scaling_title="Florida streamflow sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
@@ -199,6 +199,9 @@ APPLICATIONS = (
     ),
 )
 
+PAPER_APPLICATIONS = tuple(spec for spec in APPLICATIONS if spec.provider != "ghcn")
+CLIMATE_APPLICATIONS = tuple(spec for spec in APPLICATIONS if spec.provider == "ghcn")
+
 
 def spec_by_key() -> dict[str, ApplicationSpec]:
     """Return the application registry keyed by application id."""
@@ -212,6 +215,8 @@ __all__ = [
     "APPLICATION_DESIGN_LIFE_TAUS",
     "APPLICATION_RANDOM_STATE",
     "APPLICATIONS",
+    "CLIMATE_APPLICATIONS",
+    "PAPER_APPLICATIONS",
     "ApplicationBundle",
     "ApplicationPreparedInputs",
     "ApplicationSpec",

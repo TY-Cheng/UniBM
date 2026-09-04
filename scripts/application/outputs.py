@@ -39,6 +39,7 @@ from application.inputs import (
 from application.freeze_usgs import freeze_usgs_station_selection
 from application.diagnostics import (
     application_design_life_interval_record,
+    application_observations_per_year,
 )
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series, screen_extremal_index_series
@@ -48,6 +49,8 @@ from application.specs import (
     APPLICATION_EVI_METHOD_IDS,
     APPLICATION_DESIGN_LIFE_TAUS,
     APPLICATION_RANDOM_STATE,
+    APPLICATIONS,
+    PAPER_APPLICATIONS,
     DESIGN_LIFE_LEVEL_HORIZONS,
     ApplicationBundle,
 )
@@ -67,14 +70,10 @@ from unibm.evi import (
     estimate_target_scaling,
     target_stability_summary,
 )
+from data_prep._io import write_csv_gz_atomic
 
 
-_MANUSCRIPT_APPLICATION_KEYS = (
-    "tx_streamflow",
-    "fl_streamflow",
-    "tx_nfip_claims",
-    "fl_nfip_claims",
-)
+_MANUSCRIPT_APPLICATION_KEYS = tuple(spec.key for spec in PAPER_APPLICATIONS)
 _USGS_SCREENING_DETAIL_COLUMNS = {
     "state_code",
     "site_no",
@@ -209,11 +208,7 @@ class _WindowBandLegendHandler(HandlerBase):
 
 def _application_observations_per_year(bundle: ApplicationBundle) -> float:
     """Return the effective observation rate used in design-life-level mapping."""
-    if bundle.spec.observations_per_year is not None:
-        return float(bundle.spec.observations_per_year)
-    series = bundle.prepared.evi.series
-    n_years = max((series.index.max() - series.index.min()).days / 365.25, 1.0)
-    return float(series.size / n_years)
+    return application_observations_per_year(bundle)
 
 
 def _tau_label(tau: float) -> str:
@@ -393,7 +388,7 @@ def _format_scaled_interval(center: float, lo: float, hi: float, *, scale: float
 
 
 def _gev_l_moment_return_level(annual_maxima: pd.Series, return_period: float) -> float:
-    """Return an annual-maxima GEV return level from L-moment estimates."""
+    """Return a block-maxima GEV return level from L-moment estimates."""
     values = np.sort(pd.to_numeric(annual_maxima, errors="coerce").dropna().to_numpy(dtype=float))
     n = values.size
     if n < 4:
@@ -432,7 +427,10 @@ def _application_summary_design_life_scale(bundle: ApplicationBundle) -> float:
 def _save_figure_pair(fig, file_path: Path) -> None:
     """Save the publication figure to the requested path."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(file_path)
+    if file_path.suffix.lower() == ".png":
+        fig.savefig(file_path, dpi=180, bbox_inches="tight")
+    else:
+        fig.savefig(file_path)
 
 
 def _wrapped_axis_label(text: str, *, prefix: str | None = None) -> str:
@@ -477,7 +475,7 @@ def _role_series_rows(
     for role, prepared in series_map.items():
         file_path = derived_dir / "applications" / f"{bundle.spec.key}__{role}.csv.gz"
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        prepared.to_frame().to_csv(file_path, compression="gzip")
+        write_csv_gz_atomic(prepared.to_frame().reset_index(), file_path)
         rows.append(
             {
                 "application": bundle.spec.key,
@@ -965,7 +963,7 @@ def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
 
 
 def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the streamflow annual-maxima GEV scale-check table."""
+    """Build the streamflow water-year-maxima GEV scale-check table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         if bundle.spec.provider != "usgs":
@@ -975,7 +973,7 @@ def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> 
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "Annual maxima count": str(
+                "Water-year maxima count": str(
                     int(bundle.prepared.display.annual_maxima.dropna().size)
                 ),
                 "GEV 10y return level": _format_readable_scaled_number(
@@ -1235,7 +1233,7 @@ def _plot_daily_and_annual(
     save: bool = False,
     close: bool | None = None,
 ) -> None:
-    """Write a two-panel time-series/annual-maxima figure for one application."""
+    """Write a two-panel time-series/comparison-maxima figure for one application."""
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(7.2, 5.2), sharex=False, dpi=600)
@@ -1258,8 +1256,13 @@ def _plot_daily_and_annual(
         lw=0.8,
         color="tab:red",
     )
-    axes[1].set_xlabel("Year")
-    axes[1].set_ylabel(_wrapped_axis_label(ylabel, prefix="annual max"))
+    maxima_period = prepared.metadata.get("maxima_period", "annual")
+    maxima_prefix = {
+        "water_year": "water-year max",
+        "season": "seasonal max",
+    }.get(maxima_period, "annual max")
+    axes[1].set_xlabel("Water year" if maxima_period == "water_year" else "Year")
+    axes[1].set_ylabel(_wrapped_axis_label(ylabel, prefix=maxima_prefix))
     axes[1].set_yscale(annual_max_yscale)
     axes[1].grid(alpha=0.25)
     fig.tight_layout()
@@ -1787,7 +1790,7 @@ def plot_application_time_series(
     *,
     close: bool | None = None,
 ) -> None:
-    """Plot the application display series and annual maxima inline."""
+    """Plot the application display series and comparison maxima inline."""
     _plot_daily_and_annual(
         bundle.prepared.display,
         ylabel=bundle.spec.ylabel,
@@ -1904,37 +1907,11 @@ def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
     )
 
 
-def _provider_metadata_rows(
-    bundle: ApplicationBundle,
-    *,
-    raw_path: Path | None = None,
-) -> list[dict[str, object]]:
-    """Return provider metadata rows for JSON sidecars."""
-    rows: list[dict[str, object]] = []
-    for role, prepared in {
-        "display": bundle.prepared.display,
-        "evi": bundle.prepared.evi,
-    }.items():
-        rows.append(
-            {
-                "application": bundle.spec.key,
-                "provider": bundle.spec.provider,
-                "role": role,
-                "raw_file": None if raw_path is None else str(raw_path),
-                **prepared.metadata,
-            }
-        )
-    if bundle.spec.formal_ei:
-        rows.append(
-            {
-                "application": bundle.spec.key,
-                "provider": bundle.spec.provider,
-                "role": "ei",
-                "raw_file": None if raw_path is None else str(raw_path),
-                **bundle.prepared.ei.metadata,
-            }
-        )
-    return rows
+def write_application_web_figure(bundle: ApplicationBundle, web_dir: Path) -> Path:
+    """Write the browser-ready composite figure for one case study."""
+    file_path = web_dir / f"{bundle.spec.figure_stem}.png"
+    _plot_composite_application_diagnostics(bundle, file_path=file_path, save=True)
+    return file_path
 
 
 def _usgs_site_audit_frame(metadata_dir: Path) -> pd.DataFrame:
@@ -2085,9 +2062,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     out_dir = dirs["DIR_OUT_APPLICATIONS"]
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
     table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
+    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "cases"
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
+    web_dir.mkdir(parents=True, exist_ok=True)
     metadata_app_dir.mkdir(parents=True, exist_ok=True)
     ensure_application_metadata(metadata_app_dir)
     usgs_screening_path = out_dir / "application_usgs_site_screening.csv"
@@ -2105,9 +2084,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         **ensure_nfip_raw_data(dirs["DIR_DATA_RAW_FEMA"]),
     }
     status("application", "building application inputs")
-    inputs = build_application_inputs(dirs, raw_paths=raw_paths)
+    inputs = build_application_inputs(dirs, raw_paths=raw_paths, specs=APPLICATIONS)
     status("application", "building application bundles")
-    bundles = build_application_bundles_from_inputs(inputs)
+    bundles = build_application_bundles_from_inputs(inputs, specs=APPLICATIONS)
     manuscript_bundles = _manuscript_bundles(bundles)
     series_registry_rows: list[dict[str, object]] = []
     screening_rows: list[dict[str, object]] = []
@@ -2116,14 +2095,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     design_life_interval_rows: list[dict[str, object]] = []
     method_rows: list[dict[str, object]] = []
     ei_method_rows: list[dict[str, object]] = []
-    provider_metadata: dict[str, list[dict[str, object]]] = {"ghcn": [], "usgs": [], "fema": []}
-
     for bundle in bundles:
         status("application", f"collecting outputs for {bundle.spec.label}")
         series_registry_rows.extend(_role_series_rows(bundle, derived_dir=derived_dir))
-        provider_metadata[bundle.spec.provider].extend(
-            _provider_metadata_rows(bundle, raw_path=raw_paths.get(bundle.spec.key))
-        )
         evi_review = screen_extreme_series(
             bundle.prepared.evi.series, name=bundle.spec.key
         ).to_record()
@@ -2143,8 +2117,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         method_rows.extend(application_method_rows(bundle))
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
-        status("application", f"writing figures for {bundle.spec.label}")
-        write_application_figures(bundle, fig_dir)
+        status("application", f"writing web figure for {bundle.spec.label}")
+        write_application_web_figure(bundle, web_dir)
+        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
+            status("application", f"writing manuscript figures for {bundle.spec.label}")
+            write_application_figures(bundle, fig_dir)
 
     status("application", "writing application tables and metadata")
     series_registry = pd.DataFrame(series_registry_rows).sort_values(["application", "role"])
@@ -2176,13 +2153,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         out_dir / "application_ei_methods.csv",
         index=False,
     )
-    for provider, rows in provider_metadata.items():
-        with (metadata_app_dir / f"{provider}_sources.json").open("w") as fh:
-            json.dump(rows, fh, indent=2)
-
     status("application", "writing cross-application overview figure")
     _plot_application_overview(
-        bundles,
+        manuscript_bundles,
         file_path=fig_dir / "application_overview.pdf",
         save=True,
     )
@@ -2198,16 +2171,16 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             streamflow_gev_check,
             caption=(
-                "Streamflow scale comparison against conventional annual-maxima GEV return levels. "
-                "GEV entries are L-moment point estimates from annual maxima "
+                "Streamflow scale comparison against conventional water-year-maxima GEV return levels. "
+                "GEV entries are L-moment point estimates from complete October--September water years "
                 "\\citep{hosking_lmoments_1990}; UniBM entries are median design-life levels "
                 "with conditional 95 percent confidence intervals from the selected fit. "
                 "The two sets of entries answer different questions and are not used to validate "
                 "one another. The comparison is included only to place the streamflow estimates "
-                "beside a familiar annual-maxima scale. Large differences, particularly for "
+                "beside a familiar water-year-maxima scale. Large differences, particularly for "
                 "Texas at 50 years, reflect the distinct estimands: UniBM entries are daily-clock "
                 "horizon-maximum quantiles from the selected block-scaling extrapolation, not "
-                "annual-maxima return levels. All discharge entries are in "
+                "water-year-maxima return levels. All discharge entries are in "
                 "\\(10^3\\,\\mathrm{ft}^3\\,\\mathrm{s}^{-1}\\)."
             ),
             label="tab:application-streamflow-gev-check-main",
@@ -2217,7 +2190,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             ),
             size=r"\tiny",
             header_latex={
-                "Annual maxima count": r"\shortstack[c]{Annual\\ maxima\\ count}",
+                "Water-year maxima count": r"\shortstack[c]{Water-year\\ maxima\\ count}",
                 "GEV 10y return level": r"\shortstack[c]{GEV 10y\\ return level}",
                 "UniBM 10y design-life level": r"\shortstack[c]{UniBM 10y\\ design-life level}",
                 "GEV 50y return level": r"\shortstack[c]{GEV 50y\\ return level}",
@@ -2264,7 +2237,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     status("application", "writing application appendix selection-sensitivity table")
     (table_dir / "application_selection_sensitivity_main.tex").write_text(
         render_latex_table(
-            application_selection_sensitivity_table(bundles),
+            application_selection_sensitivity_table(manuscript_bundles),
             caption=(
                 "Local selection sensitivity for the application-side parameter estimates. "
                 "Each cell reports the selected \\(\\xi\\) or \\(\\theta\\) "
@@ -2315,7 +2288,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             tabcolsep="1pt",
         )
     )
-    return {
+    outputs = {
         "application_series_registry": out_dir / "application_series_registry.csv",
         "application_screening": out_dir / "application_screening.csv",
         "application_summary": out_dir / "application_summary.csv",
@@ -2338,6 +2311,13 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_extrapolation_main": table_dir / "application_extrapolation_main.tex",
         "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
     }
+    outputs.update(
+        {
+            f"application_web_{bundle.spec.key}": web_dir / f"{bundle.spec.figure_stem}.png"
+            for bundle in bundles
+        }
+    )
+    return outputs
 
 
 __all__ = [
@@ -2360,4 +2340,5 @@ __all__ = [
     "plot_application_target_stability",
     "plot_application_time_series",
     "write_application_figures",
+    "write_application_web_figure",
 ]

@@ -17,6 +17,34 @@ from scripts.data_prep.usgs import (
 
 
 class UsgsPrepTests(unittest.TestCase):
+    def test_preparation_uses_continuous_suffix_and_complete_water_years(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usgs_02236000.csv.gz"
+            index = pd.date_range("2023-01-01", "2025-12-31", freq="D").difference(
+                [pd.Timestamp("2023-08-31")]
+            )
+            pd.DataFrame(
+                {
+                    "date": index.strftime("%Y-%m-%d"),
+                    "discharge_cfs": range(1, index.size + 1),
+                    "site_no": ["02236000"] * index.size,
+                    "station_name": ["Station"] * index.size,
+                }
+            ).to_csv(path, index=False, compression="gzip")
+
+            prepared = prepare_usgs_streamflow_series(
+                path,
+                state_code="FL",
+                site_no="02236000",
+            )
+
+        expected_index = pd.date_range("2023-09-01", "2025-12-31", freq="D")
+        self.assertTrue(prepared.series.index.equals(expected_index))
+        self.assertEqual(prepared.annual_maxima.index.tolist(), [2024, 2025])
+        self.assertEqual(prepared.annual_maxima.index.name, "water_year")
+        self.assertEqual(prepared.metadata["continuity_start"], "2023-09-01")
+        self.assertEqual(prepared.metadata["maxima_period"], "water_year")
+
     def test_extract_usgs_daily_series_prefers_mean_stat_code(self) -> None:
         payload = {
             "value": {
@@ -47,7 +75,7 @@ class UsgsPrepTests(unittest.TestCase):
     def test_prepare_usgs_streamflow_series_preserves_site_match_with_leading_zero(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "usgs_02236000.csv.gz"
-            index = pd.date_range("2020-01-01", periods=365, freq="D")
+            index = pd.date_range("2025-01-01", "2025-12-31", freq="D")
             pd.DataFrame(
                 {
                     "date": index.strftime("%Y-%m-%d"),
@@ -86,6 +114,8 @@ class UsgsPrepTests(unittest.TestCase):
             inspect.signature(download_usgs_daily_discharge).parameters["end_date"].default,
             "2025-12-31",
         )
+        with self.assertRaisesRegex(ValueError, "end_date must be explicit"):
+            download_usgs_daily_discharge("02236000", "unused.csv.gz", end_date=None)  # type: ignore[arg-type]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "usgs_02236000.csv.gz"
             index = pd.date_range("2025-01-01", "2026-12-31", freq="D")

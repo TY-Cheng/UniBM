@@ -182,7 +182,7 @@ _EVI_METRIC_Y_UPPER_STEPS = {
 
 
 def benchmark_table(summary: pd.DataFrame, *, benchmark_set: str | None = None) -> pd.DataFrame:
-    """Return the long-form benchmark table used in the notebook appendix."""
+    """Return the long-form benchmark table used in the appendix."""
     columns = [
         "benchmark_set",
         "family",
@@ -277,7 +277,7 @@ def benchmark_story_latex(
     position: str = "htbp",
     caption_raw: bool = False,
 ) -> str:
-    """Render the compact benchmark story table without depending on notebook tooling."""
+    """Render the compact benchmark story table."""
     table = benchmark_story_table(summary, methods=methods, benchmark_set=benchmark_set)
     return render_latex_table(
         table,
@@ -930,6 +930,7 @@ def plot_benchmark_panels(
     methods: Iterable[str] = METHOD_ORDER,
     metrics: Iterable[str] = ("interval_score", "ape"),
     file_path: Path | None = None,
+    web_path: Path | None = None,
     dpi: int = 600,
     title: str | None = None,
     band_alpha: float = 0.08,
@@ -1076,6 +1077,9 @@ def plot_benchmark_panels(
     if save and file_path is not None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(file_path)
+        if web_path is not None:
+            web_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(web_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -1150,6 +1154,7 @@ def write_evi_benchmark_manuscript_artifacts(
     record_length_summary: pd.DataFrame | None = None,
     fig_dir: Path,
     table_dir: Path,
+    web_dir: Path | None = None,
 ) -> None:
     """Write EVI benchmark manuscript tables and figures from cached CSV summaries."""
     # Deferred import avoids a circular dependency between report and mixed-baseline helpers.
@@ -1250,6 +1255,7 @@ def write_evi_benchmark_manuscript_artifacts(
         legend_mode="explicit",
         interval_style="errorbar",
         file_path=fig_dir / "benchmark_summary.pdf",
+        web_path=None if web_dir is None else web_dir / "evi_benchmark.png",
         save=True,
     )
     plot_benchmark_panels(
@@ -1345,9 +1351,11 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
     table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
     out_dir = dirs["DIR_OUT_BENCHMARK"]
+    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "validation"
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
+    web_dir.mkdir(parents=True, exist_ok=True)
 
     status("evi_report", "loading benchmark summaries")
     benchmark_outputs = load_or_materialize_evi_benchmark_outputs(root, force=False)
@@ -1370,6 +1378,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
         record_length_summary=record_length_summary,
         fig_dir=fig_dir,
         table_dir=table_dir,
+        web_dir=web_dir,
     )
     return {
         "benchmark_summary": benchmark_outputs.summary_path,
@@ -1388,6 +1397,7 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
         "benchmark_interval_sharpness_figure": fig_dir / "benchmark_interval_sharpness.pdf",
         "benchmark_shrinkage_sensitivity_figure": fig_dir / "benchmark_shrinkage_sensitivity.pdf",
         "benchmark_stress_summary_figure": fig_dir / "benchmark_stress_summary.pdf",
+        "benchmark_evi_web_figure": web_dir / "evi_benchmark.png",
     }
 
 

@@ -1,9 +1,10 @@
 """Dataset-specific preparation helpers for manuscript applications."""
 
 from .constants import ANALYSIS_END_DATE
+from .cpi import download_monthly_cpi
 from .fema import (
     download_nfip_claims_state,
-    load_cpi_2025_base,
+    load_monthly_cpi,
     prepare_nfip_claim_series,
     read_nfip_claims_csv,
 )
@@ -24,8 +25,9 @@ __all__ = [
     "ANALYSIS_END_DATE",
     "PreparedSeries",
     "download_nfip_claims_state",
+    "download_monthly_cpi",
     "download_usgs_daily_discharge",
-    "load_cpi_2025_base",
+    "load_monthly_cpi",
     "materialize_derived_series",
     "prepare_nfip_claim_series",
     "prepare_hot_dry_series",

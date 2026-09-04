@@ -553,6 +553,7 @@ def _plot_panels(
     methods: Iterable[str],
     title: str,
     file_path: Path | None = None,
+    web_path: Path | None = None,
     save: bool = False,
 ) -> None:
     """Plot panel grids on the theta scale for a chosen EI method subset."""
@@ -693,6 +694,9 @@ def _plot_panels(
     if save and file_path is not None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(file_path)
+        if web_path is not None:
+            web_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(web_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -701,6 +705,7 @@ def plot_ei_core_panels(
     *,
     title: str = "EI benchmark: pooled BM methods",
     file_path: Path | None = None,
+    web_path: Path | None = None,
     save: bool = False,
 ) -> None:
     """Plot the eight internal pooled BM EI methods."""
@@ -709,6 +714,7 @@ def plot_ei_core_panels(
         methods=EI_INTERNAL_METHODS,
         title=title,
         file_path=file_path,
+        web_path=web_path,
         save=save,
     )
 
@@ -898,6 +904,7 @@ def write_ei_benchmark_manuscript_artifacts(
     shrinkage_sensitivity_summary: pd.DataFrame | None = None,
     fig_dir: Path,
     table_dir: Path,
+    web_dir: Path | None = None,
 ) -> None:
     """Write EI benchmark manuscript tables and figures from cached CSV summaries."""
     n_obs = _main_ei_benchmark_n_obs(benchmark_summary)
@@ -1010,6 +1017,7 @@ def write_ei_benchmark_manuscript_artifacts(
         benchmark_summary,
         title="",
         file_path=fig_dir / "benchmark_ei_summary.pdf",
+        web_path=None if web_dir is None else web_dir / "ei_benchmark.png",
         save=True,
     )
     plot_ei_targets_panels(
@@ -1051,9 +1059,11 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
     fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
     table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
     out_dir = dirs["DIR_OUT_BENCHMARK"]
+    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "validation"
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
+    web_dir.mkdir(parents=True, exist_ok=True)
 
     status("ei_report", "loading benchmark summaries")
     benchmark_outputs = load_or_materialize_ei_benchmark_outputs(root, force=False)
@@ -1068,6 +1078,7 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
         shrinkage_sensitivity_summary=shrinkage_sensitivity_summary,
         fig_dir=fig_dir,
         table_dir=table_dir,
+        web_dir=web_dir,
     )
     return {
         "benchmark_ei_summary": benchmark_outputs.summary_path,
@@ -1083,6 +1094,7 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
         "benchmark_ei_shrinkage_sensitivity_figure": (
             fig_dir / "benchmark_ei_shrinkage_sensitivity.pdf"
         ),
+        "benchmark_ei_web_figure": web_dir / "ei_benchmark.png",
     }
 
 

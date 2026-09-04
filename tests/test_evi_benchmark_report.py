@@ -1,20 +1,10 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
-import os
-from pathlib import Path
 import tempfile
 import unittest
-from unittest import mock
+from pathlib import Path
 
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from benchmark.design import (
     BENCHMARK_MONTE_CARLO_REPS,
@@ -29,13 +19,49 @@ from benchmark.evi_report import (
     build_evi_stress_suite_summary,
     build_evi_shrinkage_sensitivity_summary,
     evi_record_length_sensitivity_table,
+    plot_benchmark_panels,
 )
 
 
 class EviBenchmarkReportTests(unittest.TestCase):
+    def test_benchmark_panels_can_save_publication_and_web_formats(self) -> None:
+        summary = pd.DataFrame(
+            {
+                "benchmark_set": ["universal", "universal"],
+                "family": ["frechet_max_ar", "frechet_max_ar"],
+                "method": ["sliding_median_fgls", "sliding_median_fgls"],
+                "summary_target": ["median", "median"],
+                "block_scheme": ["sliding", "sliding"],
+                "regression": ["FGLS", "FGLS"],
+                "theta_true": [0.5, 0.5],
+                "xi_true": [0.1, 0.3],
+                "ape_median": [0.2, 0.3],
+                "ape_q25": [0.1, 0.2],
+                "ape_q75": [0.3, 0.4],
+                "interval_score_median": [0.5, 0.7],
+                "interval_score_q25": [0.4, 0.6],
+                "interval_score_q75": [0.6, 0.8],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            publication_path = output_dir / "summary.pdf"
+            web_path = output_dir / "summary.png"
+            plot_benchmark_panels(
+                summary,
+                benchmark_set="universal",
+                methods=("sliding_median_fgls",),
+                file_path=publication_path,
+                web_path=web_path,
+                save=True,
+            )
+
+            self.assertGreater(publication_path.stat().st_size, 0)
+            self.assertGreater(web_path.stat().st_size, 0)
+
     def test_build_evi_shrinkage_sensitivity_summary_emits_expected_grid_and_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = default_evi_simulation_configs(
                 xi_values=(0.10,),
                 theta_values=(0.50,),
@@ -43,12 +69,11 @@ class EviBenchmarkReportTests(unittest.TestCase):
                 n_obs=64,
                 reps=1,
             )
-            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
-                summary, output_path = build_evi_shrinkage_sensitivity_summary(
-                    root=tmpdir,
-                    configs=configs,
-                    force=True,
-                )
+            summary, output_path = build_evi_shrinkage_sensitivity_summary(
+                root=tmpdir,
+                configs=configs,
+                force=True,
+            )
             self.assertEqual(
                 sorted(summary["delta"].dropna().unique().tolist()),
                 list(EVI_SHRINKAGE_GRID),
@@ -67,7 +92,6 @@ class EviBenchmarkReportTests(unittest.TestCase):
 
     def test_build_evi_record_length_sensitivity_summary_emits_expected_n_obs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs: list[object] = []
             for n_obs in (64, 96):
                 configs.extend(
@@ -79,12 +103,11 @@ class EviBenchmarkReportTests(unittest.TestCase):
                         reps=1,
                     )
                 )
-            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
-                summary, output_path = build_evi_record_length_sensitivity_summary(
-                    root=tmpdir,
-                    configs=configs,
-                    force=True,
-                )
+            summary, output_path = build_evi_record_length_sensitivity_summary(
+                root=tmpdir,
+                configs=configs,
+                force=True,
+            )
             self.assertEqual(sorted(summary["n_obs"].dropna().unique().tolist()), [64, 96])
             self.assertEqual(summary["family"].drop_duplicates().tolist(), ["frechet_max_ar"])
             self.assertIn("median_interval_score", summary.columns)
@@ -135,19 +158,17 @@ class EviBenchmarkReportTests(unittest.TestCase):
 
     def test_build_evi_stress_suite_summary_emits_expected_family(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_root = Path(tmpdir).parent / f"{Path(tmpdir).name}_external_data"
             configs = stress_evi_simulation_configs(
                 xi_values=(0.10,),
                 theta_values=(0.50,),
                 reps=1,
             )
-            with mock.patch.dict(os.environ, {"DIR_DATA": str(data_root)}, clear=False):
-                summary, output_path = build_evi_stress_suite_summary(
-                    root=tmpdir,
-                    configs=configs,
-                    force=True,
-                    max_workers=1,
-                )
+            summary, output_path = build_evi_stress_suite_summary(
+                root=tmpdir,
+                configs=configs,
+                force=True,
+                max_workers=1,
+            )
             self.assertEqual(summary["benchmark_set"].drop_duplicates().tolist(), ["stress"])
             self.assertEqual(
                 summary["family"].drop_duplicates().tolist(),
@@ -158,7 +179,3 @@ class EviBenchmarkReportTests(unittest.TestCase):
             self.assertIn("benchmark_set", persisted.columns)
             self.assertIn("family", persisted.columns)
             self.assertIn("method", persisted.columns)
-
-
-if __name__ == "__main__":
-    unittest.main()

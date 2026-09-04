@@ -1,0 +1,30 @@
+{
+  "TX": [
+    {
+      "site_no": "08114000",
+      "station_name": "Brazos River at Richmond, TX"
+    },
+    {
+      "site_no": "08066500",
+      "station_name": "Trinity River at Romayor, TX"
+    },
+    {
+      "site_no": "08158000",
+      "station_name": "Colorado River at Austin, TX"
+    }
+  ],
+  "FL": [
+    {
+      "site_no": "02236000",
+      "station_name": "St. Johns River near Deland, FL"
+    },
+    {
+      "site_no": "02320500",
+      "station_name": "Suwannee River at Branford, FL"
+    },
+    {
+      "site_no": "02366500",
+      "station_name": "Choctawhatchee River near Bruce, FL"
+    }
+  ]
+}

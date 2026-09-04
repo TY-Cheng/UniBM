@@ -256,7 +256,12 @@ def application_observations_per_year(bundle: ApplicationBundle) -> float:
     if bundle.spec.observations_per_year is not None:
         return float(bundle.spec.observations_per_year)
     series = bundle.prepared.evi.series
-    n_years = max((series.index.max() - series.index.min()).days / 365.25, 1.0)
+    clock = (
+        bundle.prepared.display.series
+        if bundle.spec.design_life_level_basis == "claim_active_day"
+        else series
+    )
+    n_years = max((clock.index.max() - clock.index.min()).days / 365.25, 1.0)
     return float(series.size / n_years)
 
 

@@ -226,6 +226,131 @@
   margin-bottom: 0;
 }
 
+.unibm-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.25rem 0 1.6rem;
+}
+
+.unibm-domain-card {
+  position: relative;
+  min-height: 12rem;
+  overflow: hidden;
+  border: 1px solid rgba(114, 90, 72, 0.16);
+  border-radius: var(--unibm-radius);
+  padding: 1.25rem;
+  color: inherit !important;
+  text-decoration: none !important;
+  background: var(--md-default-bg-color--light);
+  box-shadow: var(--unibm-shadow);
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+
+.unibm-domain-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0.3rem;
+  content: "";
+  background: var(--unibm-domain-color);
+}
+
+.unibm-domain-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--unibm-domain-color);
+}
+
+.unibm-domain-climate {
+  --unibm-domain-color: #367d85;
+}
+
+.unibm-domain-streamflow {
+  --unibm-domain-color: #3e6284;
+}
+
+.unibm-domain-nfip {
+  --unibm-domain-color: #a34b26;
+}
+
+.unibm-domain-index,
+.unibm-domain-meta {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.unibm-domain-card h3 {
+  margin: 1.4rem 0 0.6rem;
+}
+
+.unibm-domain-card p {
+  min-height: 4rem;
+}
+
+.unibm-case-intro {
+  margin: 0.5rem 0 1.5rem;
+  border-left: 0.3rem solid var(--md-accent-fg-color);
+  padding: 0.35rem 0 0.35rem 1rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 1.05rem;
+}
+
+.unibm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0 1.3rem;
+}
+
+.unibm-stat {
+  border-top: 2px solid var(--md-accent-fg-color);
+  padding: 0.7rem 0.75rem;
+  background: rgba(114, 90, 72, 0.06);
+}
+
+.unibm-stat strong {
+  display: block;
+  margin-bottom: 0.18rem;
+  font-size: 1.15rem;
+}
+
+.unibm-stat span {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.82rem;
+}
+
+.unibm-figure {
+  margin: 1.25rem 0 1.8rem;
+}
+
+.unibm-figure img {
+  width: 100%;
+  border: 1px solid rgba(114, 90, 72, 0.16);
+  border-radius: 0.65rem;
+  background: #ffffff;
+}
+
+.unibm-figure figcaption {
+  margin-top: 0.45rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.unibm-method-box {
+  margin: 1rem 0 1.4rem;
+  border: 1px solid rgba(54, 125, 133, 0.28);
+  border-radius: 0.65rem;
+  padding: 0.85rem 1rem;
+  background: rgba(54, 125, 133, 0.07);
+}
+
+.unibm-method-box p:last-child {
+  margin-bottom: 0;
+}
+
 .unibm-note {
   margin-top: 1rem;
   padding-left: 0.9rem;
@@ -238,13 +363,23 @@
 }
 
 @media screen and (max-width: 76.1875em) {
-  .unibm-metrics {
+  .unibm-metrics,
+  .unibm-domain-grid {
     grid-template-columns: 1fr;
+  }
+
+  .unibm-domain-card {
+    min-height: auto;
+  }
+
+  .unibm-domain-card p {
+    min-height: auto;
   }
 }
 
 @media screen and (max-width: 44.9375em) {
-  .unibm-card-grid {
+  .unibm-card-grid,
+  .unibm-stat-grid {
     grid-template-columns: 1fr;
   }
 

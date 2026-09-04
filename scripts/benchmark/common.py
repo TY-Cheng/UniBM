@@ -93,7 +93,7 @@ def render_latex_table(
     header_latex: Mapping[str, str] | None = None,
     caption_raw: bool = False,
 ) -> str:
-    """Render a small flat table without notebook-specific dependencies."""
+    """Render a small flat table."""
     columns = [str(col) for col in table.columns]
     alignment = "ll" + "c" * max(len(columns) - 2, 0)
     lines = [

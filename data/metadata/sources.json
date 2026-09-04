@@ -1,0 +1,12 @@
+{
+  "analysis_end_date": "2025-12-31",
+  "cpi_2025_10": "geometric mean of 2025-09 and 2025-11; BLS unavailable",
+  "cpi_series_id": "CUUR0000SA0",
+  "retrieved_at_utc": "2026-09-04T06:08:42+00:00",
+  "sources": {
+    "cpi_u": "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+    "ghcn": "https://www.ncei.noaa.gov/pub/data/ghcn/daily/by_station",
+    "nfip": "https://www.fema.gov/api/open/v2/FimaNfipClaims",
+    "usgs": "https://waterservices.usgs.gov/nwis/dv/"
+  }
+}

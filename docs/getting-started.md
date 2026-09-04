@@ -5,22 +5,28 @@ The installable package lives in `src/unibm` and is importable as
 the package layer, not on the full repo orchestration under
 `scripts/benchmark` and `scripts/application`.
 
-## Environment setup
+## Source installation
+
+UniBM is **not yet released on PyPI**. Until the first reviewed release, install
+from a local source checkout:
 
 ```bash
-cp .env.example .env
+git clone https://github.com/TY-Cheng/UniBM.git
+cd UniBM
+uv sync --locked
+```
+
+For repository development, include the development dependencies and run the
+lightweight checks:
+
+```bash
+uv sync --locked --dev
 just check
 ```
 
-Top-level `just` tasks load `.env` automatically and sync the development
-environment before they run. If you prefer raw `uv` commands instead, load
-`.env` into your shell first and then sync:
-
-```bash
-set -a; source .env; set +a
-uv sync --dev
-```
-
+No `.env` is required. Copy `.env.example` only to override the sibling
+manuscript checkout or uv environment location. Top-level `just` tasks load it
+automatically when present and sync the development environment before they run.
 The repo-level workflow details stay in the repository `README.md` and
 `justfile`. Use this site when you want the `unibm` package API itself.
 

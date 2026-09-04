@@ -9,8 +9,8 @@ It exposes two complementary inferential targets:
 - persistence via the extremal index (EI)
 
 The installable package lives under `src/unibm`. Repository-level benchmark,
-application, and vignette workflows are orchestrated through the root
-`justfile`.
+application, manuscript, and static-site workflows are orchestrated through the
+root `justfile`.
 
 ## Package surface
 
@@ -23,30 +23,25 @@ The public package is organized around four entrypoints:
 
 ## Quick start
 
-1. Copy the local environment template:
-
-```bash
-cp .env.example .env
-```
-
-2. Edit `.env` and set:
-
-- `DIR_WORK` to your local clone of this repository
-- `DIR_DATA` to the external UniBM data root
-- `UV_PROJECT_ENVIRONMENT` to a dedicated external uv environment path
-
-3. Run the lightest repo entrypoint:
+1. Run the lightest repo entrypoint:
 
 ```bash
 just check
 ```
 
-Top-level `just` tasks load `.env` automatically and sync the development
-environment before they run. If you prefer raw `uv` commands, load `.env`
-first and then run:
+The repo defaults to `data/`, the sibling `../UniBM_manuscript` checkout, and
+uv's normal project environment. Copy `.env.example` only when overriding the
+last two locations:
 
 ```bash
-set -a; source .env; set +a
+cp .env.example .env
+```
+
+Top-level `just` tasks load `.env` automatically when present and sync the
+development environment before they run. Raw `uv` commands need no environment
+setup unless you use an override:
+
+```bash
 uv sync --locked --dev
 ```
 
@@ -65,6 +60,9 @@ just docs
 `just docs` builds the static site under `site/` and then launches the local
 preview server.
 
+UniBM is not yet released on PyPI. The documentation therefore describes source
+installation until a separately reviewed package release is approved.
+
 ## Main repo entrypoints
 
 The stable top-level entrypoints are:
@@ -72,18 +70,19 @@ The stable top-level entrypoints are:
 - `just check`
 - `just check-full`
 - `just data`
+- `just refresh-data`
 - `just docs`
 - `just full`
 
 `just check` runs tests affected by local changes in parallel, then checks all
 formatting and lint rules. `just check-full` runs the complete parallel test
 suite with the coverage gate.
-`just data` materializes the application raw and derived data inputs under
-`DIR_DATA` on the external disk. The repository intentionally does not use a
-repo-local `data/` directory or symlink.
-`just full` is the full repo rebuild.
-For benchmark, application, vignette, and manuscript-artifact details, see the
-root `justfile`.
+`just data` validates the tracked canonical inputs and prepares the four paper
+cases without network access. `just refresh-data` is the only networked data
+entrypoint; it refreshes the fixed-cutoff provider snapshots and leaves their
+Git diff for review. `just full` rebuilds the manuscript artifacts and static
+website snapshots offline. For benchmark, application, and manuscript-artifact
+details, see the root `justfile`.
 
 ## Minimal package example
 

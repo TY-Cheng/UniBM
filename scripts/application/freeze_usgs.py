@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 if __package__ in {None, ""}:
@@ -22,13 +21,12 @@ if __package__ in {None, ""}:
 
 from config import resolve_repo_dirs
 from data_prep.usgs import (
-    download_usgs_daily_discharge,
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
 from application.metadata import ensure_application_metadata
 from application.screening import screen_extreme_series
-from shared.runtime import resolve_bool_env, status
+from shared.runtime import status
 
 
 def _load_candidate_sites(path: Path) -> dict[str, list[dict[str, str]]]:
@@ -43,39 +41,6 @@ def _load_candidate_sites(path: Path) -> dict[str, list[dict[str, str]]]:
     }
 
 
-def _failed_screening_row(
-    *,
-    state_code: str,
-    site_no: str,
-    station_name: str,
-    raw_file: Path,
-    error: Exception,
-) -> dict[str, object]:
-    """Return a deterministic fallback row when one candidate cannot be screened."""
-    return {
-        "state_code": state_code,
-        "site_no": site_no,
-        "station_name": station_name,
-        "raw_file": str(raw_file),
-        "name": f"{state_code}_{site_no}",
-        "n_obs": 0,
-        "n_years": 0.0,
-        "start": "",
-        "end": "",
-        "daily_positive_share": np.nan,
-        "maxima_positive_share": np.nan,
-        "seasonality_strength": np.nan,
-        "xi_hat": np.nan,
-        "xi_lower": -999.0,
-        "xi_upper": np.nan,
-        "plateau_bounds": (-1, -1),
-        "plateau_points": 0,
-        "supports_frechet_working_model": False,
-        "recommended": False,
-        "screen_error": str(error),
-    }
-
-
 def _candidate_screening_rows(
     *,
     state_code: str,
@@ -83,50 +48,36 @@ def _candidate_screening_rows(
     raw_dir: Path,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    force_refresh = resolve_bool_env("UNIBM_FORCE_REFRESH_APPLICATION_DATA", default=False)
     for candidate in candidates:
         site_no = str(candidate["site_no"])
         station_name = str(candidate["station_name"])
         raw_file = raw_dir / f"usgs_{site_no}.csv.gz"
-        try:
-            if force_refresh or usgs_daily_discharge_needs_refresh(raw_file):
-                verb = "force-refreshing" if force_refresh and raw_file.exists() else "refreshing"
-                status("freeze_usgs", f"{verb} USGS raw series {site_no} ({station_name})")
-                download_usgs_daily_discharge(site_no, raw_file)
-            else:
-                status("freeze_usgs", f"reusing USGS raw series {site_no} ({station_name})")
-            prepared = prepare_usgs_streamflow_series(
-                raw_file,
-                state_code=state_code,
-                site_no=site_no,
-                station_name=station_name,
+        if usgs_daily_discharge_needs_refresh(raw_file):
+            raise FileNotFoundError(
+                f"Canonical USGS input is missing or invalid: {raw_file}. Run `just refresh-data`."
             )
-            review = screen_extreme_series(prepared.series, name=f"{state_code}_{site_no}")
-            status(
-                "freeze_usgs",
-                f"screened {state_code} {site_no}: recommended={review.recommended}, "
-                f"plateau_points={review.plateau_points}, xi_lo={review.xi_lower:.3f}",
-            )
-            rows.append(
-                {
-                    "state_code": state_code,
-                    "site_no": site_no,
-                    "station_name": station_name,
-                    "raw_file": str(raw_file),
-                    **review.to_record(),
-                }
-            )
-        except Exception as exc:
-            status("freeze_usgs", f"skipped {state_code} {site_no} due to error: {exc}")
-            rows.append(
-                _failed_screening_row(
-                    state_code=state_code,
-                    site_no=site_no,
-                    station_name=station_name,
-                    raw_file=raw_file,
-                    error=exc,
-                )
-            )
+        status("freeze_usgs", f"using canonical USGS raw series {site_no} ({station_name})")
+        prepared = prepare_usgs_streamflow_series(
+            raw_file,
+            state_code=state_code,
+            site_no=site_no,
+            station_name=station_name,
+        )
+        review = screen_extreme_series(prepared.series, name=f"{state_code}_{site_no}")
+        status(
+            "freeze_usgs",
+            f"screened {state_code} {site_no}: recommended={review.recommended}, "
+            f"plateau_points={review.plateau_points}, xi_lo={review.xi_lower:.3f}",
+        )
+        rows.append(
+            {
+                "state_code": state_code,
+                "site_no": site_no,
+                "station_name": station_name,
+                "raw_file": str(raw_file),
+                **review.to_record(),
+            }
+        )
     return rows
 
 
@@ -177,7 +128,10 @@ def freeze_usgs_station_selection(root: Path | str = ".") -> dict[str, Path]:
 
     frozen: dict[str, dict[str, object]] = {}
     for state_code, group in ranked.groupby("state_code", sort=True):
-        winner = group.iloc[0]
+        eligible = group[group["recommended"].eq(True)]
+        if eligible.empty:
+            raise ValueError(f"{state_code} has no recommended USGS candidate.")
+        winner = eligible.iloc[0]
         status(
             "freeze_usgs",
             f"selected {state_code} site {winner['site_no']} ({winner['station_name']})",

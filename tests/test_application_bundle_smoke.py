@@ -1,17 +1,9 @@
 from __future__ import annotations
-# ruff: noqa: E402
 
 import unittest
 
 import numpy as np
 import pandas as pd
-
-try:
-    from . import _path_setup as test_paths
-except ImportError:  # pragma: no cover
-    import _path_setup as test_paths
-
-test_paths.ensure_repo_import_paths()
 
 from data_prep.ghcn import PreparedSeries
 from application.build import (
@@ -171,7 +163,3 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
         self.assertIsNone(bundle.ei_bb_sliding_fgls)
         with self.assertRaises(ValueError):
             _ = bundle.ei_primary
-
-
-if __name__ == "__main__":
-    unittest.main()
