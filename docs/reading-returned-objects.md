@@ -93,6 +93,6 @@ does not guarantee CI coverage, account for selection uncertainty, or ensure
 small MCSE for a 50-year design-life level. Increasing R does not add observed
 extreme events and need not narrow a statistical CI.
 
-New application CSV/JSON exports include these diagnostics. The
-[case-study snapshots](cases/index.md) have not been rerun with the current
-defaults; rebuilding this site alone does not update their statistical results.
+Application CSV/JSON exports include these diagnostics. The
+[case-study snapshots](cases/index.md) document the configuration used to
+generate them; rebuilding this site alone does not rerun the statistical analysis.
