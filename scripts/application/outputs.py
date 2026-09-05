@@ -70,6 +70,7 @@ from unibm.evi import (
     estimate_target_scaling,
     target_stability_summary,
 )
+from unibm.evi.design import _design_block_sizes
 from data_prep._io import write_csv_gz_atomic
 
 
@@ -123,7 +124,7 @@ class _ApplicationTauScalingView:
         return self.intercept + self.slope * self.log_block_sizes
 
     def design_life_levels(self, years: np.ndarray, *, observations_per_year: float) -> np.ndarray:
-        block_sizes = observations_per_year * np.asarray(years, dtype=float)
+        block_sizes = _design_block_sizes(years, observations_per_year)
         return np.exp(self.intercept + self.slope * np.log(block_sizes))
 
 
@@ -644,10 +645,10 @@ def _fit_evi_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> li
         fits.append(
             estimate_target_scaling(
                 bundle.prepared.evi.series.values,
+                regression="FGLS",
                 target="quantile",
                 quantile=bundle.spec.quantile,
                 sliding=True,
-                bootstrap_reps=0,
                 curve=bundle.evi_fit.curve,
                 plateau=plateau,
                 bootstrap_result=bundle.evi_fit.bootstrap,
@@ -800,6 +801,14 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
         "xi_hat": float(bundle.evi_fit.slope),
         "xi_lo": float(bundle.evi_fit.confidence_interval[0]),
         "xi_hi": float(bundle.evi_fit.confidence_interval[1]),
+        "evi_regression_policy": bundle.evi_fit.regression_policy,
+        "evi_regression": bundle.evi_fit.regression,
+        "evi_ci_variant": bundle.evi_fit.ci_variant,
+        "evi_bootstrap_reps_policy": bundle.evi_fit.bootstrap_reps_policy,
+        "evi_bootstrap_reps_used": bundle.evi_fit.bootstrap_reps_used,
+        "evi_bootstrap_precision_met": bundle.evi_fit.bootstrap_precision_met,
+        "evi_bootstrap_mcse_max_ratio": bundle.evi_fit.bootstrap_mcse_max_ratio,
+        "evi_covariance_shrinkage": bundle.evi_fit.covariance_shrinkage,
         "plateau_lo": int(bundle.evi_fit.plateau_bounds[0]),
         "plateau_hi": int(bundle.evi_fit.plateau_bounds[1]),
         "theta_hat_bb_sliding_fgls": np.nan if bb is None else float(bb.theta_hat),
@@ -913,8 +922,7 @@ def application_extrapolation_table(bundles: list[ApplicationBundle]) -> pd.Data
     for bundle in bundles:
         plateau_lo, plateau_hi = bundle.evi_fit.plateau_bounds
         observations_per_year = _application_observations_per_year(bundle)
-        b10 = int(np.ceil(observations_per_year * 10.0))
-        b50 = int(np.ceil(observations_per_year * 50.0))
+        b10, b50 = _design_block_sizes(np.asarray([10.0, 50.0]), observations_per_year).astype(int)
         rows.append(
             {
                 "Application": bundle.spec.label,
@@ -963,7 +971,7 @@ def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
 
 
 def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the streamflow water-year-maxima GEV scale-check table."""
+    """Build the streamflow calendar-year-maxima GEV scale-check table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         if bundle.spec.provider != "usgs":
@@ -973,7 +981,7 @@ def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> 
         rows.append(
             {
                 "Application": bundle.spec.label,
-                "Water-year maxima count": str(
+                "Calendar-year maxima count": str(
                     int(bundle.prepared.display.annual_maxima.dropna().size)
                 ),
                 "GEV 10y return level": _format_readable_scaled_number(
@@ -1208,6 +1216,11 @@ def application_ei_method_rows(bundle: ApplicationBundle) -> list[dict[str, obje
                 "theta_lo": float(estimate.confidence_interval[0]),
                 "theta_hi": float(estimate.confidence_interval[1]),
                 "standard_error": float(estimate.standard_error),
+                "z_standard_error": (
+                    np.nan
+                    if estimate.z_standard_error is None
+                    else float(estimate.z_standard_error)
+                ),
                 "stable_level_lo": (
                     np.nan if estimate.stable_window is None else float(estimate.stable_window.lo)
                 ),
@@ -1217,6 +1230,11 @@ def application_ei_method_rows(bundle: ApplicationBundle) -> list[dict[str, obje
                 "mean_cluster_size": float(1.0 / estimate.theta_hat),
                 "ci_method": estimate.ci_method,
                 "ci_variant": estimate.ci_variant,
+                "bootstrap_reps_policy": estimate.bootstrap_reps_policy,
+                "bootstrap_reps_used": estimate.bootstrap_reps_used,
+                "bootstrap_precision_met": estimate.bootstrap_precision_met,
+                "bootstrap_mcse_max_ratio": estimate.bootstrap_mcse_max_ratio,
+                "covariance_shrinkage": estimate.covariance_shrinkage,
             }
         )
     return rows
@@ -1258,10 +1276,10 @@ def _plot_daily_and_annual(
     )
     maxima_period = prepared.metadata.get("maxima_period", "annual")
     maxima_prefix = {
-        "water_year": "water-year max",
+        "calendar_year": "calendar-year max",
         "season": "seasonal max",
     }.get(maxima_period, "annual max")
-    axes[1].set_xlabel("Water year" if maxima_period == "water_year" else "Year")
+    axes[1].set_xlabel("Year")
     axes[1].set_ylabel(_wrapped_axis_label(ylabel, prefix=maxima_prefix))
     axes[1].set_yscale(annual_max_yscale)
     axes[1].grid(alpha=0.25)
@@ -2171,16 +2189,18 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         _render_wrapped_latex_table(
             streamflow_gev_check,
             caption=(
-                "Streamflow scale comparison against conventional water-year-maxima GEV return levels. "
-                "GEV entries are L-moment point estimates from complete October--September water years "
-                "\\citep{hosking_lmoments_1990}; UniBM entries are median design-life levels "
+                "Streamflow scale comparison against conventional calendar-year-maxima GEV return levels. "
+                "GEV entries are L-moment point estimates from January--December years meeting the "
+                "predeclared 97 percent daily-coverage gate; retained years may have up to 3 percent "
+                "missing daily observations \\citep{hosking_lmoments_1990}; UniBM entries are median "
+                "design-life levels "
                 "with conditional 95 percent confidence intervals from the selected fit. "
                 "The two sets of entries answer different questions and are not used to validate "
                 "one another. The comparison is included only to place the streamflow estimates "
-                "beside a familiar water-year-maxima scale. Large differences, particularly for "
+                "beside a familiar annual-maxima scale. Large differences, particularly for "
                 "Texas at 50 years, reflect the distinct estimands: UniBM entries are daily-clock "
                 "horizon-maximum quantiles from the selected block-scaling extrapolation, not "
-                "water-year-maxima return levels. All discharge entries are in "
+                "calendar-year-maxima return levels. All discharge entries are in "
                 "\\(10^3\\,\\mathrm{ft}^3\\,\\mathrm{s}^{-1}\\)."
             ),
             label="tab:application-streamflow-gev-check-main",
@@ -2190,7 +2210,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             ),
             size=r"\tiny",
             header_latex={
-                "Water-year maxima count": r"\shortstack[c]{Water-year\\ maxima\\ count}",
+                "Calendar-year maxima count": r"\shortstack[c]{Calendar-year\\ maxima\\ count}",
                 "GEV 10y return level": r"\shortstack[c]{GEV 10y\\ return level}",
                 "UniBM 10y design-life level": r"\shortstack[c]{UniBM 10y\\ design-life level}",
                 "GEV 50y return level": r"\shortstack[c]{GEV 50y\\ return level}",

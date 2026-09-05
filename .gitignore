@@ -8,6 +8,7 @@ scratch*
 *.pkl
 *.csv.gz
 *.npz
+CONTEXT.md
 
 # Canonical provider snapshots (derived data and download chunks stay ignored)
 /data/*

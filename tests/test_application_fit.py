@@ -13,6 +13,7 @@ from application.fit import (
     fit_application_ei_estimates,
 )
 from application.specs import (
+    APPLICATION_EI_THRESHOLD_QUANTILES,
     ApplicationPreparedInputs,
     ApplicationSpec,
 )
@@ -37,7 +38,10 @@ class ApplicationFitTests(unittest.TestCase):
         index = pd.date_range("2001-01-01", periods=365 * 20, freq="D")
         if allow_zeros:
             values = np.zeros(index.size, dtype=float)
-            active = rs.random(index.size) < 0.15
+            cluster_starts = rs.random(index.size) < 0.05
+            active = np.zeros(index.size, dtype=bool)
+            for lag in range(5):
+                active[lag:] |= cluster_starts[: index.size - lag]
             values[active] = rs.gamma(shape=2.5, scale=4.0, size=int(active.sum()))
         else:
             values = rs.pareto(2.4, index.size) + 1.0
@@ -45,8 +49,9 @@ class ApplicationFitTests(unittest.TestCase):
 
     def test_fit_application_ei_estimates_uses_fgls_covariance(self) -> None:
         series = self._series(seed=53, allow_zeros=True)
-        _, estimates = fit_application_ei_estimates(series, allow_zeros=True)
+        bundle, estimates = fit_application_ei_estimates(series, allow_zeros=True)
 
+        self.assertEqual(tuple(bundle.threshold_candidates), APPLICATION_EI_THRESHOLD_QUANTILES)
         self.assertEqual(
             set(estimates),
             {"bb_sliding_fgls", "northrop_sliding_fgls", "k_gaps", "ferro_segers"},
@@ -54,6 +59,9 @@ class ApplicationFitTests(unittest.TestCase):
         for key in ("bb_sliding_fgls", "northrop_sliding_fgls"):
             self.assertEqual(estimates[key].regression, "FGLS")
             self.assertEqual(estimates[key].ci_variant, "bootstrap_cov")
+            self.assertEqual(estimates[key].bootstrap_reps_policy, "adaptive")
+            self.assertIn(estimates[key].bootstrap_reps_used, (128, 256, 512, 768, 1024))
+            self.assertEqual(estimates[key].covariance_shrinkage, 0.37)
 
     def test_parallel_application_bundle_builder_sets_blas_thread_caps(self) -> None:
         series = self._series(seed=59, allow_zeros=False)

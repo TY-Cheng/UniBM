@@ -1,5 +1,4 @@
 """Plotting helpers for EI path and fit objects."""
-# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -8,11 +7,17 @@ import sys
 
 from .._runtime import prepare_matplotlib_env
 
-prepare_matplotlib_env()
-import matplotlib.pyplot as plt
 import numpy as np
 
 from .models import EiPathBundle, ExtremalIndexEstimate
+
+
+def _pyplot():
+    """Import pyplot only when a plot is requested."""
+    prepare_matplotlib_env()
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
@@ -69,6 +74,7 @@ def plot_ei_path(
     ylabel: str = "extremal index",
 ) -> None:
     """Plot one observed EI path together with its selected stable window."""
+    plt = _pyplot()
     levels, theta = _finite_path_arrays(path.block_sizes, path.theta_path)
     if levels.size == 0:
         raise ValueError("EI path contains no finite theta values to plot.")
@@ -170,6 +176,7 @@ def plot_ei_fit(
     close: bool | None = None,
 ) -> None:
     """Plot one EI fit either as a retained path view or a threshold summary."""
+    plt = _pyplot()
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6.5, 4), dpi=dpi)
     if fit.path_level and fit.path_theta:
         _plot_path_aware_fit(ax, fit)

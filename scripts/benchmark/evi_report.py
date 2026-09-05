@@ -59,7 +59,6 @@ from benchmark.design import (
     BENCHMARK_SET_LABELS,
     BLOCK_LINESTYLES,
     CORE_METHODS,
-    STRESS_BENCHMARK_SET,
     UNIVERSAL_BENCHMARK_SET,
     family_label,
     ordered_families,
@@ -79,15 +78,7 @@ from shared.runtime import status
 # Aggregation helpers
 # ---------------------------------------------------------------------------
 
-EVI_SHRINKAGE_GRID = (0.00, 0.15, 0.35, 0.55, 0.75, 1.00)
-RECORD_LENGTH_METHODS = (
-    "disjoint_median_ols",
-    "sliding_median_ols",
-    "sliding_median_fgls",
-)
-RECORD_LENGTH_FAMILIES = ("frechet_max_ar", "pareto_additive_ar1")
-RECORD_LENGTH_N_OBS = (200, 365, 730)
-RECORD_LENGTH_THETA = 0.10
+EVI_SHRINKAGE_GRID = (0.00, 0.15, 0.37, 0.55, 0.75, 1.00)
 _EVI_SHRINKAGE_REQUIRED_COLUMNS = {
     "benchmark_set",
     "family",
@@ -95,7 +86,7 @@ _EVI_SHRINKAGE_REQUIRED_COLUMNS = {
     "delta",
     "median_ape",
     "median_coverage",
-    "median_interval_score",
+    "mean_interval_score",
 }
 
 
@@ -125,6 +116,8 @@ def benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
             interval_width_q25=("interval_width", quantile_agg(IQR_LOWER)),
             interval_width_q75=("interval_width", quantile_agg(IQR_UPPER)),
             interval_score_mean=("interval_score", "mean"),
+            interval_score_sd=("interval_score", "std"),
+            n_score=("interval_score", "count"),
             interval_score_median=("interval_score", "median"),
             interval_score_q25=("interval_score", quantile_agg(IQR_LOWER)),
             interval_score_q75=("interval_score", quantile_agg(IQR_UPPER)),
@@ -135,6 +128,9 @@ def benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
     grouped["xi_hat_sd"] = grouped["xi_hat_sd"].fillna(0.0)
+    grouped["interval_score_mcse"] = grouped["interval_score_sd"] / np.sqrt(grouped["n_score"])
+    grouped["interval_score_lo"] = grouped["interval_score_mean"] - grouped["interval_score_mcse"]
+    grouped["interval_score_hi"] = grouped["interval_score_mean"] + grouped["interval_score_mcse"]
     grouped["mape_sd"] = grouped["mape_sd"].fillna(0.0)
     grouped["xi_hat_se"] = grouped["xi_hat_sd"] / np.sqrt(grouped["n_rep"])
     grouped["mape_se"] = grouped["mape_sd"] / np.sqrt(grouped["n_rep"])
@@ -240,13 +236,11 @@ def benchmark_story_table(
         median_ape=("ape_median", "median"),
         ape_q25=("ape_median", quantile_agg(IQR_LOWER)),
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
-        median_interval_score=("interval_score_median", "median"),
-        interval_score_q25=("interval_score_median", quantile_agg(IQR_LOWER)),
-        interval_score_q75=("interval_score_median", quantile_agg(IQR_UPPER)),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{row['mean_interval_score']:.3f} / "
             f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
@@ -292,16 +286,6 @@ def benchmark_story_latex(
 def _shrinkage_sensitivity_output_path(out_dir: Path) -> Path:
     """Return the canonical appendix CSV for EVI shrinkage sensitivity."""
     return out_dir / "benchmark_shrinkage_sensitivity.csv"
-
-
-def _stress_summary_output_path(out_dir: Path) -> Path:
-    """Return the canonical appendix CSV for the slow-convergence stress suite."""
-    return out_dir / "benchmark_stress_summary.csv"
-
-
-def _record_length_summary_output_path(out_dir: Path) -> Path:
-    """Return the canonical appendix CSV for the record-length sensitivity."""
-    return out_dir / "benchmark_record_length_sensitivity.csv"
 
 
 def _shrinkage_sensitivity_contract_ok(
@@ -396,15 +380,15 @@ def build_evi_shrinkage_sensitivity_summary(
                 cache_key=f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}",
             )["sliding_median_fgls"]
             for delta in shrinkage_values:
-                if np.isclose(delta, 0.35):
+                if np.isclose(delta, headline_fit.covariance_shrinkage):
                     fit = headline_fit
                 else:
                     fit = estimate_target_scaling(
                         vec,
+                        regression="FGLS",
                         target="quantile",
                         quantile=cfg.quantile,
                         sliding=True,
-                        bootstrap_reps=0,
                         random_state=rep,
                         curve=headline_fit.curve,
                         plateau=headline_fit.plateau,
@@ -443,7 +427,7 @@ def build_evi_shrinkage_sensitivity_summary(
         )
         .agg(
             ape_median=("ape", "median"),
-            interval_score_median=("interval_score", "median"),
+            interval_score_mean=("interval_score", "mean"),
             coverage=("covered", "mean"),
         )
         .reset_index(drop=True)
@@ -457,257 +441,13 @@ def build_evi_shrinkage_sensitivity_summary(
         .agg(
             median_ape=("ape_median", "median"),
             median_coverage=("coverage", "median"),
-            median_interval_score=("interval_score_median", "median"),
+            mean_interval_score=("interval_score_mean", "mean"),
         )
         .reset_index(drop=True)
     )
     summary = sort_by_family_order(summary, sort_columns=["delta"])
     summary.to_csv(output_path, index=False)
     return summary, output_path
-
-
-def build_evi_stress_suite_summary(
-    root: Path | str = ".",
-    *,
-    configs: list[object] | None = None,
-    max_workers: int | None = None,
-    force: bool = False,
-) -> tuple[pd.DataFrame, Path]:
-    """Materialize the appendix slow-convergence EVI stress-suite summary CSV."""
-    from benchmark.design import stress_evi_simulation_configs
-    from benchmark.evi_benchmark import BENCHMARK_RANDOM_STATE, run_evi_benchmark
-    from config import resolve_repo_dirs
-
-    dirs = resolve_repo_dirs(root)
-    out_dir = dirs["DIR_OUT_BENCHMARK"]
-    cache_dir = dirs["DIR_OUT_BENCHMARK_CACHE"]
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    output_path = _stress_summary_output_path(out_dir)
-
-    resolved_configs = stress_evi_simulation_configs() if configs is None else list(configs)
-    if not force and output_path.exists():
-        cached = pd.read_csv(output_path)
-        expected_families = sorted({str(cfg.family) for cfg in resolved_configs})
-        expected_sets = sorted({str(cfg.benchmark_set) for cfg in resolved_configs})
-        expected_xi = sorted({float(cfg.xi_true) for cfg in resolved_configs})
-        expected_theta = sorted({float(cfg.theta_true) for cfg in resolved_configs})
-        if (
-            {"benchmark_set", "family", "xi_true", "theta_true", "method"}.issubset(cached.columns)
-            and sorted(str(value) for value in cached["benchmark_set"].dropna().unique())
-            == expected_sets
-            and sorted(str(value) for value in cached["family"].dropna().unique())
-            == expected_families
-            and sorted(float(value) for value in cached["xi_true"].dropna().unique())
-            == expected_xi
-            and sorted(float(value) for value in cached["theta_true"].dropna().unique())
-            == expected_theta
-        ):
-            status("evi_report", "reusing cached slow-convergence EVI stress summary")
-            return cached, output_path
-
-    status("evi_report", "building slow-convergence EVI stress-suite summary")
-    _, summary = run_evi_benchmark(
-        random_state=BENCHMARK_RANDOM_STATE,
-        configs=resolved_configs,
-        cache_dir=cache_dir,
-        max_workers=max_workers,
-    )
-    summary.to_csv(output_path, index=False)
-    return summary, output_path
-
-
-def _record_length_sensitivity_contract_ok(
-    summary: pd.DataFrame,
-    *,
-    families: Iterable[str],
-    n_obs_values: Iterable[int],
-    methods: Iterable[str],
-) -> bool:
-    required = {
-        "family",
-        "n_obs",
-        "method",
-        "median_ape",
-        "ape_q25",
-        "ape_q75",
-        "median_interval_score",
-        "interval_score_q25",
-        "interval_score_q75",
-        "median_coverage",
-    }
-    if not required.issubset(summary.columns):
-        return False
-    observed_families = sorted(str(value) for value in summary["family"].dropna().unique())
-    observed_n_obs = sorted(int(value) for value in summary["n_obs"].dropna().unique())
-    observed_methods = sorted(str(value) for value in summary["method"].dropna().unique())
-    return (
-        observed_families == sorted(str(value) for value in families)
-        and observed_n_obs == sorted(int(value) for value in n_obs_values)
-        and observed_methods == sorted(str(value) for value in methods)
-    )
-
-
-def build_evi_record_length_sensitivity_summary(
-    root: Path | str = ".",
-    *,
-    configs: list[object] | None = None,
-    max_workers: int | None = None,
-    force: bool = False,
-) -> tuple[pd.DataFrame, Path]:
-    """Materialize the appendix EVI record-length sensitivity summary CSV."""
-    from benchmark.design import (
-        BENCHMARK_MONTE_CARLO_REPS,
-        default_evi_simulation_configs,
-        fit_methods_for_series,
-    )
-    from benchmark.evi_benchmark import BENCHMARK_ALPHA, BENCHMARK_RANDOM_STATE
-    from config import resolve_repo_dirs
-
-    dirs = resolve_repo_dirs(root)
-    out_dir = dirs["DIR_OUT_BENCHMARK"]
-    cache_dir = dirs["DIR_OUT_BENCHMARK_CACHE"]
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    output_path = _record_length_summary_output_path(out_dir)
-
-    if configs is None:
-        resolved_configs: list[object] = []
-        for n_obs in RECORD_LENGTH_N_OBS:
-            resolved_configs.extend(
-                default_evi_simulation_configs(
-                    families=RECORD_LENGTH_FAMILIES,
-                    theta_values=(RECORD_LENGTH_THETA,),
-                    n_obs=int(n_obs),
-                    reps=BENCHMARK_MONTE_CARLO_REPS,
-                )
-            )
-    else:
-        resolved_configs = list(configs)
-    expected_families = sorted({str(cfg.family) for cfg in resolved_configs})
-    expected_n_obs = sorted({int(cfg.n_obs) for cfg in resolved_configs})
-    if not force and output_path.exists():
-        cached = pd.read_csv(output_path)
-        if _record_length_sensitivity_contract_ok(
-            cached,
-            families=expected_families,
-            n_obs_values=expected_n_obs,
-            methods=RECORD_LENGTH_METHODS,
-        ):
-            status("evi_report", "reusing cached EVI record-length sensitivity summary")
-            return cached, output_path
-
-    from benchmark.design import load_or_simulate_series_bank, scenario_random_state
-
-    status("evi_report", "building appendix EVI record-length sensitivity summary")
-    detail_rows: list[dict[str, float | int | str]] = []
-    _ = max_workers  # Reserved for future parallelization; current run favors cache reuse.
-    for cfg in resolved_configs:
-        scenario_seed = scenario_random_state(cfg, master_seed=BENCHMARK_RANDOM_STATE)
-        series_bank = load_or_simulate_series_bank(
-            cfg,
-            random_state=scenario_seed,
-            cache_dir=cache_dir,
-        )
-        for rep, vec in enumerate(series_bank):
-            fits = fit_methods_for_series(
-                vec,
-                quantile=cfg.quantile,
-                random_state=rep,
-                method_ids=RECORD_LENGTH_METHODS,
-                cache_dir=cache_dir,
-                cache_key=f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}",
-            )
-            for method, fit in fits.items():
-                ci_lo, ci_hi = fit.confidence_interval
-                detail_rows.append(
-                    {
-                        "family": str(cfg.family),
-                        "n_obs": int(cfg.n_obs),
-                        "xi_true": float(cfg.xi_true),
-                        "theta_true": float(cfg.theta_true),
-                        "method": str(method),
-                        "ape": float(abs(fit.slope - cfg.xi_true) / abs(cfg.xi_true)),
-                        "interval_score": float(
-                            interval_score(
-                                cfg.xi_true,
-                                ci_lo,
-                                ci_hi,
-                                alpha=BENCHMARK_ALPHA,
-                            )
-                        ),
-                        "covered": float(interval_contains((ci_lo, ci_hi), cfg.xi_true)),
-                    }
-                )
-    detail = pd.DataFrame(detail_rows)
-    scenario_summary = (
-        detail.groupby(
-            ["family", "n_obs", "xi_true", "theta_true", "method"],
-            as_index=False,
-            dropna=False,
-        )
-        .agg(
-            ape_median=("ape", "median"),
-            interval_score_median=("interval_score", "median"),
-            coverage=("covered", "mean"),
-        )
-        .reset_index(drop=True)
-    )
-    summary = (
-        scenario_summary.groupby(
-            ["family", "n_obs", "method"],
-            as_index=False,
-            dropna=False,
-        )
-        .agg(
-            median_ape=("ape_median", "median"),
-            ape_q25=("ape_median", quantile_agg(IQR_LOWER)),
-            ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
-            median_interval_score=("interval_score_median", "median"),
-            interval_score_q25=("interval_score_median", quantile_agg(IQR_LOWER)),
-            interval_score_q75=("interval_score_median", quantile_agg(IQR_UPPER)),
-            median_coverage=("coverage", "median"),
-        )
-        .reset_index(drop=True)
-    )
-    summary["method_label"] = summary["method"].map(METHOD_LABELS)
-    summary["family"] = pd.Categorical(
-        summary["family"],
-        categories=ordered_families(expected_families),
-        ordered=True,
-    )
-    summary = summary.sort_values(["family", "n_obs", "method"]).reset_index(drop=True)
-    summary["family"] = summary["family"].astype(str)
-    summary.to_csv(output_path, index=False)
-    return summary, output_path
-
-
-def evi_record_length_sensitivity_table(summary: pd.DataFrame) -> pd.DataFrame:
-    """Render the appendix record-length sensitivity table for headline EVI methods."""
-    subset = summary.loc[summary["method"].isin(RECORD_LENGTH_METHODS)].copy()
-    subset["Family"] = subset["family"].map(family_label)
-    subset["Summary"] = subset.apply(
-        lambda row: (
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
-        ),
-        axis=1,
-    )
-    table = (
-        subset.pivot(
-            index=["Family", "n_obs"],
-            columns="method_label",
-            values="Summary",
-        )
-        .reset_index()
-        .rename_axis(columns=None)
-    )
-    ordered_columns = ["Family", "n_obs"] + [
-        METHOD_LABELS[method]
-        for method in RECORD_LENGTH_METHODS
-        if METHOD_LABELS[method] in table.columns
-    ]
-    return table.loc[:, ordered_columns]
 
 
 def plot_evi_shrinkage_sensitivity(
@@ -727,7 +467,7 @@ def plot_evi_shrinkage_sensitivity(
         )
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("median_interval_score", "median Winkler interval score"),
+        ("mean_interval_score", "mean Winkler interval score"),
         ("median_coverage", "median coverage"),
         ("median_ape", "median APE"),
     ]
@@ -786,24 +526,13 @@ def plot_evi_shrinkage_sensitivity(
 _METRIC_COLUMNS = {
     "ape": ("ape_median", "ape_q25", "ape_q75"),
     "coverage": ("coverage", "coverage_lo", "coverage_hi"),
-    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+    "interval_score": ("interval_score_mean", "interval_score_lo", "interval_score_hi"),
     "mape": ("mape", None, None),
 }
 
 
 def _metric_columns(metric: str) -> tuple[str, str | None, str | None]:
     return _METRIC_COLUMNS[metric]
-
-
-def _stress_cutoff(subset: pd.DataFrame) -> float | None:
-    benchmark_sets = subset["benchmark_set"].drop_duplicates().tolist()
-    if len(benchmark_sets) <= 1 or not {"main", "stress"}.issubset(set(benchmark_sets)):
-        return None
-    main_max = subset.loc[subset["benchmark_set"] == "main", "xi_true"].max()
-    stress_min = subset.loc[subset["benchmark_set"] == "stress", "xi_true"].min()
-    if np.isfinite(main_max) and np.isfinite(stress_min) and main_max < stress_min:
-        return float(np.sqrt(main_max * stress_min))
-    return None
 
 
 def _x_multipliers(methods: list[str], interval_style: str) -> dict[str, float]:
@@ -938,10 +667,11 @@ def plot_benchmark_panels(
     interval_style: str = "band",
     save: bool = False,
 ) -> None:
-    """Plot benchmark metrics against xi using shared bootstrap uncertainty bars.
+    """Plot benchmark metrics against xi using score MCSE and APE IQR bars.
 
-    The errorbar mode offsets methods slightly on the x-axis so empirical IQR
-    whiskers remain visible even when several methods share nearly identical curves.
+    The score uses arithmetic means with one Monte Carlo standard error on each
+    side; APE retains the empirical median and IQR. Methods are offset slightly
+    so whiskers remain visible when curves nearly coincide.
     """
     subset = (
         summary.copy()
@@ -968,7 +698,6 @@ def plot_benchmark_panels(
         sharey="row",
     )
     axes = np.asarray(axes, dtype=object).reshape(nrows, ncols)
-    stress_cutoff = _stress_cutoff(subset)
     x_multipliers = _x_multipliers(methods, interval_style)
     for family_idx, family in enumerate(families):
         family_frame = subset[subset["family"] == family]
@@ -1044,8 +773,6 @@ def plot_benchmark_panels(
                 ax.set_xscale("log")
                 if ylim is not None:
                     ax.set_ylim(*ylim)
-                if stress_cutoff is not None:
-                    ax.axvline(stress_cutoff, color="0.5", linestyle="--", lw=0.8, alpha=0.9)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
                     ax.set_title(f"$\\theta$ = {theta:.2f}")
@@ -1150,13 +877,16 @@ def write_evi_benchmark_manuscript_artifacts(
     external_benchmark_summary: pd.DataFrame,
     *,
     shrinkage_sensitivity_summary: pd.DataFrame | None = None,
-    stress_summary: pd.DataFrame | None = None,
-    record_length_summary: pd.DataFrame | None = None,
     fig_dir: Path,
     table_dir: Path,
     web_dir: Path | None = None,
 ) -> None:
     """Write EVI benchmark manuscript tables and figures from cached CSV summaries."""
+    if web_dir is not None:
+        web_dir.mkdir(parents=True, exist_ok=True)
+        pd.concat([benchmark_summary_df, external_benchmark_summary], ignore_index=True).to_csv(
+            web_dir / "evi_benchmark.csv", index=False
+        )
     # Deferred import avoids a circular dependency between report and mixed-baseline helpers.
     from benchmark.evi_external import (
         EXTERNAL_METHOD_LABELS,
@@ -1195,7 +925,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 f"\\(\\xi \\in \\{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
                 f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
                 "Rows report methods and columns group representative scenarios by family and "
-                "\\(\\theta\\). In each cell, the first line reports median Winkler interval score and "
+                "\\(\\theta\\). In each cell, the first line reports mean Winkler interval score and "
                 "the second line reports median absolute percentage error, both summarized over "
                 "the \\(\\xi\\) grid. "
                 "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\))."
@@ -1229,7 +959,7 @@ def write_evi_benchmark_manuscript_artifacts(
                 f"with xi in {{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0}}, "
                 f"theta in {{0.01, 0.10, 0.50, 1.0}}, and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n_obs={n_obs}. Cells report median 95\\% interval width / "
-                "median coverage / median interval score."
+                "median coverage / mean interval score."
             ),
             label="tab:benchmark-interval-main",
         )
@@ -1292,53 +1022,6 @@ def write_evi_benchmark_manuscript_artifacts(
             file_path=fig_dir / "benchmark_shrinkage_sensitivity.pdf",
             save=True,
         )
-    if stress_summary is not None:
-        (table_dir / "benchmark_stress_main.tex").write_text(
-            benchmark_story_latex(
-                stress_summary,
-                methods=CORE_METHODS,
-                benchmark_set=STRESS_BENCHMARK_SET,
-                caption=(
-                    "Slow-convergence stress suite for the sliding-median-FGLS EVI workflow. "
-                    "The design uses absolute-Student-t moving-maxima \\(q=99\\) series with "
-                    "\\(\\xi \\in \\{0.10, 0.30, 1.0\\}\\), \\(\\theta \\in \\{0.10, 0.50, 1.0\\}\\), and \\(n=365\\). "
-                    "Cells report median Winkler interval score and median absolute percentage "
-                    "error, each followed by its interquartile range (IQR), summarized over the \\(\\xi\\) grid. The purpose is robustness checking under "
-                    "heavy-tailed but slower-converging block-maxima behavior, not to define "
-                    "a separate benchmark."
-                ),
-                label="tab:benchmark-stress-main",
-                caption_raw=True,
-            )
-        )
-        plot_benchmark_panels(
-            stress_summary,
-            benchmark_set=STRESS_BENCHMARK_SET,
-            methods=CORE_METHODS,
-            title="Appendix: slow-convergence EVI stress suite",
-            legend_mode="explicit",
-            interval_style="errorbar",
-            file_path=fig_dir / "benchmark_stress_summary.pdf",
-            save=True,
-        )
-    if record_length_summary is not None:
-        (table_dir / "benchmark_record_length_main.tex").write_text(
-            render_latex_table(
-                evi_record_length_sensitivity_table(record_length_summary),
-                caption=(
-                    "EVI record-length sensitivity for the within-BM severity "
-                    "comparison used in the main text. The table holds \\(\\theta\\) fixed at 0.10, compares "
-                    "\\(n \\in \\{200, 365, 730\\}\\) for the Fréchet max-AR and Pareto additive AR(1) "
-                    "families, and reports median Winkler interval score and median absolute "
-                    "percentage error, each followed by its interquartile range (IQR), across the \\(\\xi\\) grid for disjoint-median-OLS, sliding-median-OLS, "
-                    "and sliding-median-FGLS. The purpose is to delimit how the short-record "
-                    "benchmark narrative transports across nearby record lengths, not to define "
-                    "a separate benchmark."
-                ),
-                label="tab:benchmark-record-length-main",
-                caption_raw=True,
-            )
-        )
 
 
 def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, Path]:
@@ -1363,19 +1046,11 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
     shrinkage_sensitivity_summary, shrinkage_sensitivity_path = (
         build_evi_shrinkage_sensitivity_summary(root, force=False)
     )
-    status("evi_report", "building slow-convergence stress summary")
-    stress_summary, stress_summary_path = build_evi_stress_suite_summary(root, force=False)
-    status("evi_report", "building record-length sensitivity summary")
-    record_length_summary, record_length_summary_path = (
-        build_evi_record_length_sensitivity_summary(root, force=False)
-    )
     status("evi_report", "writing manuscript figures and LaTeX tables")
     write_evi_benchmark_manuscript_artifacts(
         benchmark_outputs.summary,
         benchmark_outputs.external_summary,
         shrinkage_sensitivity_summary=shrinkage_sensitivity_summary,
-        stress_summary=stress_summary,
-        record_length_summary=record_length_summary,
         fig_dir=fig_dir,
         table_dir=table_dir,
         web_dir=web_dir,
@@ -1384,19 +1059,14 @@ def build_evi_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, 
         "benchmark_summary": benchmark_outputs.summary_path,
         "external_benchmark_summary": benchmark_outputs.external_summary_path,
         "benchmark_shrinkage_sensitivity_data": shrinkage_sensitivity_path,
-        "benchmark_stress_summary_data": stress_summary_path,
-        "benchmark_record_length_sensitivity_data": record_length_summary_path,
         "benchmark_evi_summary_main": table_dir / "benchmark_evi_summary_main.tex",
         "benchmark_interval_main": table_dir / "benchmark_interval_main.tex",
         "benchmark_overview_main": table_dir / "benchmark_overview_main.tex",
-        "benchmark_stress_main": table_dir / "benchmark_stress_main.tex",
-        "benchmark_record_length_main": table_dir / "benchmark_record_length_main.tex",
         "benchmark_summary_figure": fig_dir / "benchmark_summary.pdf",
         "benchmark_overview_figure": fig_dir / "benchmark_overview.pdf",
         "benchmark_targets_figure": fig_dir / "benchmark_targets.pdf",
         "benchmark_interval_sharpness_figure": fig_dir / "benchmark_interval_sharpness.pdf",
         "benchmark_shrinkage_sensitivity_figure": fig_dir / "benchmark_shrinkage_sensitivity.pdf",
-        "benchmark_stress_summary_figure": fig_dir / "benchmark_stress_summary.pdf",
         "benchmark_evi_web_figure": web_dir / "evi_benchmark.png",
     }
 
@@ -1417,11 +1087,8 @@ __all__ = [
     "benchmark_story_table",
     "benchmark_summary",
     "benchmark_table",
-    "build_evi_record_length_sensitivity_summary",
-    "build_evi_stress_suite_summary",
     "build_evi_shrinkage_sensitivity_summary",
     "build_evi_benchmark_manuscript_outputs",
-    "evi_record_length_sensitivity_table",
     "plot_evi_shrinkage_sensitivity",
     "plot_benchmark_panels",
     "write_evi_benchmark_manuscript_artifacts",

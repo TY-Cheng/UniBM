@@ -9,6 +9,19 @@ import numpy as np
 from .._validation import as_1d_float_array
 
 
+def _validate_quantile(quantile: float) -> float:
+    """Return a finite non-boolean quantile strictly inside the unit interval."""
+    if isinstance(quantile, (bool, np.bool_)):
+        raise ValueError("quantile must be finite and lie strictly between 0 and 1.")
+    try:
+        value = float(quantile)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("quantile must be finite and lie strictly between 0 and 1.") from exc
+    if not np.isfinite(value) or not 0.0 < value < 1.0:
+        raise ValueError("quantile must be finite and lie strictly between 0 and 1.")
+    return value
+
+
 def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True) -> float:
     """Estimate a positive-sample mode via a log-scale KDE surrogate."""
     sample_arr = as_1d_float_array(sample)
@@ -61,7 +74,13 @@ def summarize_block_maxima(
     if maxima_arr.size == 0:
         return np.nan
     if target == "quantile":
-        return float(np.quantile(maxima_arr, quantile, method="median_unbiased"))
+        return float(
+            np.quantile(
+                maxima_arr,
+                _validate_quantile(quantile),
+                method="median_unbiased",
+            )
+        )
     if target == "mean":
         return float(np.mean(maxima_arr))
     if target == "mode":

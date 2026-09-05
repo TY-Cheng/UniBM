@@ -43,6 +43,9 @@ from unibm._runtime import (
 def _make_scaling_fit() -> ScalingFit:
     block_sizes = np.array([4, 8, 16], dtype=int)
     curve = BlockSummaryCurve(
+        target="quantile",
+        quantile=0.5,
+        sliding=True,
         block_sizes=block_sizes,
         counts=np.array([128, 64, 32], dtype=int),
         values=np.array([2.0, 3.0, 4.5], dtype=float),
@@ -60,6 +63,9 @@ def _make_scaling_fit() -> ScalingFit:
         target="quantile",
         quantile=0.5,
         sliding=True,
+        regression_policy="OLS",
+        regression="OLS",
+        ci_variant="hc0",
         intercept=0.1,
         slope=0.8,
         standard_error=0.05,

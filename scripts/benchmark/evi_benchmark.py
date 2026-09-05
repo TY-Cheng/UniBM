@@ -72,6 +72,15 @@ from shared.runtime import status
 BENCHMARK_ALPHA = 0.05
 BENCHMARK_RANDOM_STATE = BENCHMARK_MASTER_SEED
 
+_INTERNAL_DETAIL_REQUIRED_COLUMNS = {
+    "regression_policy",
+    "regression",
+    "ci_variant",
+    "bootstrap_reps_policy",
+    "bootstrap_reps_used",
+    "bootstrap_precision_met",
+    "covariance_shrinkage",
+}
 _INTERNAL_SUMMARY_REQUIRED_COLUMNS = {
     "benchmark_set",
     "family",
@@ -92,10 +101,12 @@ _INTERNAL_SUMMARY_REQUIRED_COLUMNS = {
     "coverage_hi",
     "interval_width_mean",
     "interval_score_mean",
+    "interval_score_mcse",
     "interval_score_q25",
     "interval_score_q75",
 }
 _EXTERNAL_SUMMARY_REQUIRED_COLUMNS = {
+    "interval_score_mcse",
     "benchmark_set",
     "family",
     "n_obs",
@@ -150,7 +161,14 @@ def _result_row(
         "method_label": METHOD_LABELS[method],
         "block_scheme": spec.block_scheme,
         "summary_target": spec.summary_target,
-        "regression": spec.regression,
+        "regression_policy": fit.regression_policy,
+        "regression": fit.regression,
+        "ci_variant": fit.ci_variant,
+        "bootstrap_reps_policy": fit.bootstrap_reps_policy,
+        "bootstrap_reps_used": fit.bootstrap_reps_used,
+        "bootstrap_precision_met": fit.bootstrap_precision_met,
+        "bootstrap_mcse_max_ratio": fit.bootstrap_mcse_max_ratio,
+        "covariance_shrinkage": fit.covariance_shrinkage,
         "xi_true": cfg.xi_true,
         "theta_true": cfg.theta_true,
         "phi": cfg.phi,
@@ -243,7 +261,14 @@ def run_evi_benchmark(
         try:
             context = mp.get_context("spawn")
             with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
-                frames = list(executor.map(_evaluate_config_worker, tasks, chunksize=1))
+                frames = []
+                for completed, frame in enumerate(
+                    executor.map(_evaluate_config_worker, tasks, chunksize=1), start=1
+                ):
+                    frames.append(frame)
+                    status(
+                        "evi_benchmark", f"completed {completed}/{len(tasks)} internal scenarios"
+                    )
         except (OSError, PermissionError):
             # Some constrained environments disallow the semaphore/process-pool
             # setup required by `ProcessPoolExecutor`. Fall back to sequential
@@ -365,18 +390,23 @@ def load_or_materialize_evi_benchmark_outputs(
         and paths["external_detail"].exists()
         and paths["external_summary"].exists()
     ):
+        detail_columns = set(pd.read_csv(paths["detail"], nrows=0).columns)
         summary = pd.read_csv(paths["summary"])
         external_summary = pd.read_csv(paths["external_summary"])
-        if _summary_matches_contract(
-            summary,
-            required_columns=_INTERNAL_SUMMARY_REQUIRED_COLUMNS,
-            expected_methods=set(METHOD_ORDER),
-            configs=configs,
-        ) and _summary_matches_contract(
-            external_summary,
-            required_columns=_EXTERNAL_SUMMARY_REQUIRED_COLUMNS,
-            expected_methods=set(EXTERNAL_ESTIMATORS),
-            configs=configs,
+        if (
+            _INTERNAL_DETAIL_REQUIRED_COLUMNS.issubset(detail_columns)
+            and _summary_matches_contract(
+                summary,
+                required_columns=_INTERNAL_SUMMARY_REQUIRED_COLUMNS,
+                expected_methods=set(METHOD_ORDER),
+                configs=configs,
+            )
+            and _summary_matches_contract(
+                external_summary,
+                required_columns=_EXTERNAL_SUMMARY_REQUIRED_COLUMNS,
+                expected_methods=set(EXTERNAL_ESTIMATORS),
+                configs=configs,
+            )
         ):
             status("evi_benchmark", "reusing cached internal and external benchmark CSVs")
             return EviBenchmarkOutputs(

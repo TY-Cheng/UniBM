@@ -101,6 +101,50 @@ class EiBootstrapTests(unittest.TestCase):
         self.assertEqual(boot["samples"].shape, (4, 4))
         self.assertEqual(boot["covariance"].shape, (4, 4))
         self.assertTrue(np.all(np.isfinite(boot["covariance"])))
+        self.assertEqual(boot["base_path"], "bb")
+        self.assertIs(boot["sliding"], True)
+
+    def test_bootstrap_bm_ei_path_validates_fixed_block_length(self) -> None:
+        values = np.arange(1.0, 65.0)
+        block_sizes = np.array([4, 8, 16], dtype=int)
+
+        default = bootstrap_bm_ei_path(
+            values,
+            allow_zeros=False,
+            base_path="bb",
+            sliding=True,
+            block_sizes=block_sizes,
+            reps=3,
+            random_state=17,
+        )
+        fixed = bootstrap_bm_ei_path(
+            values,
+            allow_zeros=False,
+            base_path="bb",
+            sliding=True,
+            block_sizes=block_sizes,
+            reps=3,
+            random_state=17,
+            bootstrap_block_length=7,
+        )
+        self.assertEqual(default["bootstrap_block_length_policy"], "default")
+        self.assertEqual(default["bootstrap_block_length"], 16)
+        self.assertEqual(fixed["bootstrap_block_length_policy"], "fixed")
+        self.assertEqual(fixed["bootstrap_block_length"], 7)
+
+        for invalid in (0, 65, 1.5, True, "auto", "bad"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "bootstrap_block_length"):
+                    bootstrap_bm_ei_path(
+                        values,
+                        allow_zeros=False,
+                        base_path="bb",
+                        sliding=True,
+                        block_sizes=block_sizes,
+                        reps=3,
+                        random_state=17,
+                        bootstrap_block_length=invalid,
+                    )
 
 
 if __name__ == "__main__":

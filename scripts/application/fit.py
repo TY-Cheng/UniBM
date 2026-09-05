@@ -20,6 +20,7 @@ from unibm.ei import (
 from unibm.evi import estimate_evi_quantile
 from application.specs import (
     APPLICATION_EI_BOOTSTRAP_REPS,
+    APPLICATION_EI_THRESHOLD_QUANTILES,
     APPLICATION_RANDOM_STATE,
     PAPER_APPLICATIONS,
     ApplicationBundle,
@@ -61,7 +62,11 @@ def fit_application_ei_estimates(
     """Fit the four default application EI estimators for one prepared series."""
     if label is not None:
         status(status_prefix, f"preparing EI bundle for {label}")
-    ei_bundle = prepare_ei_bundle(series.values, allow_zeros=allow_zeros)
+    ei_bundle = prepare_ei_bundle(
+        series.values,
+        allow_zeros=allow_zeros,
+        threshold_quantiles=APPLICATION_EI_THRESHOLD_QUANTILES,
+    )
     if label is not None:
         status(status_prefix, f"bootstrapping EI covariance for {label}")
     bootstrap_results = {
@@ -116,11 +121,14 @@ def build_application_bundle(
     status("application", f"fitting EVI for {spec.label}")
     evi_fit = estimate_evi_quantile(
         inputs.evi.series.values,
+        regression="FGLS",
         quantile=spec.quantile,
         sliding=True,
-        bootstrap_reps=120,
+        bootstrap_reps="adaptive",
         random_state=APPLICATION_RANDOM_STATE,
     )
+    if evi_fit.regression_policy != "FGLS" or evi_fit.regression != "FGLS":
+        raise RuntimeError("Application EVI fits require strict FGLS.")
     ei_bundle: EiPreparedBundle | None = None
     ei_estimates: dict[str, ExtremalIndexEstimate] | None = None
     if spec.formal_ei:

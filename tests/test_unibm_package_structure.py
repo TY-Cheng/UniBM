@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
+import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -108,6 +112,42 @@ class UniBmPackageStructureTests(unittest.TestCase):
             {"__version__", "ei", "evi", "estimate_design_life_level", "estimate_evi_quantile"},
         )
 
+    def test_numerical_imports_do_not_load_optional_plotting_stack(self) -> None:
+        script = """
+import json
+import os
+import sys
+
+import unibm
+from unibm import estimate_design_life_level, estimate_evi_quantile
+import unibm.ei
+
+print(json.dumps({
+    "callable_headline_api": callable(estimate_design_life_level) and callable(estimate_evi_quantile),
+    "matplotlib_loaded": any(name == "matplotlib" or name.startswith("matplotlib.") for name in sys.modules),
+    "pandas_loaded": any(name == "pandas" or name.startswith("pandas.") for name in sys.modules),
+    "mplconfigdir": os.environ.get("MPLCONFIGDIR"),
+    "xdg_cache_home": os.environ.get("XDG_CACHE_HOME"),
+}))
+"""
+        env = os.environ.copy()
+        env.pop("MPLCONFIGDIR", None)
+        env.pop("XDG_CACHE_HOME", None)
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertTrue(result["callable_headline_api"])
+        self.assertFalse(result["matplotlib_loaded"])
+        self.assertFalse(result["pandas_loaded"])
+        self.assertIsNone(result["mplconfigdir"])
+        self.assertIsNone(result["xdg_cache_home"])
+
     def test_removed_flat_modules_are_not_importable(self) -> None:
         for module_name in REMOVED_FLAT_MODULES:
             with self.subTest(module_name=module_name):
@@ -134,6 +174,9 @@ class UniBmPackageStructureTests(unittest.TestCase):
             "draw_circular_block_bootstrap_samples",
         ):
             self.assertFalse(hasattr(evi, name), msg=f"unibm.evi leaked raw symbol {name}")
+
+    def test_evi_grouped_namespace_does_not_export_removed_tail_selector_alias(self) -> None:
+        self.assertFalse(hasattr(evi, "select_stable_tail_window"))
 
     def test_core_library_has_no_runtime_imports_from_repo_workflow_packages(self) -> None:
         for path in SRC_UNIBM.rglob("*.py"):

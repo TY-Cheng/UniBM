@@ -16,7 +16,13 @@ class UniBmPackageSmokeTests(unittest.TestCase):
 
     def test_top_level_package_import_supports_minimal_evi_workflow(self) -> None:
         sample = self._sample()
-        fit = unibm.estimate_evi_quantile(sample, quantile=0.5, sliding=True, bootstrap_reps=0)
+        fit = unibm.estimate_evi_quantile(
+            sample,
+            regression="OLS",
+            quantile=0.5,
+            sliding=True,
+            bootstrap_reps=0,
+        )
         design_life = unibm.estimate_design_life_level(fit, years=np.array([10.0, 50.0]))
 
         self.assertTrue(np.isfinite(fit.slope))

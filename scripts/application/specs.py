@@ -12,7 +12,8 @@ from unibm.evi import ScalingFit
 
 
 APPLICATION_RANDOM_STATE = 7
-APPLICATION_EI_BOOTSTRAP_REPS = 120
+APPLICATION_EI_BOOTSTRAP_REPS = "adaptive"
+APPLICATION_EI_THRESHOLD_QUANTILES = (0.90, 0.95)
 DESIGN_LIFE_LEVEL_HORIZONS = np.asarray([1.0, 10.0, 25.0, 50.0], dtype=float)
 APPLICATION_DESIGN_LIFE_TAUS = (0.5, 0.9, 0.95, 0.99)
 APPLICATION_EVI_METHOD_IDS = ("sliding_median_fgls",)
@@ -114,7 +115,7 @@ APPLICATIONS = (
         time_series_title="Houston wet-season daily precipitation and seasonal maxima",
         scaling_title="Houston sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
-        observations_per_year=183.0,
+        observations_per_year=14_454 / 79,
         design_life_level_yscale="log",
         target_stability_title="Houston target stability across block sizes",
         formal_ei=False,
@@ -142,7 +143,7 @@ APPLICATIONS = (
         figure_stem="tx_streamflow",
         raw_key="TX",
         ylabel="discharge (cfs)",
-        time_series_title="Texas daily discharge and water-year maxima",
+        time_series_title="Texas daily discharge and calendar-year maxima",
         scaling_title="Texas streamflow sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
@@ -156,7 +157,7 @@ APPLICATIONS = (
         figure_stem="fl_streamflow",
         raw_key="FL",
         ylabel="discharge (cfs)",
-        time_series_title="Florida daily discharge and water-year maxima",
+        time_series_title="Florida daily discharge and calendar-year maxima",
         scaling_title="Florida streamflow sliding block-maxima quantile scaling",
         scaling_ylabel="log block-maximum quantile",
         observations_per_year=365.25,
@@ -211,6 +212,7 @@ def spec_by_key() -> dict[str, ApplicationSpec]:
 __all__ = [
     "APPLICATION_EI_BOOTSTRAP_REPS",
     "APPLICATION_EI_METHOD_IDS",
+    "APPLICATION_EI_THRESHOLD_QUANTILES",
     "APPLICATION_EVI_METHOD_IDS",
     "APPLICATION_DESIGN_LIFE_TAUS",
     "APPLICATION_RANDOM_STATE",

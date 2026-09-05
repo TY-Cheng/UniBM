@@ -313,6 +313,8 @@ def external_benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
             interval_width_q25=("interval_width", quantile_agg(IQR_LOWER)),
             interval_width_q75=("interval_width", quantile_agg(IQR_UPPER)),
             interval_score_mean=("interval_score", "mean"),
+            interval_score_sd=("interval_score", "std"),
+            n_score=("interval_score", "count"),
             interval_score_median=("interval_score", "median"),
             interval_score_q25=("interval_score", quantile_agg(IQR_LOWER)),
             interval_score_q75=("interval_score", quantile_agg(IQR_UPPER)),
@@ -326,6 +328,9 @@ def external_benchmark_summary(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
     grouped["xi_hat_sd"] = grouped["xi_hat_sd"].fillna(0.0)
+    grouped["interval_score_mcse"] = grouped["interval_score_sd"] / np.sqrt(grouped["n_score"])
+    grouped["interval_score_lo"] = grouped["interval_score_mean"] - grouped["interval_score_mcse"]
+    grouped["interval_score_hi"] = grouped["interval_score_mean"] + grouped["interval_score_mcse"]
     grouped["mape_sd"] = grouped["mape_sd"].fillna(0.0)
     grouped["xi_hat_se"] = grouped["xi_hat_sd"] / np.sqrt(grouped["n_rep"])
     grouped["mape_se"] = grouped["mape_sd"] / np.sqrt(grouped["n_rep"])
@@ -364,7 +369,7 @@ def _summary_columns(*, include_intervals: bool) -> list[str]:
         "xi_true",
         "method",
         "ape_median",
-        "interval_score_median",
+        "interval_score_mean",
     ]
     if not include_intervals:
         return base
@@ -379,6 +384,9 @@ def _summary_columns(*, include_intervals: bool) -> list[str]:
         "ape_q25",
         "ape_q75",
         "interval_score_mean",
+        "interval_score_mcse",
+        "interval_score_lo",
+        "interval_score_hi",
         "interval_score_median",
         "interval_score_q25",
         "interval_score_q75",
@@ -442,13 +450,11 @@ def external_story_table(
         median_ape=("ape_median", "median"),
         ape_q25=("ape_median", quantile_agg(IQR_LOWER)),
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
-        median_interval_score=("interval_score_median", "median"),
-        interval_score_q25=("interval_score_median", quantile_agg(IQR_LOWER)),
-        interval_score_q75=("interval_score_median", quantile_agg(IQR_UPPER)),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{row['mean_interval_score']:.3f} / "
             f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
@@ -539,13 +545,11 @@ def target_plus_external_story_table(
         median_ape=("ape_median", "median"),
         ape_q25=("ape_median", quantile_agg(IQR_LOWER)),
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
-        median_interval_score=("interval_score_median", "median"),
-        interval_score_q25=("interval_score_median", quantile_agg(IQR_LOWER)),
-        interval_score_q75=("interval_score_median", quantile_agg(IQR_UPPER)),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{row['mean_interval_score']:.3f} / "
             f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
@@ -627,7 +631,7 @@ def interval_sharpness_story_table(
     ).agg(
         median_interval_width=("interval_width_median", "median"),
         coverage_median=("coverage", "median"),
-        median_interval_score=("interval_score_median", "median"),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     summary["method"] = pd.Categorical(summary["method"], categories=methods, ordered=True)
     summary = sort_by_family_order(summary, sort_columns=["theta_true", "method"])
@@ -639,7 +643,7 @@ def interval_sharpness_story_table(
             "method_label",
             "median_interval_width",
             "coverage_median",
-            "median_interval_score",
+            "mean_interval_score",
         ],
     ]
 
@@ -660,13 +664,13 @@ def interval_sharpness_story_latex(
     ).copy()
     table["median_interval_width"] = table["median_interval_width"].map(lambda x: f"{x:.3f}")
     table["coverage_median"] = table["coverage_median"].map(lambda x: f"{x:.3f}")
-    table["median_interval_score"] = table["median_interval_score"].map(lambda x: f"{x:.3f}")
+    table["mean_interval_score"] = table["mean_interval_score"].map(lambda x: f"{x:.3f}")
     return _render_story_latex(table, caption=caption, label=label)
 
 
 _METRIC_COLUMNS = {
     "ape": ("ape_median", "ape_q25", "ape_q75"),
-    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+    "interval_score": ("interval_score_mean", "interval_score_lo", "interval_score_hi"),
 }
 
 
@@ -775,7 +779,7 @@ def plot_external_comparison_panels(
                     ylabel = (
                         "absolute percentage error"
                         if metric == "ape"
-                        else "Winkler interval score"
+                        else "mean Winkler interval score"
                     )
                     ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
                 if row_idx == len(families) * len(metrics) - 1:
@@ -940,7 +944,7 @@ def plot_target_plus_external_panels(
                     ylabel = (
                         "absolute percentage error"
                         if metric == "ape"
-                        else "Winkler interval score"
+                        else "mean Winkler interval score"
                     )
                     ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
                 if row_idx == len(families) * len(metrics) - 1:

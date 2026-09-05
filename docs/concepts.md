@@ -34,13 +34,16 @@ observation clock.
 The relevant term for the current package output is a `design-life level`:
 a quantile of the maximum over a design-life span, or equivalently a
 `T`-year block-maximum `tau`-quantile on the chosen observation clock.
-The current package default is `tau = 0.5`, so the headline exported curve is best read as a
+The quantile estimator defaults to `tau = 0.5`, so its curve is best read as a
 **median design-life level** rather than as a classical return-period level.
-The severity workflow also exports companion design-life levels at
-`tau = 0.90, 0.95, 0.99`. Those higher curves reuse the same headline plateau
-and slope `xi` and only shift the intercept, so they should be read as
-shared-`xi` upper design-life quantiles rather than as separate headline EVI
-fits.
+
+The package maps **one fitted quantile** to design-life levels.
+`estimate_design_life_level` cannot change that fit's `tau`: a different
+quantile requires a matching fit. Separately, the repository's application
+workflow exports companion levels at `tau = 0.90, 0.95, 0.99`. That workflow
+holds the median fit's plateau and slope fixed and estimates a new intercept
+for each quantile. These are shared-`xi` application views, not additional
+fits automatically produced by the public design-life helper.
 
 Main entrypoints:
 
@@ -82,6 +85,7 @@ different roles:
 Main entrypoints:
 
 - `unibm.ei.preparation.prepare_ei_bundle`
+- `unibm.ei.bootstrap.bootstrap_bm_ei_path`
 - `unibm.ei.selection.select_stable_path_window`
 - `unibm.ei.bm.estimate_pooled_bm_ei`
 - `unibm.ei.threshold.estimate_k_gaps`
@@ -102,13 +106,44 @@ asymptotic slope `xi` and to differ mainly in intercept. In the direct
 block-maxima framework used here, serial dependence is already internalized in
 the fitted block-maximum law, so the design-life-level curve should be read
 directly from the dependent-series fit rather than through a second BM-side
-`theta` adjustment. In the current package workflow, this is implemented
-explicitly by treating `tau = 0.50` as the headline fit and deriving the
-`0.90 / 0.95 / 0.99` curves by holding the same plateau and slope fixed while
-re-estimating only tau-specific intercepts.
+`theta` adjustment. The shared-slope companion curves described above are an
+application-level use of this asymptotic relationship, not a guarantee that
+different finite-sample quantile fits have identical slopes.
 
 In practice:
 
 - use the EVI/design-life-level outputs for severity on the original physical
   scale
-- use the EI outputs for persistence, clustering, and recovery burden
+- use the EI outputs for extremal clustering; under the usual limiting
+  interpretation, `1 / theta` is a mean number of extreme observations per
+  cluster, not elapsed cluster duration or recovery time
+
+## Observation clock and annual maxima
+
+The public estimators receive values, not timestamps. They cannot infer whether
+one step means a calendar day, an observed day, or an active day. The caller
+must establish that clock before fitting. EI preparation preserves the input
+order and rejects non-finite values. `allow_zeros=True` preserves observed zeros;
+`False` requires strictly positive input. Neither setting fills missing days.
+Dropping a missing day can shorten an inter-exceedance gap, so it is not a
+neutral EI preprocessing operation.
+
+`observations_per_year` converts a design horizon into a block size; it does not
+split the fitted series at January 1. The separate application GEV comparator
+does form January–December annual maxima, after checking each year's coverage.
+This calendar-year comparator is distinct from the many overlapping block sizes
+used to estimate `xi` and `theta`.
+
+## Bootstrap repetitions and regularization
+
+FGLS uses fixed diagonal shrinkage `0.37`: the shrinkage step retains marginal
+variances and multiplies off-diagonal covariances by `0.63`, followed by a small
+diagonal ridge for numerical stability. Adaptive repetitions control the
+Monte Carlo error in estimating that covariance and the resulting fit; they do
+not tune shrinkage, change the selected window, or create more observed data.
+
+The default checkpoints are `128, 256, 512, 768, 1024`. A fixed integer is also
+supported. See [Reading Returned Objects](reading-returned-objects.md) for the
+precision targets and the meaning of a fit that reaches the cap. These are
+conditional coefficient-covariance intervals, not bootstrap percentile
+intervals, and the adaptive check is not a coverage guarantee.

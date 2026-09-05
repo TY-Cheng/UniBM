@@ -313,7 +313,7 @@ def round_up_metric_upper(
     for step in steps:
         if padded <= step:
             return float(step)
-    return float(steps[-1])
+    return float(padded)
 
 
 def panel_metric_ylim(

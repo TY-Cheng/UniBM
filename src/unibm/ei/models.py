@@ -44,7 +44,9 @@ class ExtremalIndexEstimate:
 
     Most users should read ``theta_hat`` and ``confidence_interval`` first, then
     inspect ``stable_window``, ``regression``, and ``base_path`` to understand
-    which formal estimator produced the headline result. ``path_level``,
+    which formal estimator produced the headline result. ``standard_error`` is
+    always on the native ``theta`` scale; pooled BM fits additionally expose the
+    regression-scale uncertainty in ``z_standard_error``. ``path_level``,
     ``path_theta``, and ``path_eir`` are retained for path diagnostics and
     plotting rather than for headline reporting.
     """
@@ -67,6 +69,20 @@ class ExtremalIndexEstimate:
     block_scheme: str | None = None
     base_path: str | None = None
     regression: str | None = None
+    z_standard_error: float | None = None
+    covariance_shrinkage_policy: str | None = None
+    covariance_shrinkage: float | None = None
+    covariance_condition_number_raw: float | None = None
+    covariance_condition_number_regularized: float | None = None
+    bootstrap_block_length_policy: str | None = None
+    bootstrap_block_length: int | None = None
+    bootstrap_reps_requested: int | None = None
+    bootstrap_reps_used: int | None = None
+    bootstrap_reps_policy: str | None = None
+    bootstrap_precision_met: bool | None = None
+    bootstrap_mcse: tuple[float, ...] = ()
+    bootstrap_mcse_max_ratio: float | None = None
+    bootstrap_mcse_targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

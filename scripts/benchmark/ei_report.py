@@ -54,6 +54,7 @@ from unibm.ei import (
 )
 
 from benchmark.design import (
+    EI_BENCHMARK_THRESHOLD_QUANTILES,
     FGLS_BOOTSTRAP_REPS,
     UNIVERSAL_BENCHMARK_SET,
     family_label,
@@ -72,6 +73,7 @@ from benchmark.ei_eval import (
     EI_METHOD_MARKERS,
     EI_TARGET_INTERNAL_METHODS,
     _load_or_compute_ei_bootstrap_bundle,
+    _unavailable_bootstrap_covariance,
 )
 from benchmark.common import (
     IQR_LOWER,
@@ -86,7 +88,7 @@ from benchmark.common import (
 )
 from shared.runtime import status
 
-EI_SHRINKAGE_GRID = (0.00, 0.15, 0.35, 0.55, 0.75, 1.00)
+EI_SHRINKAGE_GRID = (0.00, 0.15, 0.37, 0.55, 0.75, 1.00)
 EI_SHRINKAGE_METHODS = ("northrop_sliding_fgls", "bb_sliding_fgls")
 _EI_SHRINKAGE_REQUIRED_COLUMNS = {
     "benchmark_set",
@@ -96,7 +98,11 @@ _EI_SHRINKAGE_REQUIRED_COLUMNS = {
     "delta",
     "median_ape",
     "median_coverage",
-    "median_interval_score",
+    "mean_interval_score",
+    "n_rep",
+    "n_success",
+    "n_failed",
+    "failure_rate",
 }
 
 # ---------------------------------------------------------------------------
@@ -133,13 +139,11 @@ def _story_table(
         median_ape=("ape_median", "median"),
         ape_q25=("ape_median", quantile_agg(IQR_LOWER)),
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
-        median_interval_score=("interval_score_median", "median"),
-        interval_score_q25=("interval_score_median", quantile_agg(IQR_LOWER)),
-        interval_score_q75=("interval_score_median", quantile_agg(IQR_UPPER)),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     aggregated["summary_cell"] = aggregated.apply(
         lambda row: (
-            f"{format_median_iqr(row['median_interval_score'], row['interval_score_q25'], row['interval_score_q75'])} / "
+            f"{row['mean_interval_score']:.3f} / "
             f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
         ),
         axis=1,
@@ -211,7 +215,7 @@ def ei_interval_story_table(
     ).agg(
         median_interval_width=("interval_width_median", "median"),
         coverage_median=("coverage", "median"),
-        median_interval_score=("interval_score_median", "median"),
+        mean_interval_score=("interval_score_mean", "mean"),
     )
     summary["method"] = pd.Categorical(summary["method"], categories=methods, ordered=True)
     summary = sort_by_family_order(summary, sort_columns=["xi_true", "method"])
@@ -223,7 +227,7 @@ def ei_interval_story_table(
             "method_label",
             "median_interval_width",
             "coverage_median",
-            "median_interval_score",
+            "mean_interval_score",
         ],
     ]
 
@@ -361,7 +365,11 @@ def build_ei_shrinkage_sensitivity_summary(
             cache_dir=cache_dir,
         )
         for rep, vec in enumerate(series_bank):
-            bundle = prepare_ei_bundle(vec, allow_zeros=False)
+            bundle = prepare_ei_bundle(
+                vec,
+                allow_zeros=False,
+                threshold_quantiles=EI_BENCHMARK_THRESHOLD_QUANTILES,
+            )
             cache_key = f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}"
             bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
                 vec,
@@ -373,13 +381,34 @@ def build_ei_shrinkage_sensitivity_summary(
             )
             for method in selected_methods:
                 base_path, sliding = _ei_method_components(method)
+                bootstrap_result = bootstrap_results[(base_path, sliding)]
+                covariance_unavailable = _unavailable_bootstrap_covariance(bootstrap_result)
                 for delta in shrinkage_values:
+                    if covariance_unavailable:
+                        detail_rows.append(
+                            {
+                                "benchmark_set": cfg.benchmark_set,
+                                "family": cfg.family,
+                                "n_obs": int(cfg.n_obs),
+                                "xi_true": float(cfg.xi_true),
+                                "theta_true": float(cfg.theta_true),
+                                "phi": float(cfg.phi),
+                                "rep": int(rep),
+                                "method": method,
+                                "delta": float(delta),
+                                "ape": np.nan,
+                                "interval_score": np.nan,
+                                "covered": 0.0,
+                                "fit_succeeded": False,
+                            }
+                        )
+                        continue
                     estimate = estimate_pooled_bm_ei(
                         bundle,
                         base_path=base_path,
                         sliding=sliding,
                         regression="FGLS",
-                        bootstrap_result=bootstrap_results[(base_path, sliding)],
+                        bootstrap_result=bootstrap_result,
                         covariance_shrinkage=delta,
                     )
                     ci_lo, ci_hi = estimate.confidence_interval
@@ -406,6 +435,7 @@ def build_ei_shrinkage_sensitivity_summary(
                                 )
                             ),
                             "covered": float(interval_contains((ci_lo, ci_hi), cfg.theta_true)),
+                            "fit_succeeded": True,
                         }
                     )
     detail = pd.DataFrame(detail_rows)
@@ -425,12 +455,16 @@ def build_ei_shrinkage_sensitivity_summary(
             dropna=False,
         )
         .agg(
+            n_rep=("rep", "nunique"),
+            n_success=("fit_succeeded", "sum"),
             ape_median=("ape", "median"),
-            interval_score_median=("interval_score", "median"),
+            interval_score_mean=("interval_score", "mean"),
             coverage=("covered", "mean"),
         )
         .reset_index(drop=True)
     )
+    scenario_summary["n_success"] = scenario_summary["n_success"].astype(int)
+    scenario_summary["n_failed"] = scenario_summary["n_rep"] - scenario_summary["n_success"]
     summary = (
         scenario_summary.groupby(
             ["benchmark_set", "family", "n_obs", "method", "delta"],
@@ -438,12 +472,16 @@ def build_ei_shrinkage_sensitivity_summary(
             dropna=False,
         )
         .agg(
+            n_rep=("n_rep", "sum"),
+            n_success=("n_success", "sum"),
+            n_failed=("n_failed", "sum"),
             median_ape=("ape_median", "median"),
             median_coverage=("coverage", "median"),
-            median_interval_score=("interval_score_median", "median"),
+            mean_interval_score=("interval_score_mean", "mean"),
         )
         .reset_index(drop=True)
     )
+    summary["failure_rate"] = summary["n_failed"] / summary["n_rep"]
     summary["method"] = pd.Categorical(
         summary["method"], categories=selected_methods, ordered=True
     )
@@ -472,7 +510,7 @@ def plot_ei_shrinkage_sensitivity(
         methods = sorted(str(method) for method in subset["method"].drop_duplicates())
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("median_interval_score", "median Winkler interval score"),
+        ("mean_interval_score", "mean Winkler interval score"),
         ("median_coverage", "median coverage"),
         ("median_ape", "median APE"),
     ]
@@ -543,7 +581,7 @@ _EI_METRIC_Y_UPPER_STEPS = {
 
 _EI_PANEL_METRIC_COLUMNS = {
     "ape": ("ape_median", "ape_q25", "ape_q75"),
-    "interval_score": ("interval_score_median", "interval_score_q25", "interval_score_q75"),
+    "interval_score": ("interval_score_mean", "interval_score_lo", "interval_score_hi"),
 }
 
 
@@ -655,7 +693,7 @@ def _plot_panels(
                     ylabel = (
                         "absolute percentage error"
                         if metric == "ape"
-                        else "Winkler interval score"
+                        else "mean Winkler interval score"
                     )
                     ax.set_ylabel(f"{family_label(family)}\n{ylabel}", fontsize=8)
                 if row_idx == nrows - 1:
@@ -907,6 +945,11 @@ def write_ei_benchmark_manuscript_artifacts(
     web_dir: Path | None = None,
 ) -> None:
     """Write EI benchmark manuscript tables and figures from cached CSV summaries."""
+    if web_dir is not None:
+        web_dir.mkdir(parents=True, exist_ok=True)
+        pd.concat([benchmark_summary, external_benchmark_summary], ignore_index=True).to_csv(
+            web_dir / "ei_benchmark.csv", index=False
+        )
     n_obs = _main_ei_benchmark_n_obs(benchmark_summary)
     ei_story_table = ei_merged_story_table(
         benchmark_summary,
@@ -947,10 +990,12 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
                 f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
                 "Rows report methods and columns group representative scenarios by family and \\(\\xi\\). "
-                "In each cell, the first line reports median Winkler interval score and the "
+                "In each cell, the first line reports mean Winkler interval score and the "
                 "second line reports median absolute percentage error, both summarized over "
                 "the \\(\\theta\\) grid. "
-                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\))."
+                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\)). "
+                "An FGLS attempt with degenerate bootstrap covariance is retained as noncoverage; "
+                "interval-score and point-error summaries are conditional on successful fits."
             ),
             label="tab:benchmark-ei-summary-main",
             environment="table",
@@ -980,7 +1025,7 @@ def write_ei_benchmark_manuscript_artifacts(
         lambda x: f"{x:.3f}"
     )
     interval_table["coverage_median"] = interval_table["coverage_median"].map(lambda x: f"{x:.3f}")
-    interval_table["median_interval_score"] = interval_table["median_interval_score"].map(
+    interval_table["mean_interval_score"] = interval_table["mean_interval_score"].map(
         lambda x: f"{x:.3f}"
     )
     (table_dir / "benchmark_ei_interval_main.tex").write_text(
@@ -992,7 +1037,8 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), and the Fréchet max-AR, moving-maxima q=99, "
                 f"and Pareto additive AR(1) families, with n\\_obs={n_obs}. "
                 "Cells report median 95\\% interval width / "
-                "median coverage / median interval score."
+                "median coverage / mean interval score. Failed FGLS attempts count as "
+                "noncoverage, while width and score summaries use successful fits."
             ),
             label="tab:benchmark-ei-interval-main",
             caption_raw=True,
@@ -1007,7 +1053,9 @@ def write_ei_benchmark_manuscript_artifacts(
                 f"Appendix full EI benchmark overview on the projected EI suite with \\(\\theta \\in "
                 f"\\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), \\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
                 f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
-                f"with n\\_obs={n_obs}."
+                f"with n\\_obs={n_obs}. The n\\_failed and failure\\_rate columns report "
+                "FGLS attempts with degenerate bootstrap covariance; those attempts count as "
+                "noncoverage and are not replaced by OLS estimates."
             ),
             label="tab:benchmark-ei-overview-main",
             caption_raw=True,

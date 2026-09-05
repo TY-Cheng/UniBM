@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,7 @@ import pandas as pd
 from unibm.ei import (
     EI_ALPHA,
     ExtremalIndexEstimate,
+    bootstrap_bm_ei_path,
     bootstrap_bm_ei_path_draws,
     estimate_ferro_segers,
     estimate_k_gaps,
@@ -28,6 +29,7 @@ from benchmark.design import (
     _try_load_npz,
     BENCHMARK_CACHE_VERSION,
     default_ei_simulation_configs,
+    EI_BENCHMARK_THRESHOLD_QUANTILES,
     FGLS_BOOTSTRAP_REPS,
     load_or_draw_raw_bootstrap_samples,
     load_or_simulate_series_bank,
@@ -160,7 +162,7 @@ def _load_cached_ei_bootstrap_bundle(
     cache_key: str,
     selected_levels_by_key: dict[tuple[str, bool], np.ndarray],
     reps: int,
-) -> dict[tuple[str, bool], dict[str, np.ndarray | None]] | None:
+) -> dict[tuple[str, bool], dict[str, Any]] | None:
     """Load one series-wide EI covariance bundle if the selected windows still match."""
     if cache_dir is None:
         return None
@@ -175,7 +177,7 @@ def _load_cached_ei_bootstrap_bundle(
     if loaded is None:
         return None
     with loaded as data:
-        results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
+        results: dict[tuple[str, bool], dict[str, Any]] = {}
         for key, selected_levels in selected_levels_by_key.items():
             selected_levels = np.asarray(selected_levels, dtype=int)
             prefix = _ei_bundle_prefix(*key)
@@ -192,6 +194,8 @@ def _load_cached_ei_bootstrap_bundle(
                 "block_sizes": boot_levels,
                 "samples": np.asarray(data[f"{prefix}__samples"], dtype=float),
                 "covariance": covariance,
+                "base_path": key[0],
+                "sliding": key[1],
             }
         return results
 
@@ -201,7 +205,7 @@ def _save_cached_ei_bootstrap_bundle(
     cache_dir: Path | None,
     cache_key: str,
     reps: int,
-    bundles: dict[tuple[str, bool], dict[str, np.ndarray | None]],
+    bundles: dict[tuple[str, bool], dict[str, Any]],
 ) -> None:
     """Persist all pooled BM EI covariance bundles for one series in one file."""
     if cache_dir is None:
@@ -228,9 +232,11 @@ def _save_cached_ei_bootstrap_bundle(
 def _materialize_ei_bootstrap(
     transformed_draws: np.ndarray,
     *,
+    base_path: str,
+    sliding: bool,
     selected_levels: np.ndarray,
     reps: int,
-) -> dict[str, np.ndarray | None]:
+) -> dict[str, Any]:
     """Build and optionally cache one pooled BM EI covariance bundle."""
     selected_levels = np.asarray(selected_levels, dtype=int)
     z_draws = np.asarray(transformed_draws, dtype=float)
@@ -244,6 +250,8 @@ def _materialize_ei_bootstrap(
         "block_sizes": selected_levels,
         "samples": z_valid,
         "covariance": covariance,
+        "base_path": base_path,
+        "sliding": bool(sliding),
     }
 
 
@@ -253,16 +261,37 @@ def _load_or_compute_ei_bootstrap_bundle(
     bundle: Any,
     cache_dir: Path | None,
     cache_key: str,
-    reps: int,
+    reps: int | Literal["adaptive"],
     random_state: int,
-) -> dict[tuple[str, bool], dict[str, np.ndarray | None]]:
-    """Materialize all pooled-BM EI covariance bundles from one shared raw bootstrap bank.
+) -> dict[tuple[str, bool], dict[str, Any]]:
+    """Materialize pooled-BM EI covariance using the declared repetition policy.
 
-    The first cache layer stores raw circular bootstrap series shared across
+    Adaptive fits use the public path-specific stopping rule and bypass fixed-R
+    bootstrap caches. The fixed-R cache layer stores raw circular series shared across
     Northrop/BB and sliding/disjoint variants. The second cache layer stores
     the path-specific transformed `z = log(1/theta)` draws restricted to the
     original replicate's stable window.
     """
+    if reps == "adaptive":
+        results = {}
+        for base_path, sliding in EI_BM_PATH_KEYS:
+            try:
+                results[(base_path, sliding)] = bootstrap_bm_ei_path(
+                    vec,
+                    allow_zeros=False,
+                    base_path=base_path,
+                    sliding=sliding,
+                    block_sizes=bundle.block_sizes,
+                    reps="adaptive",
+                    random_state=random_state,
+                )
+            except ValueError as exc:
+                if str(exc) != "EI bootstrap covariance must have positive scale.":
+                    raise
+                results[(base_path, sliding)] = {
+                    "failure_reason": "degenerate_adaptive_covariance"
+                }
+        return results
     selected_levels_by_key = {
         key: extract_stable_path_window(bundle.paths[key])[0] for key in EI_BM_PATH_KEYS
     }
@@ -286,7 +315,7 @@ def _load_or_compute_ei_bootstrap_bundle(
         block_sizes=bundle.block_sizes,
         allow_zeros=False,
     )
-    results: dict[tuple[str, bool], dict[str, np.ndarray | None]] = {}
+    results: dict[tuple[str, bool], dict[str, Any]] = {}
     for key in EI_BM_PATH_KEYS:
         base_path, sliding = key
         selected_levels = selected_levels_by_key[key]
@@ -294,6 +323,8 @@ def _load_or_compute_ei_bootstrap_bundle(
         idx = [int(np.flatnonzero(full_levels == level)[0]) for level in selected_levels]
         results[key] = _materialize_ei_bootstrap(
             full_draws[key][:, idx],
+            base_path=base_path,
+            sliding=sliding,
             selected_levels=selected_levels,
             reps=reps,
         )
@@ -310,6 +341,9 @@ def _ei_result_row(
     cfg: Any,
     rep: int,
     estimate: ExtremalIndexEstimate,
+    *,
+    fit_succeeded: bool = True,
+    failure_reason: str | None = None,
 ) -> dict[str, Any]:
     """Convert one EI estimate into the shared detail-row schema."""
     ci_lo, ci_hi = estimate.confidence_interval
@@ -331,6 +365,9 @@ def _ei_result_row(
         "ci_method": estimate.ci_method,
         "ci_variant": estimate.ci_variant,
         "standard_error": estimate.standard_error,
+        "z_standard_error": (
+            np.nan if estimate.z_standard_error is None else estimate.z_standard_error
+        ),
         "signed_error": estimate.theta_hat - cfg.theta_true,
         "abs_error": abs_error,
         "relative_error": abs_error / cfg.theta_true,
@@ -364,7 +401,58 @@ def _ei_result_row(
         "block_scheme": estimate.block_scheme,
         "base_path": estimate.base_path,
         "regression": estimate.regression,
+        "bootstrap_reps_policy": estimate.bootstrap_reps_policy,
+        "bootstrap_reps_used": estimate.bootstrap_reps_used,
+        "bootstrap_precision_met": estimate.bootstrap_precision_met,
+        "bootstrap_mcse_max_ratio": estimate.bootstrap_mcse_max_ratio,
+        "covariance_shrinkage": estimate.covariance_shrinkage,
+        "fit_succeeded": fit_succeeded,
+        "failure_reason": failure_reason,
     }
+
+
+def _unavailable_bootstrap_covariance(
+    bootstrap_result: dict[str, Any],
+) -> bool:
+    """Identify documented adaptive failures or fixed-R paths with zero dispersion."""
+    if bootstrap_result.get("failure_reason") == "degenerate_adaptive_covariance":
+        return True
+    covariance = bootstrap_result.get("covariance")
+    if covariance is None:
+        return False
+    cov = np.asarray(covariance, dtype=float)
+    return cov.ndim == 2 and cov.size > 0 and not np.any(cov)
+
+
+def _unavailable_fgls_result_row(
+    cfg: Any,
+    rep: int,
+    *,
+    path: Any,
+    reason: str,
+) -> dict[str, Any]:
+    """Retain a failed FGLS attempt without manufacturing an OLS estimate."""
+    scheme = "sliding" if path.sliding else "disjoint"
+    estimate = ExtremalIndexEstimate(
+        method=f"{path.base_path}_{scheme}_fgls",
+        theta_hat=np.nan,
+        confidence_interval=(np.nan, np.nan),
+        standard_error=np.nan,
+        z_standard_error=np.nan,
+        ci_method="log_wald",
+        ci_variant=f"unavailable_{reason}",
+        stable_window=path.stable_window,
+        block_scheme=scheme,
+        base_path=path.base_path,
+        regression="FGLS",
+    )
+    return _ei_result_row(
+        cfg,
+        rep,
+        estimate,
+        fit_succeeded=False,
+        failure_reason=reason,
+    )
 
 
 def _collapse_group_flag(values: pd.Series) -> str:
@@ -386,6 +474,7 @@ def summarize_ei_benchmark(df: pd.DataFrame) -> pd.DataFrame:
         .agg(
             n_obs=("n_obs", "median"),
             n_rep=("rep", "nunique"),
+            n_success=("fit_succeeded", "sum"),
             n_cover=("covered", "sum"),
             theta_hat_mean=("theta_hat", "mean"),
             theta_hat_sd=("theta_hat", "std"),
@@ -401,6 +490,8 @@ def summarize_ei_benchmark(df: pd.DataFrame) -> pd.DataFrame:
             interval_width_q25=("interval_width", quantile_agg(IQR_LOWER)),
             interval_width_q75=("interval_width", quantile_agg(IQR_UPPER)),
             interval_score_mean=("interval_score", "mean"),
+            interval_score_sd=("interval_score", "std"),
+            n_score=("interval_score", "count"),
             interval_score_median=("interval_score", "median"),
             interval_score_q25=("interval_score", quantile_agg(IQR_LOWER)),
             interval_score_q75=("interval_score", quantile_agg(IQR_UPPER)),
@@ -418,8 +509,16 @@ def summarize_ei_benchmark(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
     grouped["theta_hat_sd"] = grouped["theta_hat_sd"].fillna(0.0)
+    grouped["interval_score_mcse"] = grouped["interval_score_sd"] / np.sqrt(grouped["n_score"])
+    grouped["interval_score_lo"] = grouped["interval_score_mean"] - grouped["interval_score_mcse"]
+    grouped["interval_score_hi"] = grouped["interval_score_mean"] + grouped["interval_score_mcse"]
     grouped["mape_sd"] = grouped["mape_sd"].fillna(0.0)
-    grouped["theta_hat_se"] = grouped["theta_hat_sd"] / np.sqrt(grouped["n_rep"])
+    grouped["n_success"] = grouped["n_success"].astype(int)
+    grouped["n_failed"] = grouped["n_rep"] - grouped["n_success"]
+    grouped["failure_rate"] = grouped["n_failed"] / grouped["n_rep"]
+    no_success = grouped["n_success"] == 0
+    grouped.loc[no_success, ["theta_hat_sd", "mape_sd"]] = np.nan
+    grouped["theta_hat_se"] = grouped["theta_hat_sd"] / np.sqrt(grouped["n_success"])
     grouped = add_wilson_bounds(grouped, success_col="n_cover", total_col="n_rep")
     grouped["scenario"] = grouped.apply(
         lambda row: (
@@ -450,7 +549,11 @@ def evaluate_ei_config(
     external_rows: list[dict[str, Any]] = []
     series_bank = load_or_simulate_series_bank(cfg, random_state=random_state, cache_dir=cache_dir)
     for rep, vec in enumerate(series_bank):
-        bundle = prepare_ei_bundle(vec, allow_zeros=False)
+        bundle = prepare_ei_bundle(
+            vec,
+            allow_zeros=False,
+            threshold_quantiles=EI_BENCHMARK_THRESHOLD_QUANTILES,
+        )
         cache_key = f"{cfg.scenario}__seed{random_state}__rep{rep:04d}"
         bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
             vec,
@@ -474,19 +577,32 @@ def evaluate_ei_config(
                         ),
                     )
                 )
-                internal_rows.append(
-                    _ei_result_row(
-                        cfg,
-                        rep,
-                        estimate_pooled_bm_ei(
-                            bundle,
-                            base_path=base_path,
-                            sliding=sliding,
-                            regression="FGLS",
-                            bootstrap_result=bootstrap_results[(base_path, sliding)],
-                        ),
+                bootstrap_result = bootstrap_results[(base_path, sliding)]
+                if _unavailable_bootstrap_covariance(bootstrap_result):
+                    internal_rows.append(
+                        _unavailable_fgls_result_row(
+                            cfg,
+                            rep,
+                            path=bundle.paths[(base_path, sliding)],
+                            reason=bootstrap_result.get(
+                                "failure_reason", "zero_bootstrap_covariance"
+                            ),
+                        )
                     )
-                )
+                else:
+                    internal_rows.append(
+                        _ei_result_row(
+                            cfg,
+                            rep,
+                            estimate_pooled_bm_ei(
+                                bundle,
+                                base_path=base_path,
+                                sliding=sliding,
+                                regression="FGLS",
+                                bootstrap_result=bootstrap_result,
+                            ),
+                        )
+                    )
             # Native EI comparators follow the original semiparametric BM papers:
             # use the sliding-blocks version together with each method's own confidence interval.
             external_rows.append(
@@ -542,7 +658,12 @@ def run_ei_benchmark(
         try:
             context = mp.get_context("spawn")
             with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
-                frames = list(executor.map(_evaluate_ei_config_worker, tasks, chunksize=1))
+                frames = []
+                for completed, frame in enumerate(
+                    executor.map(_evaluate_ei_config_worker, tasks, chunksize=1), start=1
+                ):
+                    frames.append(frame)
+                    status("ei_benchmark", f"completed {completed}/{len(tasks)} scenarios")
         except (OSError, PermissionError):
             frames = [_evaluate_ei_config_worker(task) for task in tasks]
     internal_frames = [internal for internal, _ in frames if not internal.empty]

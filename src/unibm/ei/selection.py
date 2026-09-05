@@ -23,6 +23,21 @@ def select_stable_path_window(
     z = np.asarray(z_path, dtype=float)
     if z.ndim != 1 or z.size != levels.size:
         raise ValueError("z_path must be one-dimensional and match block_sizes.")
+    if (
+        isinstance(min_points, bool)
+        or not isinstance(min_points, (int, np.integer))
+        or min_points < 2
+    ):
+        raise ValueError("min_points must be an integer at least 2.")
+    trim_fraction = float(trim_fraction)
+    if not np.isfinite(trim_fraction) or not 0.0 <= trim_fraction < 0.5:
+        raise ValueError("trim_fraction must be finite and lie in [0, 0.5).")
+    roughness_penalty = float(roughness_penalty)
+    if not np.isfinite(roughness_penalty) or roughness_penalty < 0.0:
+        raise ValueError("roughness_penalty must be finite and non-negative.")
+    curvature_penalty = float(curvature_penalty)
+    if not np.isfinite(curvature_penalty) or curvature_penalty < 0.0:
+        raise ValueError("curvature_penalty must be finite and non-negative.")
     mask = np.isfinite(z)
     levels = levels[mask]
     z = z[mask]

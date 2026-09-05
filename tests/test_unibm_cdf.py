@@ -20,6 +20,19 @@ class UniBmCdfTests(unittest.TestCase):
         self.assertEqual(result.shape, (2,))
         self.assertTrue(np.all(np.isfinite(result)))
 
+    def test_empirical_cdf_propagates_nan_queries(self) -> None:
+        for values in ([3.0], [1.0, 2.0, 3.0]):
+            with self.subTest(values=values):
+                estimator = empirical_cdf(values)
+                self.assertTrue(np.isnan(estimator(np.nan)))
+                result = estimator(np.array([0.0, np.nan, 4.0]))
+                self.assertTrue(np.isnan(result[1]))
+
+    def test_empirical_cdf_flattens_sample_and_omits_nonfinite_values(self) -> None:
+        estimator = empirical_cdf(np.array([[1.0, 2.0], [3.0, np.nan]]))
+
+        self.assertAlmostEqual(estimator(2.0), 2.0 / 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

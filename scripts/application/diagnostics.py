@@ -126,10 +126,10 @@ def fit_evi_window_variants(
         fits.append(
             estimate_target_scaling(
                 bundle.prepared.evi.series.values,
+                regression="FGLS",
                 target="quantile",
                 quantile=bundle.spec.quantile,
                 sliding=True,
-                bootstrap_reps=0,
                 curve=bundle.evi_fit.curve,
                 plateau=plateau,
                 bootstrap_result=bundle.evi_fit.bootstrap,
@@ -261,7 +261,7 @@ def application_observations_per_year(bundle: ApplicationBundle) -> float:
         if bundle.spec.design_life_level_basis == "claim_active_day"
         else series
     )
-    n_years = max((clock.index.max() - clock.index.min()).days / 365.25, 1.0)
+    n_years = max(((clock.index.max() - clock.index.min()).days + 1) / 365.25, 1.0)
     return float(series.size / n_years)
 
 

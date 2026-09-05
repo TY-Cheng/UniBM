@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import unittest
 import tomllib
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocsSiteTests(unittest.TestCase):
+    def test_guide_python_examples_execute(self) -> None:
+        for page_name in ("getting-started.md", "worked-examples.md"):
+            page = ROOT / "docs" / page_name
+            blocks = re.findall(
+                r"^```python\n(.*?)^```", page.read_text(), re.MULTILINE | re.DOTALL
+            )
+            self.assertTrue(blocks, page)
+            namespace = {"__name__": "__docs_example__"}
+            for index, code in enumerate(blocks):
+                with self.subTest(page=page_name, block=index):
+                    exec(compile(code, str(page), "exec"), namespace)
+
     def test_case_study_navigation_and_pages_are_complete(self) -> None:
         mkdocs = (ROOT / "mkdocs.yml").read_text()
         expected_pages = {
@@ -51,6 +64,8 @@ class DocsSiteTests(unittest.TestCase):
             "cases/fl_nfip_claims.png",
             "validation/evi_benchmark.png",
             "validation/ei_benchmark.png",
+            "validation/evi_benchmark.csv",
+            "validation/ei_benchmark.csv",
         ]
 
         for relative_path in expected_assets:

@@ -10,6 +10,7 @@ import pandas as pd
 
 from unibm.ei import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
 from unibm.evi import block_maxima, estimate_evi_quantile
+from application.specs import APPLICATION_EI_THRESHOLD_QUANTILES
 from shared.runtime import resolve_int_env
 
 
@@ -101,12 +102,16 @@ def screen_extreme_series(
             default=DEFAULT_SCREENING_BOOTSTRAP_REPS,
             minimum=0,
         )
+    regression = "OLS" if int(bootstrap_reps) == 0 else "FGLS"
     fit = estimate_evi_quantile(
         series.values,
+        regression=regression,
         quantile=quantile,
         sliding=True,
         bootstrap_reps=int(bootstrap_reps),
     )
+    if fit.regression_policy != regression or fit.regression != regression:
+        raise RuntimeError(f"Screening EVI fit requires strict {regression}.")
     daily_positive_share = float(np.mean(np.asarray(series.values) > 0))
     plateau_points = int(np.sum(fit.plateau_mask))
     smallest_plateau = fit.plateau_bounds[0]
@@ -167,7 +172,11 @@ def screen_extremal_index_series(
     if not isinstance(series.index, pd.DatetimeIndex):
         raise ValueError("A DatetimeIndex is required for EI dataset screening.")
     n_years = (series.index.max() - series.index.min()).days / 365.25
-    bundle = prepare_ei_bundle(series.values, allow_zeros=allow_zeros)
+    bundle = prepare_ei_bundle(
+        series.values,
+        allow_zeros=allow_zeros,
+        threshold_quantiles=APPLICATION_EI_THRESHOLD_QUANTILES,
+    )
     bb_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")
     kg_fit = estimate_k_gaps(bundle)
     values = np.asarray(series.values, dtype=float)

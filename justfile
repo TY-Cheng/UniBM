@@ -19,22 +19,22 @@ _require-manuscript-dir:
 _require-workflow-env: _require-manuscript-dir
 
 # Main Entrypoints
-full workers="6" screening_bootstrap="20": _require-workflow-env
+full workers="8" screening_bootstrap="20": _require-workflow-env
     just check-full
     just clean-generated
     just benchmark "{{ workers }}"
     just application "{{ workers }}" "{{ screening_bootstrap }}"
     uv run python scripts/manuscript/artifact_manifest.py
-    just _docs-build
+    uv run mkdocs build --strict
 
-benchmark workers="6": _require-workflow-env
+benchmark workers="8": _require-workflow-env
     uv sync --dev
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_benchmark.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_benchmark.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
 
-manuscript workers="6" screening_bootstrap="20": _require-workflow-env
+manuscript workers="8" screening_bootstrap="20": _require-workflow-env
     uv sync --dev
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
@@ -51,7 +51,7 @@ refresh-data:
     uv sync --dev
     uv run python scripts/application/refresh_data.py
 
-application workers="6" screening_bootstrap="20": _require-workflow-env
+application workers="8" screening_bootstrap="20": _require-workflow-env
     uv sync --dev
     UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
     UNIBM_APPLICATION_WORKERS={{ workers }} uv run python scripts/application/build.py
@@ -75,15 +75,6 @@ check-full:
 format:
     just --fmt
     uv run ruff format .
-
-[private]
-_docs-build:
-    uv sync --dev
-    uv run mkdocs build --strict
-
-docs:
-    just _docs-build
-    uv run mkdocs serve
 
 # Utilities
 clean-generated: _require-manuscript-dir

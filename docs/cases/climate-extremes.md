@@ -6,22 +6,29 @@ compound hot–dry index? These GHCN cases exercise the severity branch only; ne
 formal extremal-index inference.
 </p>
 
+These fits use [fixed shrinkage 0.37 and adaptive R](index.md).
+Here a **season** is a declared within-year month
+window: June–November in Houston and April–October in Phoenix. It is neither a
+universal climate-season definition nor a complete calendar year. The package
+does not choose these months automatically.
+
 ## Houston precipitation
 
 **Question.** How quickly does the upper tail of wet-season daily precipitation grow across
 longer block sizes at one long-record station?
 
-**Data.** GHCN-Daily station `USW00012918` (Houston William P. Hobby Airport), restricted to
-complete June–November seasons from 1984 through 2025. The retained series has 7,686 daily
-observations in millimetres and ends on 2025-11-30.
+**Data.** GHCN-Daily station `USW00012918` (Houston William P. Hobby Airport), restricted to a
+consecutive 1947–2025 suffix of June–November seasons meeting the 97% analysis-ready-day
+coverage gate. The retained series has 14,454 of 14,457 expected seasonal observations in
+millimetres and ends on 2025-11-30; the three missing observations are not imputed.
 
 **Estimand.** The EVI `ξ` from the median sliding-block maximum scaling path. Design-life curves
-use the seasonal-day clock, mapped at 183 observations per year.
+use the observed seasonal-day clock, mapped at 14,454 / 79 ≈ 182.962 observations per year.
 
 <div class="unibm-stat-grid">
-  <div class="unibm-stat"><strong>0.407</strong><span>fitted EVI ξ</span></div>
-  <div class="unibm-stat"><strong>[0.281, 0.534]</strong><span>conditional 95% interval</span></div>
-  <div class="unibm-stat"><strong>37–75 days</strong><span>selected block-size plateau</span></div>
+  <div class="unibm-stat"><strong>0.922</strong><span>fitted EVI ξ</span></div>
+  <div class="unibm-stat"><strong>[0.733, 1.110]</strong><span>conditional 95% interval</span></div>
+  <div class="unibm-stat"><strong>12–18 days</strong><span>selected block-size plateau</span></div>
 </div>
 
 <figure class="unibm-figure">
@@ -34,9 +41,10 @@ use the seasonal-day clock, mapped at 183 observations per year.
 **Question.** Can the same severity workflow describe the upper tail of a compound hot–dry
 signal without pretending that the signal is a directly observed physical variable?
 
-**Data.** GHCN-Daily station `USW00023183` (Phoenix Airport), restricted to complete
-April–October seasons from 1948 through 2025. The retained series has 16,692 daily observations
-and ends on 2025-10-31.
+**Data.** GHCN-Daily station `USW00023183` (Phoenix Airport), restricted to April–October seasons
+from 1948 through 2025 that meet the same 97% gate. All 16,692 expected analysis-ready positions
+have finite TMAX and a fully observed 30-day precipitation window; the series ends on
+2025-10-31. Observed zero-severity days remain in this clock.
 
 <div class="unibm-method-box">
   <strong>Derived-index definition</strong>
@@ -53,7 +61,7 @@ use the warm-season-day clock, mapped at 214 observations per year.
 
 <div class="unibm-stat-grid">
   <div class="unibm-stat"><strong>0.292</strong><span>fitted EVI ξ</span></div>
-  <div class="unibm-stat"><strong>[0.181, 0.404]</strong><span>conditional 95% interval</span></div>
+  <div class="unibm-stat"><strong>[0.179, 0.406]</strong><span>conditional 95% interval</span></div>
   <div class="unibm-stat"><strong>14–21 days</strong><span>selected block-size plateau</span></div>
 </div>
 

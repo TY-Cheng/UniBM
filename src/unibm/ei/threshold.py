@@ -9,11 +9,54 @@ from ._likelihood import find_1d_profile_likelihood_intervals
 from ._stats import (
     EI_ALPHA,
     EI_TINY,
-    Z_CRIT_95,
     _central_wald_interval,
     _intervals_overlap,
 )
+from ._validation import _validate_threshold_quantiles
 from .models import EiPreparedBundle, ExtremalIndexEstimate, ThresholdCandidate
+
+
+def _validate_k_grid(k_grid: tuple[int, ...]) -> tuple[int, ...]:
+    """Return a non-empty, strictly increasing grid of non-negative integers."""
+    try:
+        raw = np.asarray(k_grid)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k_grid must contain finite non-negative integers.") from exc
+    if raw.ndim != 1 or raw.size == 0 or raw.dtype.kind == "b" or np.iscomplexobj(raw):
+        raise ValueError("k_grid must be a non-empty sequence of finite non-negative integers.")
+    try:
+        numeric = raw.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k_grid must contain finite non-negative integers.") from exc
+    if (
+        not np.all(np.isfinite(numeric))
+        or not np.all(numeric == np.floor(numeric))
+        or np.any(numeric < 0)
+    ):
+        raise ValueError("k_grid must contain finite non-negative integers.")
+    if np.any(np.diff(numeric) <= 0):
+        raise ValueError("k_grid must be strictly increasing with no duplicates.")
+    return tuple(int(value) for value in numeric)
+
+
+def _resolve_threshold_quantiles(
+    bundle: EiPreparedBundle,
+    threshold_quantiles: tuple[float, ...] | None,
+) -> tuple[float, ...]:
+    """Resolve an optional estimator subset against its prepared bundle."""
+    available = _validate_threshold_quantiles(tuple(bundle.threshold_candidates))
+    if threshold_quantiles is None:
+        return available
+    requested = _validate_threshold_quantiles(threshold_quantiles)
+    missing = tuple(
+        quantile for quantile in requested if quantile not in bundle.threshold_candidates
+    )
+    if missing:
+        raise ValueError(
+            "threshold_quantiles must be present in the prepared bundle; "
+            f"missing={missing}, available={available}."
+        )
+    return requested
 
 
 def _select_between_candidates(
@@ -66,11 +109,11 @@ def _ferro_segers_from_times(times: np.ndarray) -> tuple[float, float]:
 def estimate_ferro_segers(
     bundle: EiPreparedBundle,
     *,
-    threshold_quantiles: tuple[float, float] = (0.90, 0.95),
+    threshold_quantiles: tuple[float, ...] | None = None,
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` with the Ferro-Segers intervals estimator."""
+    """Estimate ``theta`` using all bundle thresholds or an increasing explicit subset."""
     candidates: list[ThresholdCandidate] = []
-    for quantile in threshold_quantiles:
+    for quantile in _resolve_threshold_quantiles(bundle, threshold_quantiles):
         indices = bundle.threshold_candidates[float(quantile)]
         if indices.size < 3:
             continue
@@ -112,7 +155,7 @@ def estimate_ferro_segers(
 def _kgaps_profile_fit(
     times: np.ndarray, *, run_k: int, exceedance_rate: float
 ) -> ThresholdCandidate:
-    """Fit the K-gaps model for one `(u, K)` combination."""
+    """Fit K-gaps with a profile interval and observed-information ``theta`` SE."""
     raw_gaps = np.maximum(np.asarray(times, dtype=float) - float(run_k), 0.0)
     scaled_gaps = exceedance_rate * raw_gaps
     scaled_gaps = scaled_gaps[np.isfinite(scaled_gaps)]
@@ -144,11 +187,8 @@ def _kgaps_profile_fit(
         1.0 - EI_TINY,
         alpha=EI_ALPHA,
     )
-    standard_error = (
-        float((interval[1] - interval[0]) / (2.0 * Z_CRIT_95))
-        if np.all(np.isfinite(interval))
-        else float("nan")
-    )
+    observed_information = n_zero / (1.0 - theta_hat) ** 2 + 2.0 * n_pos / theta_hat**2
+    standard_error = float(1.0 / np.sqrt(observed_information))
     return ThresholdCandidate(
         threshold_quantile=float("nan"),
         threshold_value=float("nan"),
@@ -164,12 +204,13 @@ def _kgaps_profile_fit(
 def estimate_k_gaps(
     bundle: EiPreparedBundle,
     *,
-    threshold_quantiles: tuple[float, float] = (0.90, 0.95),
-    k_grid: tuple[int, int] = (1, 2),
+    threshold_quantiles: tuple[float, ...] | None = None,
+    k_grid: tuple[int, ...] = (1, 2),
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` with the K-gaps likelihood."""
+    """Estimate ``theta`` over all bundle thresholds or an increasing explicit subset."""
+    k_grid = _validate_k_grid(k_grid)
     threshold_winners: list[ThresholdCandidate] = []
-    for quantile in threshold_quantiles:
+    for quantile in _resolve_threshold_quantiles(bundle, threshold_quantiles):
         indices = bundle.threshold_candidates[float(quantile)]
         if indices.size < 3:
             continue

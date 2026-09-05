@@ -14,9 +14,10 @@ class JustfileTests(unittest.TestCase):
         text = JUSTFILE.read_text()
         self.assertIn('export UV_LOCKED := "1"', text)
         self.assertIn("\nfull workers=", text)
-        self.assertIn("\ndocs:", text)
+        self.assertNotIn("\ndocs:", text)
         self.assertNotIn("\ndocs-serve:", text)
-        self.assertIn("just _docs-build", text)
+        self.assertNotIn("\n_docs-build:", text)
+        self.assertIn("uv run mkdocs build --strict", text)
         self.assertIn("\nbenchmark workers=", text)
         self.assertIn("\napplication workers=", text)
         self.assertIn("\ndata screening_bootstrap=", text)
@@ -55,7 +56,6 @@ class JustfileTests(unittest.TestCase):
         self.assertIn("\n_require-workflow-env: _require-manuscript-dir", text)
         self.assertIn("\n_require-manuscript-dir:", text)
         self.assertIn('\ndata screening_bootstrap="20":', text)
-        self.assertIn("\n_docs-build:", text)
         self.assertIn("\nformat:", text)
         self.assertIn("\nclean-generated: _require-manuscript-dir", text)
 
@@ -70,7 +70,7 @@ class JustfileTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("docs", result.stdout)
+        self.assertNotIn("\n    docs", result.stdout)
         self.assertNotIn("docs-serve", result.stdout)
         self.assertIn("benchmark", result.stdout)
         self.assertIn("application", result.stdout)

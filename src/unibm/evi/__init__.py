@@ -1,5 +1,7 @@
 """Canonical EVI-facing UniBM subpackage."""
 
+from typing import TYPE_CHECKING
+
 from .._block_grid import DEFAULT_MIN_DISJOINT_BLOCKS, generate_block_sizes
 from .blocks import block_maxima, block_summary_curve
 from .bootstrap import (
@@ -22,7 +24,6 @@ from .estimation import (
     estimate_target_scaling,
 )
 from .models import BlockSummaryCurve, PlateauWindow, ScalingFit
-from .plotting import plot_scaling_fit
 from .selection import select_penultimate_window
 from .spectrum import candidate_max_spectrum_scales, estimate_max_spectrum_evi
 from .summaries import estimate_sample_mode, summarize_block_maxima
@@ -35,10 +36,12 @@ from .tail import (
     estimate_hill_evi,
     estimate_pickands_evi,
     select_stable_integer_window,
-    select_stable_tail_window,
     wald_confidence_interval,
 )
-from .targets import target_stability_summary
+
+if TYPE_CHECKING:
+    from .plotting import plot_scaling_fit
+    from .targets import target_stability_summary
 
 __all__ = [
     "BlockSummaryBootstrapBackbone",
@@ -74,8 +77,21 @@ __all__ = [
     "plot_scaling_fit",
     "select_penultimate_window",
     "select_stable_integer_window",
-    "select_stable_tail_window",
     "summarize_block_maxima",
     "target_stability_summary",
     "wald_confidence_interval",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose optional plotting and pandas-backed helpers."""
+    import importlib
+
+    if name == "plot_scaling_fit":
+        value = importlib.import_module(f"{__name__}.plotting").plot_scaling_fit
+    elif name == "target_stability_summary":
+        value = importlib.import_module(f"{__name__}.targets").target_stability_summary
+    else:
+        raise AttributeError(f"module 'unibm.evi' has no attribute {name!r}")
+    globals()[name] = value
+    return value

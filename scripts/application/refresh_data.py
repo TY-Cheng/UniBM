@@ -25,7 +25,11 @@ from application.specs import CLIMATE_APPLICATIONS
 from config import resolve_repo_dirs
 from data_prep.constants import ANALYSIS_END_DATE
 from data_prep.cpi import BLS_API_ENDPOINT, CPI_U_SERIES_ID, download_monthly_cpi
-from data_prep.fema import OPENFEMA_NFIP_CLAIMS_ENDPOINT, download_nfip_claims_state
+from data_prep.fema import (
+    DEFAULT_NFIP_START_DATE,
+    OPENFEMA_NFIP_CLAIMS_ENDPOINT,
+    download_nfip_claims_state,
+)
 from data_prep.ghcn import GHCN_BY_STATION_ENDPOINT, download_ghcn_station
 from data_prep.usgs import USGS_DV_ENDPOINT, download_usgs_daily_discharge
 from shared.runtime import status
@@ -84,6 +88,7 @@ def refresh_application_data(root: Path | str = ".") -> dict[str, Path]:
         json.dumps(
             {
                 "analysis_end_date": ANALYSIS_END_DATE,
+                "nfip_start_date": DEFAULT_NFIP_START_DATE,
                 "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
                 "sources": {
                     "ghcn": GHCN_BY_STATION_ENDPOINT,

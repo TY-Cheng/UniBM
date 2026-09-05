@@ -39,6 +39,7 @@ class BenchmarkCommonTests(unittest.TestCase):
         steps = {"ape": (1.05, 1.25, 1.5)}
         self.assertEqual(round_up_metric_upper("ape", 1.02, upper_steps=steps), 1.05)
         self.assertEqual(round_up_metric_upper("ape", 1.24, upper_steps=steps), 1.5)
+        self.assertGreater(round_up_metric_upper("ape", 10.0, upper_steps=steps), 10.0)
 
     def test_panel_metric_ylim_uses_upper_column_when_available(self) -> None:
         frame = pd.DataFrame(

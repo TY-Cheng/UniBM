@@ -111,16 +111,21 @@ class FemaPrepTests(unittest.TestCase):
             display = prepared["display"].series
             evi = prepared["evi"].series
             ei = prepared["ei"].series
-            self.assertEqual(display.index.min().strftime("%Y-%m-%d"), "2024-01-01")
+            self.assertEqual(display.index.min().strftime("%Y-%m-%d"), "1978-01-01")
             self.assertEqual(display.index.max().strftime("%Y-%m-%d"), "2025-12-31")
-            self.assertEqual(len(display), 731)
-            self.assertEqual(len(ei), 731)
+            self.assertEqual(len(display), 17_532)
+            self.assertEqual(len(ei), 17_532)
             self.assertEqual(len(evi), 2)
             self.assertAlmostEqual(
                 float(display.loc["2024-01-01"]), 150.0 * 321.943 / 313.5, places=6
             )
             self.assertAlmostEqual(float(display.loc["2024-01-02"]), 0.0, places=6)
             self.assertTrue((evi > 0).all())
+            self.assertEqual(prepared["display"].metadata["analysis_start_date"], "1978-01-01")
+            self.assertEqual(
+                prepared["display"].metadata["calendar_zero_definition"],
+                "no recorded building payout in the NFIP event ledger",
+            )
 
     def test_nfip_claims_needs_refresh_flags_invalid_and_accepts_valid_extract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

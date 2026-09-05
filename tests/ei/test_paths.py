@@ -209,14 +209,12 @@ class EiPathsTests(unittest.TestCase):
                 np.array([np.nan, 0.1], dtype=float),
                 min_points=2,
             )
-        window, mask = select_stable_path_window(
-            np.array([4], dtype=int),
-            np.array([0.2], dtype=float),
-            min_points=1,
-            trim_fraction=0.9,
-        )
-        self.assertEqual(window, EiStableWindow(4, 4))
-        np.testing.assert_array_equal(mask, np.array([True]))
+        with self.assertRaisesRegex(ValueError, "min_points must be an integer at least 2"):
+            select_stable_path_window(
+                np.array([4], dtype=int),
+                np.array([0.2], dtype=float),
+                min_points=1,
+            )
         trimmed_window, trimmed_mask = select_stable_path_window(
             np.array([4, 8, 16], dtype=int),
             np.array([0.1, 0.11, 0.12], dtype=float),
@@ -225,6 +223,29 @@ class EiPathsTests(unittest.TestCase):
         )
         self.assertEqual(trimmed_window, EiStableWindow(4, 16))
         np.testing.assert_array_equal(trimmed_mask, np.array([True, True, True]))
+
+    def test_stable_path_selection_rejects_invalid_tuning_parameters(self) -> None:
+        block_sizes = np.array([4, 8, 16], dtype=int)
+        z_path = np.array([0.1, 0.11, 0.12], dtype=float)
+        for trim_fraction in (-0.1, 0.5, np.nan):
+            with self.subTest(trim_fraction=trim_fraction):
+                with self.assertRaisesRegex(ValueError, "trim_fraction must be finite"):
+                    select_stable_path_window(
+                        block_sizes,
+                        z_path,
+                        min_points=2,
+                        trim_fraction=trim_fraction,
+                    )
+        for name, value in (("roughness_penalty", -1.0), ("curvature_penalty", np.nan)):
+            with self.subTest(name=name, value=value):
+                kwargs = {name: value}
+                with self.assertRaisesRegex(ValueError, f"{name} must be finite"):
+                    select_stable_path_window(
+                        block_sizes,
+                        z_path,
+                        min_points=2,
+                        **kwargs,
+                    )
 
 
 if __name__ == "__main__":

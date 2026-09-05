@@ -1,5 +1,4 @@
 """Plotting helpers for EVI model objects."""
-# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -8,11 +7,17 @@ import sys
 
 from .._runtime import prepare_matplotlib_env
 
-prepare_matplotlib_env()
-import matplotlib.pyplot as plt
 import numpy as np
 
 from .models import ScalingFit
+
+
+def _pyplot():
+    """Import pyplot only when a plot is requested."""
+    prepare_matplotlib_env()
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
@@ -47,6 +52,7 @@ def plot_scaling_fit(
     ylabel: str | None = None,
 ) -> None:
     """Plot an EVI scaling fit on the log-log block-size scale."""
+    plt = _pyplot()
     if ylabel is None:
         if fit.target == "quantile":
             ylabel = f"log block quantile (tau={fit.quantile:.2f})"

@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 from zipfile import BadZipFile
 
 import numpy as np
@@ -36,7 +36,7 @@ from unibm.evi import (
 # use enough Monte Carlo replicates to stabilize scenario summaries and enough
 # covariance-bootstrap draws to support the internal FGLS fits.
 BENCHMARK_MONTE_CARLO_REPS = 100
-FGLS_BOOTSTRAP_REPS = 120
+FGLS_BOOTSTRAP_REPS = "adaptive"
 BENCHMARK_CACHE_VERSION = "2026-04-06-benchmark-cache-v14-projected-grid-bundled-cache"
 LEGACY_BENCHMARK_CACHE_VERSIONS = (
     "2026-04-06-benchmark-cache-v13-universal-q",
@@ -46,16 +46,13 @@ LEGACY_SCENARIO_CACHE_VERSIONS = ("2026-04-03-benchmark-cache-v11",)
 DEFAULT_BENCHMARK_WORKERS = 4
 BENCHMARK_MASTER_SEED = 20260401
 UNIVERSAL_BENCHMARK_SET = "universal"
-STRESS_BENCHMARK_SET = "stress"
 UNIVERSAL_XI_VALUES = (0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0)
 UNIVERSAL_THETA_VALUES = (0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0)
 EVI_DEFAULT_THETA_VALUES = (0.01, 0.10, 0.50, 1.0)
 EI_DEFAULT_XI_VALUES = (0.01, 0.50, 1.0, 5.0)
-STRESS_XI_VALUES = (0.10, 0.30, 1.0)
-STRESS_THETA_VALUES = (0.10, 0.50, 1.0)
+EI_BENCHMARK_THRESHOLD_QUANTILES = (0.90, 0.95)
 MOVING_MAXIMA_Q = 99
 MOVING_MAXIMA_FAMILY = f"moving_maxima_q{MOVING_MAXIMA_Q}"
-STRESS_MOVING_MAXIMA_FAMILY = f"student_t_abs_moving_maxima_q{MOVING_MAXIMA_Q}"
 UNIVERSAL_FAMILIES = (
     "frechet_max_ar",
     MOVING_MAXIMA_FAMILY,
@@ -68,7 +65,6 @@ EVI_DEFAULT_FAMILIES = (
 )
 EI_DEFAULT_FAMILIES = UNIVERSAL_FAMILIES
 MOVING_MAXIMA_FAMILY_PATTERN = re.compile(r"^moving_maxima_q(?P<q>[1-9]\d*)$")
-STRESS_MOVING_MAXIMA_FAMILY_PATTERN = re.compile(r"^student_t_abs_moving_maxima_q(?P<q>[1-9]\d*)$")
 
 
 def _try_load_npz(cache_file: Path) -> Any | None:
@@ -122,7 +118,7 @@ class MethodSpec:
     summary_target: str
     regression: str
     sliding: bool
-    bootstrap_reps: int
+    bootstrap_reps: int | Literal["adaptive"]
 
 
 METHOD_SPECS = (
@@ -162,18 +158,15 @@ REGRESSION_MARKERS = {
 FAMILY_LABELS = {
     "frechet_max_ar": "Fréchet max-AR",
     MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
-    STRESS_MOVING_MAXIMA_FAMILY: f"Abs-Student-t moving maxima (q={MOVING_MAXIMA_Q})",
     "pareto_additive_ar1": "Pareto additive AR(1)",
 }
 FAMILY_ORDER = (
     "frechet_max_ar",
     MOVING_MAXIMA_FAMILY,
-    STRESS_MOVING_MAXIMA_FAMILY,
     "pareto_additive_ar1",
 )
 BENCHMARK_SET_LABELS = {
     UNIVERSAL_BENCHMARK_SET: "Projected short-record suite",
-    STRESS_BENCHMARK_SET: "Slow-convergence stress suite",
 }
 CORE_METHODS = (
     "disjoint_mean_ols",
@@ -192,7 +185,7 @@ METRIC_LABELS = {
     "ape": "absolute percentage error",
     "mape": "mean absolute percentage error",
     "coverage": "interval coverage",
-    "interval_score": "Winkler interval score",
+    "interval_score": "mean Winkler interval score",
 }
 SIMULATION_BURN_IN = 2000
 
@@ -234,28 +227,11 @@ def parse_moving_maxima_q(family: str) -> int | None:
     return q
 
 
-def parse_student_t_abs_moving_maxima_q(family: str) -> int | None:
-    """Return the stress moving-maxima order encoded in a family id, if present."""
-    match = STRESS_MOVING_MAXIMA_FAMILY_PATTERN.fullmatch(str(family))
-    if match is None:
-        return None
-    q = int(match.group("q"))
-    if q != MOVING_MAXIMA_Q:
-        raise ValueError(
-            "Only "
-            f"{STRESS_MOVING_MAXIMA_FAMILY} is supported in the benchmark design, got {family!r}."
-        )
-    return q
-
-
 def family_label(family: str) -> str:
     """Render a family id into a stable manuscript-friendly label."""
     q = parse_moving_maxima_q(family)
     if q is not None:
         return f"Moving Maxima (q={q})"
-    q = parse_student_t_abs_moving_maxima_q(family)
-    if q is not None:
-        return f"Abs-Student-t moving maxima (q={q})"
     return FAMILY_LABELS.get(family, family)
 
 
@@ -380,9 +356,6 @@ def map_theta_to_phi(family: str, theta: float, xi: float) -> float:
     q = parse_moving_maxima_q(family)
     if q is not None:
         return map_theta_to_phi_moving_maxima(theta, xi, q)
-    q = parse_student_t_abs_moving_maxima_q(family)
-    if q is not None:
-        return map_theta_to_phi_moving_maxima(theta, xi, q)
     raise ValueError(f"Unknown family for phi inversion: {family}")
 
 
@@ -391,10 +364,6 @@ def theta_from_phi(family: str, phi: float, xi: float) -> float:
     if family in ("frechet_max_ar", "pareto_additive_ar1"):
         return float(1.0 - phi ** (1.0 / xi))
     q = parse_moving_maxima_q(family)
-    if q is not None:
-        x = float(phi ** (1.0 / xi))
-        return float(1.0 / _moving_maxima_denominator(x, q))
-    q = parse_student_t_abs_moving_maxima_q(family)
     if q is not None:
         x = float(phi ** (1.0 / xi))
         return float(1.0 / _moving_maxima_denominator(x, q))
@@ -421,18 +390,6 @@ def _sample_frechet_innovations(
     tiny = np.finfo(float).tiny
     uniforms = np.clip(rng.random(n_obs), tiny, 1 - tiny)
     return np.power(-np.log(uniforms), -xi)
-
-
-def _sample_abs_student_t_innovations(
-    xi: float,
-    n_obs: int,
-    rng: np.random.Generator,
-) -> np.ndarray:
-    """Draw positive absolute-Student-t innovations with EVT index xi = 1 / nu."""
-    if xi <= 0.0:
-        raise ValueError("xi must be strictly positive for the heavy-tailed stress design.")
-    degrees_of_freedom = float(1.0 / xi)
-    return np.abs(rng.standard_t(df=degrees_of_freedom, size=n_obs))
 
 
 def _simulate_positive_additive_ar1(
@@ -489,28 +446,6 @@ def simulate_moving_maxima_series(
     return series[burn_in : burn_in + n_obs]
 
 
-def simulate_abs_student_t_moving_maxima_series(
-    xi: float,
-    phi: float,
-    n_obs: int,
-    rng: np.random.Generator,
-    *,
-    q: int = MOVING_MAXIMA_Q,
-    burn_in: int = SIMULATION_BURN_IN,
-) -> np.ndarray:
-    """Simulate a slow-convergence moving-maxima stress process with absolute t innovations."""
-    weights = np.array([phi**j for j in range(q + 1)], dtype=float)
-    innovations = _sample_abs_student_t_innovations(
-        xi=xi,
-        n_obs=n_obs + burn_in + q,
-        rng=rng,
-    )
-    windows = np.lib.stride_tricks.sliding_window_view(innovations, q + 1)
-    reversed_weights = weights[::-1]
-    series = np.max(windows * reversed_weights, axis=-1)
-    return series[burn_in : burn_in + n_obs]
-
-
 def simulate_pareto_additive_ar1_series(
     xi: float,
     phi: float,
@@ -554,15 +489,6 @@ def simulate_series(cfg: SimulationConfig, rng: np.random.Generator) -> np.ndarr
     q = parse_moving_maxima_q(cfg.family)
     if q is not None:
         return simulate_moving_maxima_series(cfg.xi_true, cfg.phi, cfg.n_obs, rng, q=q)
-    q = parse_student_t_abs_moving_maxima_q(cfg.family)
-    if q is not None:
-        return simulate_abs_student_t_moving_maxima_series(
-            cfg.xi_true,
-            cfg.phi,
-            cfg.n_obs,
-            rng,
-            q=q,
-        )
     raise ValueError(f"Unknown family: {cfg.family}")
 
 
@@ -640,28 +566,6 @@ def default_ei_simulation_configs(
     return configs
 
 
-def stress_evi_simulation_configs(
-    *,
-    xi_values: Iterable[float] = STRESS_XI_VALUES,
-    theta_values: Iterable[float] = STRESS_THETA_VALUES,
-    families: Iterable[str] = (STRESS_MOVING_MAXIMA_FAMILY,),
-    n_obs: int = 365,
-    reps: int = BENCHMARK_MONTE_CARLO_REPS,
-    quantile: float = 0.5,
-    benchmark_set: str = STRESS_BENCHMARK_SET,
-) -> list[SimulationConfig]:
-    """Build the appendix-only slow-convergence EVI stress suite."""
-    return default_evi_simulation_configs(
-        xi_values=xi_values,
-        theta_values=theta_values,
-        families=families,
-        n_obs=n_obs,
-        reps=reps,
-        quantile=quantile,
-        benchmark_set=benchmark_set,
-    )
-
-
 def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:
     """Backward-compatible alias for the default EVI benchmark grid."""
     legacy_map = {
@@ -674,16 +578,11 @@ def default_simulation_configs(**kwargs: Any) -> list[SimulationConfig]:
     unsupported_legacy = sorted(
         set(kwargs).intersection(
             {
-                "xi_values_stress",
-                "theta_values_stress",
                 "phi_values",
                 "phi_values_main",
-                "phi_values_stress",
                 "tau_values",
                 "tau_values_main",
-                "tau_values_stress",
                 "reps_main",
-                "reps_stress",
             }
         )
     )
@@ -897,7 +796,11 @@ def _save_bootstrap_results_bundle(
     _atomic_savez(cache_file, compressed=False, **arrays)
 
 
-def _load_bootstrap_results_bundle(cache_file: Path) -> dict[str, dict[str, dict[str, Any]]]:
+def _load_bootstrap_results_bundle(
+    cache_file: Path,
+    *,
+    quantile: float,
+) -> dict[str, dict[str, dict[str, Any]]]:
     """Reload one series-wide cached EVI bootstrap bundle from disk."""
     loaded = _try_load_npz(cache_file)
     if loaded is None:
@@ -906,6 +809,8 @@ def _load_bootstrap_results_bundle(cache_file: Path) -> dict[str, dict[str, dict
         schemes = [str(scheme) for scheme in np.asarray(data["schemes"])]
         bundle: dict[str, dict[str, dict[str, Any]]] = {}
         for scheme in schemes:
+            if scheme not in {"sliding", "disjoint"}:
+                raise ValueError(f"Unsupported cached block scheme: {scheme}")
             targets = [str(target) for target in np.asarray(data[f"{scheme}__targets"])]
             scheme_results: dict[str, dict[str, Any]] = {}
             for target in targets:
@@ -919,6 +824,8 @@ def _load_bootstrap_results_bundle(cache_file: Path) -> dict[str, dict[str, dict
                     "samples": np.asarray(data[f"{prefix}__samples"], dtype=float),
                     "covariance": covariance if has_covariance and covariance.size else None,
                     "target": target,
+                    "quantile": float(quantile) if target == "quantile" else None,
+                    "sliding": scheme == "sliding",
                 }
             bundle[scheme] = scheme_results
     return bundle
@@ -977,6 +884,7 @@ def _scheme_bootstrap_results(
     sliding: bool,
     specs: list[MethodSpec],
     random_state: int,
+    reps: int,
     cache_dir: Path | None = None,
     cache_key: str | None = None,
 ) -> dict[str, dict[str, Any]]:
@@ -995,12 +903,15 @@ def _scheme_bootstrap_results(
             cache_dir,
             cache_key=cache_key,
             quantile=quantile,
-            reps=FGLS_BOOTSTRAP_REPS,
+            reps=reps,
         )
         scheme_name = "sliding" if sliding else "disjoint"
         if cache_file.exists():
             try:
-                cached_bundle = _load_bootstrap_results_bundle(cache_file)
+                cached_bundle = _load_bootstrap_results_bundle(
+                    cache_file,
+                    quantile=quantile,
+                )
             except FileNotFoundError:
                 cached_bundle = {}
             cached = cached_bundle.get(scheme_name, {})
@@ -1012,14 +923,17 @@ def _scheme_bootstrap_results(
         targets=fgls_targets,
         quantile=quantile,
         sliding=sliding,
-        reps=FGLS_BOOTSTRAP_REPS,
+        reps=reps,
         random_state=random_state,
     )
     if cache_dir is not None and cache_key is not None:
         existing_bundle = {}
         if cache_file.exists():
             try:
-                existing_bundle = _load_bootstrap_results_bundle(cache_file)
+                existing_bundle = _load_bootstrap_results_bundle(
+                    cache_file,
+                    quantile=quantile,
+                )
             except FileNotFoundError:
                 existing_bundle = {}
         existing_bundle["sliding" if sliding else "disjoint"] = bootstrap_results
@@ -1032,6 +946,7 @@ def fit_methods_for_series(
     *,
     quantile: float,
     random_state: int,
+    bootstrap_reps: int | Literal["adaptive"] = FGLS_BOOTSTRAP_REPS,
     method_ids: Iterable[str] | None = None,
     reuse_fits: dict[str, ScalingFit] | None = None,
     cache_dir: Path | None = None,
@@ -1042,10 +957,10 @@ def fit_methods_for_series(
     """Fit every benchmark method to one synthetic series.
 
     The benchmark compares target choice, block extraction scheme, and whether
-    covariance-aware regression is used. FGLS methods share one bootstrap
-    backbone per block scheme (`sliding` and `disjoint`) so median/mean/mode
-    comparisons reuse the same dependence-preserving resamples instead of
-    paying the bootstrap cost three times.
+    covariance-aware regression is used. Adaptive FGLS uses the public estimator
+    separately for each target/window, with paired random-number prefixes but
+    target-specific stopping. Explicit fixed-R fits share one bootstrap backbone
+    per block scheme (`sliding` and `disjoint`).
 
     When `fgls_bootstrap_overrides` is supplied, those cached covariance
     summaries are reused instead of drawing fresh scheme-level bootstraps. This
@@ -1075,6 +990,7 @@ def fit_methods_for_series(
                 raise ValueError(f"Unknown benchmark method id: {method_id!r}") from exc
         if not selected_specs:
             return {}
+    selected_method_ids = {spec.method_id for spec in selected_specs}
     values = np.asarray(vec, dtype=float).reshape(-1)
     values = values[np.isfinite(values)]
     block_sizes = generate_block_sizes(n_obs=values.size)
@@ -1092,7 +1008,7 @@ def fit_methods_for_series(
             and f"{'sliding' if sliding else 'disjoint'}_{spec.summary_target}_fgls"
             not in fgls_bootstrap_overrides
         ]
-        if allow_scheme_bootstrap and missing_targets:
+        if allow_scheme_bootstrap and missing_targets and bootstrap_reps != "adaptive":
             scheme_bootstrap_results = _scheme_bootstrap_results(
                 values,
                 block_sizes=block_sizes,
@@ -1100,6 +1016,7 @@ def fit_methods_for_series(
                 sliding=sliding,
                 specs=specs,
                 random_state=random_state,
+                reps=bootstrap_reps,
                 cache_dir=cache_dir,
                 cache_key=cache_key,
             )
@@ -1119,9 +1036,10 @@ def fit_methods_for_series(
                 existing_fit=existing_fit,
             )
             internal_target = _internal_target_name(summary_target)
-            if ols_id not in fits:
+            if ols_id in selected_method_ids and ols_id not in fits:
                 fits[ols_id] = estimate_target_scaling(
                     values,
+                    regression="OLS",
                     target=internal_target,
                     quantile=quantile,
                     sliding=sliding,
@@ -1130,24 +1048,35 @@ def fit_methods_for_series(
                     curve=shared_curve,
                     plateau=shared_plateau,
                 )
-            if fgls_id not in fits:
+            if fgls_id in selected_method_ids and fgls_id not in fits:
                 bootstrap_result = fgls_bootstrap_overrides.get(fgls_id)
                 if bootstrap_result is None:
                     bootstrap_result = scheme_bootstrap_results.get(internal_target)
-                effective_bootstrap_reps = (
-                    FGLS_BOOTSTRAP_REPS if bootstrap_result is not None else 0
-                )
+                if bootstrap_result is None and not (
+                    allow_scheme_bootstrap and bootstrap_reps == "adaptive"
+                ):
+                    raise ValueError(f"{fgls_id} requires bootstrap covariance.")
                 fits[fgls_id] = estimate_target_scaling(
                     values,
+                    regression="FGLS",
                     target=internal_target,
                     quantile=quantile,
                     sliding=sliding,
-                    bootstrap_reps=effective_bootstrap_reps,
                     random_state=random_state,
                     curve=shared_curve,
                     plateau=shared_plateau,
                     bootstrap_result=bootstrap_result,
+                    bootstrap_reps=(bootstrap_reps if bootstrap_result is None else None),
                 )
-    return {
-        spec.method_id: fits[spec.method_id] for spec in selected_specs if spec.method_id in fits
-    }
+    selected_fits: dict[str, ScalingFit] = {}
+    for spec in selected_specs:
+        fit = fits.get(spec.method_id)
+        if fit is None:
+            continue
+        if fit.regression_policy != spec.regression or fit.regression != spec.regression:
+            raise ValueError(
+                f"Strict benchmark method {spec.method_id!r} expected {spec.regression}, "
+                f"got policy={fit.regression_policy}, actual={fit.regression}."
+            )
+        selected_fits[spec.method_id] = fit
+    return selected_fits

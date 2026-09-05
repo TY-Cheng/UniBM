@@ -108,6 +108,8 @@ class EiThresholdTests(unittest.TestCase):
         candidate = _kgaps_profile_fit(np.array([2.0, 4.0, 3.0]), run_k=1, exceedance_rate=0.1)
         self.assertTrue(np.isfinite(candidate.theta_hat))
         self.assertEqual(candidate.run_k, 1)
+        expected_information = 2.0 * 3.0 / candidate.theta_hat**2
+        self.assertAlmostEqual(candidate.standard_error, 1.0 / np.sqrt(expected_information))
         with self.assertRaisesRegex(ValueError, "at least two finite gap observations"):
             _kgaps_profile_fit(np.array([1.0]), run_k=1, exceedance_rate=0.1)
 
@@ -130,6 +132,11 @@ class EiThresholdTests(unittest.TestCase):
             )
         self.assertEqual(invalid_theta_checks[:2], [-np.inf, -np.inf])
         self.assertTrue(np.isfinite(zero_gap_candidate.theta_hat))
+        zero_gap_information = 3.0 / (1.0 - zero_gap_candidate.theta_hat) ** 2
+        self.assertAlmostEqual(
+            zero_gap_candidate.standard_error,
+            1.0 / np.sqrt(zero_gap_information),
+        )
 
         bundle = prepare_ei_bundle(
             self._positive_sample(),
@@ -158,6 +165,79 @@ class EiThresholdTests(unittest.TestCase):
             ValueError, "could not find a threshold with enough exceedances"
         ):
             estimate_k_gaps(sparse_bundle)
+
+    def test_threshold_estimators_default_to_bundle_candidates(self) -> None:
+        bundle = prepare_ei_bundle(
+            self._positive_sample(),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            allow_zeros=False,
+            threshold_quantiles=(0.80, 0.90),
+        )
+
+        for estimator in (estimate_ferro_segers, estimate_k_gaps):
+            with self.subTest(estimator=estimator.__name__):
+                fit = estimator(bundle)
+                self.assertIn(fit.selected_threshold_quantile, (0.80, 0.90))
+
+    def test_preparation_validates_threshold_quantiles(self) -> None:
+        invalid_quantiles = (
+            (),
+            (0.90, 0.90),
+            (0.95, 0.90),
+            (0.0, 0.90),
+            (0.90, 1.0),
+            (0.90, np.nan),
+            np.array([[0.90, 0.95]]),
+        )
+        for threshold_quantiles in invalid_quantiles:
+            with self.subTest(threshold_quantiles=threshold_quantiles):
+                with self.assertRaisesRegex(ValueError, "threshold_quantiles"):
+                    prepare_ei_bundle(
+                        self._positive_sample(),
+                        block_sizes=np.array([4, 8, 16, 32], dtype=int),
+                        allow_zeros=False,
+                        threshold_quantiles=threshold_quantiles,
+                    )
+
+    def test_threshold_estimators_validate_explicit_subsets(self) -> None:
+        bundle = prepare_ei_bundle(
+            self._positive_sample(),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            allow_zeros=False,
+            threshold_quantiles=(0.80, 0.90, 0.95),
+        )
+
+        for estimator in (estimate_ferro_segers, estimate_k_gaps):
+            with self.subTest(estimator=estimator.__name__, case="single"):
+                fit = estimator(bundle, threshold_quantiles=(0.90,))
+                self.assertEqual(fit.selected_threshold_quantile, 0.90)
+            with self.subTest(estimator=estimator.__name__, case="missing"):
+                with self.assertRaisesRegex(ValueError, "threshold_quantiles"):
+                    estimator(bundle, threshold_quantiles=(0.90, 0.99))
+            with self.subTest(estimator=estimator.__name__, case="reordered"):
+                with self.assertRaisesRegex(ValueError, "threshold_quantiles"):
+                    estimator(bundle, threshold_quantiles=(0.95, 0.90))
+
+    def test_k_gaps_validates_run_grid(self) -> None:
+        bundle = prepare_ei_bundle(
+            self._positive_sample(seed=727),
+            block_sizes=np.array([4, 8, 16, 32], dtype=int),
+            allow_zeros=False,
+        )
+        self.assertTrue(np.isfinite(estimate_k_gaps(bundle, k_grid=(0, 1)).theta_hat))
+        invalid_grids = (
+            (),
+            (1.9,),
+            (1, 1),
+            (2, 1),
+            (-1, 1),
+            (True, 1),
+            (np.nan, 1),
+        )
+        for k_grid in invalid_grids:
+            with self.subTest(k_grid=k_grid):
+                with self.assertRaisesRegex(ValueError, "k_grid"):
+                    estimate_k_gaps(bundle, k_grid=k_grid)
 
 
 if __name__ == "__main__":

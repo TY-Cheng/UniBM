@@ -5,7 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 from .._block_grid import generate_block_sizes, validate_block_sizes
-from ._validation import _finite_nonnegative_series, _finite_positive_series
+from ._validation import (
+    _finite_nonnegative_series,
+    _finite_positive_series,
+    _validate_threshold_quantiles,
+)
 from .models import EiPreparedBundle
 from .paths import _build_bm_paths_from_values
 
@@ -17,8 +21,13 @@ def prepare_ei_bundle(
     block_sizes: np.ndarray | None = None,
     threshold_quantiles: tuple[float, ...] = (0.90, 0.95),
 ) -> EiPreparedBundle:
-    """Prepare EI inputs without changing their caller-chosen temporal clock."""
+    """Prepare EI paths and a strictly increasing threshold grid without changing the clock.
+
+    The default threshold candidates are ``(0.90, 0.95)``. Estimators consume this
+    bundle-owned order unless the caller requests a validated subset.
+    """
     values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
+    threshold_quantiles = _validate_threshold_quantiles(threshold_quantiles)
     if block_sizes is None:
         block_sizes = generate_block_sizes(values.size)
     block_sizes = validate_block_sizes(block_sizes, n_obs=values.size)

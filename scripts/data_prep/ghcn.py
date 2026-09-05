@@ -20,7 +20,7 @@ from urllib.request import urlretrieve
 import numpy as np
 import pandas as pd
 
-from .constants import ANALYSIS_END_DATE
+from .constants import ANALYSIS_END_DATE, MIN_PERIOD_COVERAGE
 from ._io import write_csv_gz_atomic
 
 
@@ -150,37 +150,29 @@ def _season_index(year: int, months: tuple[int, ...]) -> pd.DatetimeIndex:
     return year_index[year_index.month.isin(months)]
 
 
-def _complete_season_suffix_years(
-    requirements: tuple[tuple[pd.Series, int], ...],
+def _covered_season_suffix_years(
+    valid_days: pd.Series,
     months: tuple[int, ...],
 ) -> tuple[int, ...]:
-    """Return the consecutive complete-season suffix ending in the cutoff year."""
-    if not requirements or any(series.empty for series, _ in requirements):
+    """Return the consecutive seasonal suffix meeting the daily-coverage gate."""
+    if valid_days.empty:
         raise ValueError("GHCN inputs must contain the required elements.")
     cutoff_year = pd.Timestamp(ANALYSIS_END_DATE).year
-    earliest_year = max(int(series.index.min().year) for series, _ in requirements)
-    complete: list[int] = []
-    for year in range(cutoff_year, earliest_year - 1, -1):
+    covered: list[int] = []
+    for year in range(cutoff_year, int(valid_days.index.min().year) - 1, -1):
         season = _season_index(year, months)
-        valid = True
-        for series, lookback_days in requirements:
-            required = (
-                pd.date_range(season.min() - pd.Timedelta(days=lookback_days), season.max())
-                if lookback_days
-                else season
+        n_valid = int(valid_days.reindex(season, fill_value=False).astype(bool).sum())
+        if n_valid < int(np.ceil(MIN_PERIOD_COVERAGE * season.size)):
+            if covered:
+                break
+            raise ValueError(
+                f"GHCN season {cutoff_year} does not meet the "
+                f"{MIN_PERIOD_COVERAGE:.0%} daily-coverage gate."
             )
-            values = series.reindex(required)
-            if values.isna().any() or not np.all(np.isfinite(values.to_numpy(dtype=float))):
-                valid = False
-                break
-        if not valid:
-            if complete:
-                break
-            raise ValueError(f"GHCN season {cutoff_year} is incomplete at the analysis cutoff.")
-        complete.append(year)
-    if not complete:
-        raise ValueError("GHCN inputs contain no complete seasons.")
-    return tuple(reversed(complete))
+        covered.append(year)
+    if not covered:
+        raise ValueError("GHCN inputs contain no seasons meeting the daily-coverage gate.")
+    return tuple(reversed(covered))
 
 
 def prepare_precipitation_series(
@@ -193,13 +185,20 @@ def prepare_precipitation_series(
     df = read_ghcn_station_csv(path)
     df = df[df["date"] <= ANALYSIS_END_DATE]
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
-    years = _complete_season_suffix_years(((precipitation, 0),), wet_season_months)
+    finite = pd.Series(
+        np.isfinite(precipitation.to_numpy(dtype=float)),
+        index=precipitation.index,
+    )
+    years = _covered_season_suffix_years(finite, wet_season_months)
     precipitation = precipitation[
         precipitation.index.year.isin(years) & precipitation.index.month.isin(wet_season_months)
     ]
+    precipitation = precipitation[np.isfinite(precipitation.to_numpy(dtype=float))]
     if min_wet_day_mm > 0:
         precipitation = precipitation.clip(lower=min_wet_day_mm)
     annual_maxima = precipitation.groupby(precipitation.index.year).max()
+    expected_days = sum(_season_index(year, wet_season_months).size for year in years)
+    valid_days = int(precipitation.size)
     return PreparedSeries(
         name="wet-season daily precipitation",
         value_name="precipitation_mm",
@@ -214,6 +213,10 @@ def prepare_precipitation_series(
             "season_start_year": years[0],
             "season_end_year": years[-1],
             "maxima_period": "season",
+            "coverage_threshold": MIN_PERIOD_COVERAGE,
+            "coverage_expected_days": expected_days,
+            "coverage_valid_days": valid_days,
+            "coverage_fraction": valid_days / expected_days,
         },
     )
 
@@ -229,15 +232,9 @@ def prepare_hot_dry_series(
     df = df[df["date"] <= ANALYSIS_END_DATE]
     tmax = _extract_ghcn_element(df, "TMAX", scale=10.0)
     precipitation = _extract_ghcn_element(df, "PRCP", scale=10.0)
-    years = _complete_season_suffix_years(
-        ((tmax, 0), (precipitation, rolling_days - 1)),
-        warm_season_months,
-    )
-    first_season = _season_index(years[0], warm_season_months)
-    last_season = _season_index(years[-1], warm_season_months)
     date_index = pd.date_range(
-        first_season.min() - pd.Timedelta(days=rolling_days - 1),
-        last_season.max(),
+        min(tmax.index.min(), precipitation.index.min()),
+        ANALYSIS_END_DATE,
         freq="D",
     )
     tmax = tmax.reindex(date_index)
@@ -254,7 +251,15 @@ def prepare_hot_dry_series(
         },
         index=date_index,
     )
-    daily = daily[daily.index.year.isin(years) & daily.index.month.isin(warm_season_months)]
+    analysis_ready = pd.Series(
+        np.isfinite(daily["tmax_c"].to_numpy(dtype=float))
+        & np.isfinite(daily["prcp_roll_mm"].to_numpy(dtype=float)),
+        index=daily.index,
+    )
+    years = _covered_season_suffix_years(analysis_ready, warm_season_months)
+    daily = daily[
+        daily.index.year.isin(years) & daily.index.month.isin(warm_season_months) & analysis_ready
+    ]
     daily["doy"] = daily.index.dayofyear
     tmax_mean = daily.groupby("doy")["tmax_c"].transform("mean")
     tmax_sd = daily.groupby("doy")["tmax_c"].transform("std").replace(0, np.nan)
@@ -266,6 +271,8 @@ def prepare_hot_dry_series(
     )
     severity = hot_anomaly.clip(lower=0).fillna(0) + dry_anomaly.clip(lower=0).fillna(0)
     annual_maxima = severity.groupby(severity.index.year).max()
+    expected_days = sum(_season_index(year, warm_season_months).size for year in years)
+    valid_days = int(severity.size)
     return PreparedSeries(
         name="warm-season hot-dry severity",
         value_name="hot_dry_severity",
@@ -282,6 +289,10 @@ def prepare_hot_dry_series(
             "season_start_year": years[0],
             "season_end_year": years[-1],
             "maxima_period": "season",
+            "coverage_threshold": MIN_PERIOD_COVERAGE,
+            "coverage_expected_days": expected_days,
+            "coverage_valid_days": valid_days,
+            "coverage_fraction": valid_days / expected_days,
         },
     )
 

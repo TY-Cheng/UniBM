@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from typing import Any
 import warnings
 
 import numpy as np
 
 from .._block_grid import validate_block_sizes
-from .._validation import warn_on_negative_values
+from .._bootstrap_precision import ADAPTIVE_REPS, adaptive_covariance
+from .._validation import as_1d_float_array, warn_on_negative_values
 from .._window_ops import circular_sliding_window_maximum
+from .summaries import _validate_quantile
+
+
+_MODE_BOOTSTRAP_GRID_POINTS = 256
+_MODE_BOOTSTRAP_MAX_WORKING_BYTES = 64 * 1024 * 1024
 
 
 def _sliding_block_maxima(segment: np.ndarray, block_size: int) -> np.ndarray:
@@ -48,6 +55,51 @@ class BlockSummaryBootstrapBackbone:
     super_block_size: int
     segment_draws: np.ndarray
     maxima_by_block: dict[int, np.ndarray]
+
+
+def _adaptive_block_summary_bootstrap(
+    vec: np.ndarray,
+    block_sizes: np.ndarray,
+    *,
+    target: str,
+    quantile: float,
+    sliding: bool,
+    super_block_size: int | None,
+    random_state: int | None,
+    evaluate: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
+) -> dict[str, Any]:
+    """Append path rows while reusing the existing maxima backbone."""
+    backbone = build_block_summary_bootstrap_backbone(
+        vec, block_sizes, sliding=sliding, reps=2, super_block_size=super_block_size
+    )
+    identity = {
+        "block_sizes": block_sizes,
+        "target": target,
+        "quantile": quantile if target == "quantile" else None,
+        "sliding": sliding,
+        "bootstrap_reps_policy": "adaptive",
+        "bootstrap_reps_requested": ADAPTIVE_REPS[-1],
+        "bootstrap_reps_used": 0,
+    }
+    if backbone is None:
+        return {**identity, "covariance": None, "samples": np.empty((0, len(block_sizes)))}
+
+    def draw(reps: int, rng: np.random.Generator) -> np.ndarray:
+        n_super = backbone.segment_draws.shape[1]
+        rows = []
+        for offset in range(0, reps, 32):
+            draws = rng.integers(0, n_super, (min(32, reps - offset), n_super))
+            result = evaluate_block_summary_bootstrap_backbone(
+                replace(backbone, segment_draws=draws), target=target, quantile=quantile
+            )
+            rows.append(result["samples"])
+        return np.concatenate(rows)
+
+    return {
+        **identity,
+        **adaptive_covariance(draw, evaluate, random_state=random_state),
+        "super_block_size": backbone.super_block_size,
+    }
 
 
 def _selected_bootstrap_maxima(
@@ -106,11 +158,18 @@ def _rowwise_linear_quantile(
     return result
 
 
-def _evaluate_mode_bootstrap_column_batched(selected: np.ndarray) -> np.ndarray:
-    """Evaluate bootstrap mode summaries exactly while batching across replicates."""
+def _evaluate_mode_bootstrap_column_batched(
+    selected: np.ndarray,
+    *,
+    max_kernel_bytes: int = _MODE_BOOTSTRAP_MAX_WORKING_BYTES,
+) -> np.ndarray:
+    """Evaluate modes while limiting each three-dimensional KDE kernel temporary."""
     selected = np.asarray(selected, dtype=float)
     if selected.ndim != 2:
         raise ValueError("selected maxima must be a 2D matrix.")
+    minimum_working_bytes = _MODE_BOOTSTRAP_GRID_POINTS * np.dtype(float).itemsize
+    if max_kernel_bytes < minimum_working_bytes:
+        raise ValueError(f"max_kernel_bytes must be at least {minimum_working_bytes}.")
     summaries = np.full(selected.shape[0], np.nan, dtype=float)
     valid = np.isfinite(selected) & (selected > 0)
     counts = np.sum(valid, axis=1)
@@ -153,20 +212,33 @@ def _evaluate_mode_bootstrap_column_batched(selected: np.ndarray) -> np.ndarray:
     row_index = np.arange(active_selected.shape[0])
     log_min = sorted_logs[:, 0]
     log_max = sorted_logs[row_index, active_counts - 1]
-    grid = np.linspace(0.0, 1.0, 256, dtype=float)[None, :]
+    grid = np.linspace(0.0, 1.0, _MODE_BOOTSTRAP_GRID_POINTS, dtype=float)[None, :]
     grid = log_min[:, None] + (log_max - log_min)[:, None] * grid
 
     density = np.zeros_like(grid)
-    chunk_size = 8192
-    for start in range(0, log_values.shape[1], chunk_size):
-        stop = start + chunk_size
-        chunk_values = log_values[:, start:stop]
-        chunk_valid = active_valid[:, start:stop]
-        if not np.any(chunk_valid):
-            continue
-        diff = (grid[:, :, None] - chunk_values[:, None, :]) / bandwidth[:, None, None]
-        kernel = np.exp(-0.5 * diff * diff) * chunk_valid[:, None, :]
-        density += kernel.sum(axis=2)
+    bytes_per_row_column = grid.shape[1] * np.dtype(float).itemsize
+    row_chunk_size = max(1, min(grid.shape[0], max_kernel_bytes // bytes_per_row_column))
+    for row_start in range(0, grid.shape[0], row_chunk_size):
+        row_stop = min(row_start + row_chunk_size, grid.shape[0])
+        row_slice = slice(row_start, row_stop)
+        bytes_per_column = (row_stop - row_start) * bytes_per_row_column
+        column_chunk_size = max(
+            1,
+            min(log_values.shape[1], max_kernel_bytes // bytes_per_column),
+        )
+        for start in range(0, log_values.shape[1], column_chunk_size):
+            stop = start + column_chunk_size
+            chunk_values = log_values[row_slice, start:stop]
+            chunk_valid = active_valid[row_slice, start:stop]
+            if not np.any(chunk_valid):
+                continue
+            kernel = grid[row_slice, :, None] - chunk_values[:, None, :]
+            kernel /= bandwidth[row_slice, None, None]
+            np.square(kernel, out=kernel)
+            kernel *= -0.5
+            np.exp(kernel, out=kernel)
+            kernel *= chunk_valid[:, None, :]
+            density[row_slice] += kernel.sum(axis=2)
     density /= active_counts_f[:, None]
     density_on_original_scale = density * np.exp(-grid)
     mode_index = np.argmax(density_on_original_scale, axis=1)
@@ -193,11 +265,17 @@ def evaluate_block_summary_bootstrap_backbone(
     quantile: float = 0.5,
 ) -> dict[str, Any]:
     """Evaluate one block-summary target on a precomputed bootstrap backbone."""
+    if target not in {"quantile", "mean", "mode"}:
+        raise ValueError(f"Unsupported target: {target}")
+    resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
     if backbone is None:
         return {
             "block_sizes": np.asarray([], dtype=int),
             "samples": np.empty((0, 0)),
             "covariance": None,
+            "target": target,
+            "quantile": resolved_quantile,
+            "sliding": None,
         }
     reps = backbone.segment_draws.shape[0]
     block_sizes = np.asarray(backbone.block_sizes, dtype=int)
@@ -248,6 +326,7 @@ def evaluate_block_summary_bootstrap_backbone(
         "super_block_size": backbone.super_block_size,
         "sliding": backbone.sliding,
         "target": target,
+        "quantile": resolved_quantile,
         "invalid_replicates": int(np.sum(~valid_rows)),
     }
 
@@ -263,9 +342,9 @@ def build_block_summary_bootstrap_backbone(
 ) -> BlockSummaryBootstrapBackbone | None:
     """Precompute the shared super-block state for UniBM bootstrap fitting."""
     warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
-    arr = np.asarray(vec, dtype=float).reshape(-1)
+    arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
-    if np.sum(np.isfinite(arr)) < 64 or reps < 2:
+    if reps < 2:
         return None
     max_block_size = int(block_sizes.max())
     if super_block_size is None:
@@ -341,13 +420,19 @@ def circular_block_summary_bootstrap(
     random_state: int | None = 0,
 ) -> dict[str, Any]:
     """Bootstrap one block-summary target by resampling time-series super-blocks."""
-    arr = np.asarray(vec, dtype=float).reshape(-1)
+    arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
+    if target not in {"quantile", "mean", "mode"}:
+        raise ValueError(f"Unsupported target: {target}")
+    resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
     if reps < 2:
         return {
             "block_sizes": block_sizes,
             "samples": np.empty((0, block_sizes.size)),
             "covariance": None,
+            "target": target,
+            "quantile": resolved_quantile,
+            "sliding": bool(sliding),
         }
     backbone = build_block_summary_bootstrap_backbone(
         vec=arr,
@@ -362,6 +447,9 @@ def circular_block_summary_bootstrap(
             "block_sizes": block_sizes,
             "samples": np.empty((0, block_sizes.size)),
             "covariance": None,
+            "target": target,
+            "quantile": resolved_quantile,
+            "sliding": bool(sliding),
         }
     return evaluate_block_summary_bootstrap_backbone(
         backbone,

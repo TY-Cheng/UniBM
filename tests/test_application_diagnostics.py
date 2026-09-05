@@ -26,7 +26,12 @@ def _make_prepared(series: pd.Series, *, name: str, provider: str, role: str) ->
 def _make_stream_bundle() -> object:
     rng = np.random.default_rng(17)
     index = pd.date_range("2000-01-01", periods=365 * 18, freq="D")
-    values = pd.Series(rng.pareto(2.1, index.size) + 1.0, index=index, dtype=float)
+    innovations = rng.pareto(2.1, index.size) + 1.0
+    values = pd.Series(
+        np.maximum(innovations, np.roll(innovations, 1)),
+        index=index,
+        dtype=float,
+    )
     prepared = _make_prepared(values, name="synthetic_stream", provider="usgs", role="shared")
     inputs = ApplicationPreparedInputs(display=prepared, evi=prepared, ei=prepared)
     spec = ApplicationSpec(

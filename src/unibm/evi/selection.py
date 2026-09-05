@@ -19,13 +19,27 @@ def select_penultimate_window(
     """Choose an intermediate block-size window by balancing linearity and curvature."""
     x = np.asarray(log_block_sizes, dtype=float)
     y = np.asarray(log_values, dtype=float)
+    if x.ndim != 1 or y.ndim != 1 or y.size != x.size:
+        raise ValueError("log_block_sizes and log_values must be matching one-dimensional arrays.")
+    if (
+        isinstance(min_points, bool)
+        or not isinstance(min_points, (int, np.integer))
+        or min_points < 2
+    ):
+        raise ValueError("min_points must be an integer at least 2.")
+    trim_fraction = float(trim_fraction)
+    if not np.isfinite(trim_fraction) or not 0.0 <= trim_fraction < 0.5:
+        raise ValueError("trim_fraction must be finite and lie in [0, 0.5).")
+    curvature_penalty = float(curvature_penalty)
+    if not np.isfinite(curvature_penalty) or curvature_penalty < 0.0:
+        raise ValueError("curvature_penalty must be finite and non-negative.")
     n = x.size
     if n < min_points:
         raise ValueError("Not enough positive block summaries to select a plateau.")
-    if x.ndim != 1 or y.ndim != 1 or y.size != n:
-        raise ValueError("log_block_sizes and log_values must be matching one-dimensional arrays.")
     if not np.all(np.isfinite(x)) or np.any(np.diff(x) <= 0):
         raise ValueError("log_block_sizes must be finite and strictly increasing.")
+    if not np.all(np.isfinite(y)):
+        raise ValueError("log_values must be finite.")
     lo = int(np.floor(n * trim_fraction))
     hi = n - lo
     lo = min(lo, max(n - min_points, 0))

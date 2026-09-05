@@ -17,7 +17,7 @@ from scripts.data_prep.usgs import (
 
 
 class UsgsPrepTests(unittest.TestCase):
-    def test_preparation_uses_continuous_suffix_and_complete_water_years(self) -> None:
+    def test_preparation_uses_continuous_suffix_and_covered_calendar_years(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "usgs_02236000.csv.gz"
             index = pd.date_range("2023-01-01", "2025-12-31", freq="D").difference(
@@ -41,9 +41,17 @@ class UsgsPrepTests(unittest.TestCase):
         expected_index = pd.date_range("2023-09-01", "2025-12-31", freq="D")
         self.assertTrue(prepared.series.index.equals(expected_index))
         self.assertEqual(prepared.annual_maxima.index.tolist(), [2024, 2025])
-        self.assertEqual(prepared.annual_maxima.index.name, "water_year")
+        self.assertEqual(prepared.annual_maxima.index.name, "calendar_year")
+        self.assertEqual(
+            float(prepared.annual_maxima.loc[2024]),
+            float(prepared.series.loc["2024"].max()),
+        )
         self.assertEqual(prepared.metadata["continuity_start"], "2023-09-01")
-        self.assertEqual(prepared.metadata["maxima_period"], "water_year")
+        self.assertEqual(prepared.metadata["maxima_period"], "calendar_year")
+        self.assertEqual(prepared.metadata["coverage_threshold"], 0.97)
+        self.assertEqual(prepared.metadata["coverage_expected_days"], 731)
+        self.assertEqual(prepared.metadata["coverage_valid_days"], 731)
+        self.assertEqual(prepared.metadata["coverage_fraction"], 1.0)
 
     def test_extract_usgs_daily_series_prefers_mean_stat_code(self) -> None:
         payload = {
@@ -67,6 +75,53 @@ class UsgsPrepTests(unittest.TestCase):
 
         self.assertEqual(station_name, "Station")
         self.assertEqual(float(series.iloc[0]), 10.0)
+
+    def test_partial_first_calendar_year_is_retained_when_coverage_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usgs_02236000.csv.gz"
+            index = pd.date_range("2023-01-11", "2025-12-31", freq="D")
+            pd.DataFrame(
+                {
+                    "date": index.strftime("%Y-%m-%d"),
+                    "discharge_cfs": range(1, index.size + 1),
+                    "site_no": ["02236000"] * index.size,
+                    "station_name": ["Station"] * index.size,
+                }
+            ).to_csv(path, index=False, compression="gzip")
+
+            prepared = prepare_usgs_streamflow_series(
+                path,
+                state_code="FL",
+                site_no="02236000",
+            )
+
+        self.assertEqual(prepared.annual_maxima.index.tolist(), [2023, 2024, 2025])
+        self.assertEqual(prepared.metadata["coverage_expected_days"], 1_096)
+        self.assertEqual(prepared.metadata["coverage_valid_days"], 1_086)
+
+    def test_short_continuous_suffix_can_be_screened_without_calendar_maxima(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usgs_02236000.csv.gz"
+            index = pd.date_range("2025-09-01", "2025-12-31", freq="D")
+            pd.DataFrame(
+                {
+                    "date": index.strftime("%Y-%m-%d"),
+                    "discharge_cfs": range(1, index.size + 1),
+                    "site_no": ["02236000"] * index.size,
+                    "station_name": ["Station"] * index.size,
+                }
+            ).to_csv(path, index=False, compression="gzip")
+
+            prepared = prepare_usgs_streamflow_series(
+                path,
+                state_code="FL",
+                site_no="02236000",
+            )
+
+        self.assertEqual(prepared.series.size, index.size)
+        self.assertTrue(prepared.annual_maxima.empty)
+        self.assertEqual(prepared.metadata["coverage_expected_days"], 0)
+        self.assertEqual(prepared.metadata["coverage_valid_days"], 0)
 
     def test_normalize_site_no_preserves_leading_zeroes(self) -> None:
         self.assertEqual(_normalize_site_no("02236000"), "02236000")

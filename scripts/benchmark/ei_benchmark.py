@@ -48,8 +48,12 @@ _EI_SUMMARY_REQUIRED_COLUMNS = {
     "coverage_hi",
     "interval_width_mean",
     "interval_score_mean",
+    "interval_score_mcse",
     "interval_score_q25",
     "interval_score_q75",
+    "n_success",
+    "n_failed",
+    "failure_rate",
 }
 
 
@@ -154,14 +158,21 @@ def load_or_materialize_ei_benchmark_outputs(
     ):
         summary = pd.read_csv(paths["summary"])
         external_summary = pd.read_csv(paths["external_summary"])
-        if _summary_matches_contract(
-            summary,
-            expected_methods=set(EI_INTERNAL_METHODS),
-            configs=configs,
-        ) and _summary_matches_contract(
-            external_summary,
-            expected_methods=set(EI_EXTERNAL_METHODS),
-            configs=configs,
+        detail_columns = set(pd.read_csv(paths["detail"], nrows=0).columns)
+        if (
+            {"bootstrap_reps_policy", "bootstrap_reps_used", "covariance_shrinkage"}.issubset(
+                detail_columns
+            )
+            and _summary_matches_contract(
+                summary,
+                expected_methods=set(EI_INTERNAL_METHODS),
+                configs=configs,
+            )
+            and _summary_matches_contract(
+                external_summary,
+                expected_methods=set(EI_EXTERNAL_METHODS),
+                configs=configs,
+            )
         ):
             status("ei_benchmark", "reusing cached internal and external benchmark CSVs")
             return EiBenchmarkOutputs(

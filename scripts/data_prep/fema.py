@@ -23,6 +23,7 @@ OPENFEMA_TIMEOUT_SECONDS = 60
 OPENFEMA_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 OPENFEMA_MAX_RETRIES = 6
 OPENFEMA_RETRY_BASE_SECONDS = 2.0
+DEFAULT_NFIP_START_DATE = "1978-01-01"
 DEFAULT_NFIP_END_DATE = ANALYSIS_END_DATE
 
 
@@ -187,7 +188,7 @@ def download_nfip_claims_state(
     state_code: str,
     output_path: Path | str,
     *,
-    start_date: str = "1978-01-01",
+    start_date: str = DEFAULT_NFIP_START_DATE,
     end_date: str = DEFAULT_NFIP_END_DATE,
     page_size: int = OPENFEMA_PAGE_SIZE,
     force_refresh: bool = False,
@@ -288,6 +289,7 @@ def prepare_nfip_claim_series(
     )
     claims = claims[
         claims["dateOfLoss"].notna()
+        & (claims["dateOfLoss"] >= DEFAULT_NFIP_START_DATE)
         & (claims["dateOfLoss"] <= ANALYSIS_END_DATE)
         & np.isfinite(claims["amountPaidOnBuildingClaim"])
         & (claims["amountPaidOnBuildingClaim"] >= 0)
@@ -302,7 +304,7 @@ def prepare_nfip_claim_series(
     daily = (
         claims.groupby(claims["dateOfLoss"].dt.normalize())["amount_real_2025"].sum().sort_index()
     )
-    full_index = pd.date_range(daily.index.min(), ANALYSIS_END_DATE, freq="D")
+    full_index = pd.date_range(DEFAULT_NFIP_START_DATE, ANALYSIS_END_DATE, freq="D")
     zero_filled = daily.reindex(full_index, fill_value=0.0).astype(float)
     positive_only = zero_filled[zero_filled > 0].astype(float)
     state_label = (
@@ -312,6 +314,10 @@ def prepare_nfip_claim_series(
         "cpi_series_id": CPI_U_SERIES_ID,
         "cpi_frequency": "monthly",
         "cpi_base_2025_annual_average": CPI_2025_ANNUAL_AVERAGE,
+    }
+    calendar_metadata = {
+        "analysis_start_date": DEFAULT_NFIP_START_DATE,
+        "calendar_zero_definition": "no recorded building payout in the NFIP event ledger",
     }
     display = PreparedSeries(
         name=f"{state_label} daily NFIP building payouts",
@@ -326,6 +332,7 @@ def prepare_nfip_claim_series(
             "series_role": "display",
             "series_basis": "calendar_day",
             "analysis_end_date": ANALYSIS_END_DATE,
+            **calendar_metadata,
             **cpi_metadata,
         },
     )
@@ -341,6 +348,7 @@ def prepare_nfip_claim_series(
             "unit": "2025 USD",
             "series_role": "evi",
             "series_basis": "claim_active_day",
+            "analysis_start_date": DEFAULT_NFIP_START_DATE,
             "analysis_end_date": ANALYSIS_END_DATE,
             **cpi_metadata,
         },
@@ -358,6 +366,7 @@ def prepare_nfip_claim_series(
             "series_role": "ei",
             "series_basis": "calendar_day",
             "analysis_end_date": ANALYSIS_END_DATE,
+            **calendar_metadata,
             **cpi_metadata,
         },
     )
@@ -365,6 +374,7 @@ def prepare_nfip_claim_series(
 
 
 __all__ = [
+    "DEFAULT_NFIP_START_DATE",
     "OPENFEMA_NFIP_CLAIMS_ENDPOINT",
     "download_nfip_claims_state",
     "load_monthly_cpi",

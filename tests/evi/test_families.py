@@ -7,7 +7,6 @@ import numpy as np
 from unibm.evi.spectrum import (
     _max_spectrum_curve,
     _max_spectrum_path,
-    _positive_finite_in_order,
     _weighted_slope_with_se,
     candidate_max_spectrum_scales,
     estimate_max_spectrum_evi,
@@ -27,9 +26,9 @@ from unibm.evi.tail import (
     estimate_hill_evi,
     estimate_pickands_evi,
     select_stable_integer_window,
-    select_stable_tail_window,
     wald_confidence_interval,
 )
+from unibm.evi.blocks import block_maxima
 
 
 class EviEstimatorFamilyTests(unittest.TestCase):
@@ -45,8 +44,54 @@ class EviEstimatorFamilyTests(unittest.TestCase):
             ordered,
             np.array([8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], dtype=float),
         )
-        in_order = _positive_finite_in_order(sample)
-        np.testing.assert_allclose(in_order, np.array([2.0, 5.0, 1.0, 4.0, 3.0, 6.0, 7.0, 8.0]))
+
+    def test_max_spectrum_preserves_observation_positions(self) -> None:
+        sample = np.arange(1.0, 33.0)
+        sample[0] = 0.0
+        _, block_counts = _max_spectrum_curve(sample, np.array([1, 2, 3], dtype=int))
+        np.testing.assert_array_equal(block_counts, np.array([16, 8, 4], dtype=int))
+
+        fit = estimate_max_spectrum_evi(
+            sample,
+            scales=np.array([1, 2, 3], dtype=int),
+            min_scale_count=3,
+        )
+        self.assertTrue(np.isfinite(fit.xi_hat))
+
+    def test_max_spectrum_rejects_clock_breaking_inputs(self) -> None:
+        sample = np.arange(1.0, 33.0)
+        nonfinite = sample.copy()
+        nonfinite[4] = np.nan
+        with self.assertRaisesRegex(ValueError, "finite"):
+            estimate_max_spectrum_evi(
+                nonfinite,
+                scales=np.array([1, 2, 3], dtype=int),
+                min_scale_count=3,
+            )
+
+        nonpositive_block = sample.copy()
+        nonpositive_block[:8] = 0.0
+        with self.assertRaisesRegex(ValueError, "block maxima must be strictly positive"):
+            estimate_max_spectrum_evi(
+                nonpositive_block,
+                scales=np.array([1, 2, 3], dtype=int),
+                min_scale_count=3,
+            )
+
+    def test_max_spectrum_rejects_invalid_custom_scales(self) -> None:
+        sample = np.arange(1.0, 33.0)
+        invalid_scales = (
+            np.array([1.0, 2.5, 3.0]),
+            np.array([1, 2, 2]),
+            np.array([2, 1, 3]),
+            np.array([-1, 1, 2]),
+            np.array([1, 2, 5]),
+            np.array([[1, 2, 3]]),
+        )
+        for scales in invalid_scales:
+            with self.subTest(scales=scales):
+                with self.assertRaisesRegex(ValueError, "scales"):
+                    estimate_max_spectrum_evi(sample, scales=scales, min_scale_count=3)
 
     def test_confidence_intervals_and_stable_window_selection(self) -> None:
         lo, hi = wald_confidence_interval(1.0, 0.5, ci_level=0.95)
@@ -60,24 +105,36 @@ class EviEstimatorFamilyTests(unittest.TestCase):
 
         tail_counts = candidate_tail_counts(64, min_count=8, max_fraction=0.3, num=6)
         self.assertTrue(np.all(tail_counts >= 8))
-        singleton_tail_counts = candidate_tail_counts(10, min_count=8, max_fraction=0.9, num=6)
-        np.testing.assert_array_equal(singleton_tail_counts, np.array([7], dtype=int))
+        with self.assertRaisesRegex(ValueError, "feasible tail-count grid"):
+            candidate_tail_counts(10, min_count=8)
         chosen, window, stable = select_stable_integer_window(
             np.array([8, 12, 16, 20], dtype=int),
             np.array([1.0, 1.1, 1.12, 1.11], dtype=float),
             min_window=4,
         )
-        self.assertEqual(chosen, 14)
+        self.assertEqual(chosen, 12)
         self.assertEqual((window.lo, window.hi), (8, 20))
         self.assertEqual(stable.size, 4)
-        alias_chosen, _, _ = select_stable_tail_window(
-            np.array([8, 12, 16], dtype=int),
-            np.array([1.0, 1.1, 1.2], dtype=float),
-            min_window=4,
-        )
-        self.assertEqual(alias_chosen, 12)
         with self.assertRaisesRegex(ValueError, "must be non-empty and aligned"):
             select_stable_integer_window(np.array([], dtype=int), np.array([], dtype=float))
+
+        invalid_windows = (
+            (np.array([8.0, 12.5]), np.array([1.0, 1.1]), 2),
+            (np.array([12, 8]), np.array([1.0, 1.1]), 2),
+            (np.array([8, 12]), np.array([1.0, np.nan]), 2),
+            (np.array([8, 12]), np.array([1.0, 1.1]), 1),
+        )
+        for levels, path, min_window in invalid_windows:
+            with self.subTest(levels=levels, path=path, min_window=min_window):
+                with self.assertRaises(ValueError):
+                    select_stable_integer_window(levels, path, min_window=min_window)
+
+    def test_block_maxima_rejects_invalid_block_sizes(self) -> None:
+        sample = np.arange(1.0, 9.0)
+        for block_size in (1, 2.5, np.nan, np.inf, True):
+            with self.subTest(block_size=block_size):
+                with self.assertRaisesRegex(ValueError, "block_size"):
+                    block_maxima(sample, block_size)
 
     def test_tail_and_spectrum_paths(self) -> None:
         ordered = _finite_positive(self._pareto_sample(size=512))
@@ -127,12 +184,11 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         )
         self.assertTrue(np.isnan(sparse_slope))
         self.assertTrue(np.isnan(sparse_se))
-        curve_with_empty_blocks, empty_counts = _max_spectrum_curve(
-            np.array([1.0] * 8, dtype=float),
-            np.array([10], dtype=int),
-        )
-        np.testing.assert_allclose(curve_with_empty_blocks, np.array([np.nan]), equal_nan=True)
-        np.testing.assert_array_equal(empty_counts, np.array([0], dtype=int))
+        with self.assertRaisesRegex(ValueError, "at least two complete blocks"):
+            _max_spectrum_curve(
+                np.array([1.0] * 8, dtype=float),
+                np.array([10], dtype=int),
+            )
         with self.assertRaisesRegex(ValueError, "at least three usable dyadic scales"):
             _max_spectrum_path(
                 np.array([1, 2], dtype=int),
@@ -145,6 +201,45 @@ class EviEstimatorFamilyTests(unittest.TestCase):
         )
         self.assertGreaterEqual(j_max, int(scales[-1]))
         self.assertEqual(start_scales.shape, xi_path.shape)
+
+    def test_tail_estimators_validate_custom_tail_counts(self) -> None:
+        sample = self._pareto_sample(size=64)
+        invalid_cases = (
+            (estimate_hill_evi, np.array([2.5, 4.0])),
+            (estimate_hill_evi, np.array([2, 2, 4])),
+            (estimate_hill_evi, np.array([4, 2])),
+            (estimate_hill_evi, np.array([0, 2])),
+            (estimate_hill_evi, np.array([[2, 4]])),
+            (estimate_hill_evi, np.array([64])),
+            (estimate_pickands_evi, np.array([17])),
+            (estimate_dedh_moment_evi, np.array([1])),
+        )
+        for estimator, k_values in invalid_cases:
+            with self.subTest(estimator=estimator.__name__, k_values=k_values):
+                with self.assertRaisesRegex(ValueError, "k_values"):
+                    estimator(sample, k_values=k_values)
+
+        for estimator in (estimate_hill_evi, estimate_dedh_moment_evi):
+            with self.subTest(estimator=estimator.__name__):
+                fit = estimator(sample, k_values=np.array([2, 3, 4, 5]))
+                self.assertIn(fit.selected_level, fit.path_level)
+
+        hill = estimate_hill_evi(sample, k_values=np.array([8, 12, 16, 20]))
+        self.assertEqual(hill.selected_level, 12)
+        self.assertAlmostEqual(hill.standard_error, abs(hill.xi_hat) / np.sqrt(12.0))
+
+    def test_candidate_tail_counts_rejects_invalid_grid_parameters(self) -> None:
+        invalid_calls = (
+            ("n_obs", lambda: candidate_tail_counts(64.5)),
+            ("min_count", lambda: candidate_tail_counts(64, min_count=8.5)),
+            ("max_fraction", lambda: candidate_tail_counts(64, max_fraction=0.0)),
+            ("max_fraction", lambda: candidate_tail_counts(64, max_fraction=1.5)),
+            ("num", lambda: candidate_tail_counts(64, num=0)),
+        )
+        for parameter, call in invalid_calls:
+            with self.subTest(parameter=parameter):
+                with self.assertRaisesRegex(ValueError, parameter):
+                    call()
 
     def test_public_estimator_families_return_finite_estimates(self) -> None:
         sample = self._pareto_sample()

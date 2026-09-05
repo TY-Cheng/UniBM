@@ -8,7 +8,7 @@ import numpy as np
 
 
 def _as_finite_1d(vec: np.ndarray | list[float]) -> np.ndarray:
-    """Return a one-dimensional finite float array."""
+    """Flatten an array-like sample and omit its non-finite observations."""
     arr = np.asarray(vec, dtype=float).reshape(-1)
     return arr[np.isfinite(arr)]
 
@@ -29,7 +29,7 @@ def _singleton_cdf_estimator(point: float) -> Callable[[float | np.ndarray], flo
 
     def estimate_single(q: float | np.ndarray) -> float | np.ndarray:
         q_arr = np.asarray(q, dtype=float)
-        result = np.where(q_arr >= point, 1.0, 0.0)
+        result = np.where(np.isnan(q_arr), np.nan, np.where(q_arr >= point, 1.0, 0.0))
         return float(result.item()) if np.ndim(result) == 0 else result
 
     return estimate_single
@@ -38,7 +38,7 @@ def _singleton_cdf_estimator(point: float) -> Callable[[float | np.ndarray], flo
 def empirical_cdf(
     vec: np.ndarray | list[float],
 ) -> Callable[[float | np.ndarray], float | np.ndarray]:
-    """Return an empirical marginal CDF estimator based on scaled ranks."""
+    """Return a scaled-rank CDF after flattening and omitting non-finite input."""
     arr = np.sort(_as_finite_1d(vec))
     if arr.size == 0:
         return _empty_cdf_estimator()
@@ -50,7 +50,9 @@ def empirical_cdf(
         q_arr = np.asarray(q, dtype=float)
         q_flat = q_arr.reshape(-1)
         counts = np.searchsorted(arr, q_flat, side="right").astype(float)
-        result = (counts / normalizer).reshape(q_arr.shape)
+        scaled = counts / normalizer
+        scaled[np.isnan(q_flat)] = np.nan
+        result = scaled.reshape(q_arr.shape)
         return float(result.item()) if result.ndim == 0 else result
 
     return estimate

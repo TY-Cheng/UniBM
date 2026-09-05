@@ -8,7 +8,7 @@ from .._block_grid import validate_block_sizes
 from .._validation import as_1d_float_array, warn_on_negative_values, warn_on_nonpositive_values
 from .._window_ops import sliding_window_extreme_valid
 from .models import BlockSummaryCurve
-from .summaries import summarize_block_maxima
+from .summaries import _validate_quantile, summarize_block_maxima
 
 
 def block_maxima(
@@ -18,7 +18,14 @@ def block_maxima(
 ) -> np.ndarray:
     """Compute sliding or disjoint block maxima."""
     arr = as_1d_float_array(vec)
-    if block_size < 2 or arr.size < block_size:
+    if (
+        isinstance(block_size, (bool, np.bool_))
+        or not isinstance(block_size, (int, np.integer))
+        or block_size < 2
+    ):
+        raise ValueError("block_size must be a finite non-boolean integer at least 2.")
+    block_size = int(block_size)
+    if arr.size < block_size:
         return np.asarray([], dtype=float)
     if sliding:
         return sliding_window_extreme_valid(arr, block_size, reducer="max")
@@ -41,6 +48,9 @@ def block_summary_curve(
 ) -> BlockSummaryCurve:
     """Summarize block maxima over multiple block sizes."""
     arr = as_1d_float_array(vec)
+    if target not in {"quantile", "mean", "mode"}:
+        raise ValueError(f"Unsupported target: {target}")
+    resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
     warn_on_negative_values(arr, context="block_summary_curve", stacklevel=3)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
     values = np.empty(block_sizes.size, dtype=float)
@@ -48,7 +58,11 @@ def block_summary_curve(
     for idx, block_size in enumerate(block_sizes):
         maxima = block_maxima(vec=arr, block_size=int(block_size), sliding=sliding)
         counts[idx] = maxima.size
-        values[idx] = summarize_block_maxima(maxima, target=target, quantile=quantile)
+        values[idx] = summarize_block_maxima(
+            maxima,
+            target=target,
+            quantile=quantile,
+        )
     excluded = values[np.isfinite(values) & (values <= 0) & (counts > 0)]
     if excluded.size:
         warn_on_nonpositive_values(
@@ -59,6 +73,9 @@ def block_summary_curve(
         )
     positive_mask = np.isfinite(values) & (values > 0) & (counts > 0)
     return BlockSummaryCurve(
+        target=target,
+        quantile=resolved_quantile,
+        sliding=bool(sliding),
         block_sizes=block_sizes,
         counts=counts,
         values=values,

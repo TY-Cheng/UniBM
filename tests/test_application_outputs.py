@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,6 +34,7 @@ from application.outputs import (
     application_method_rows,
     application_selection_sensitivity_table,
     application_streamflow_gev_check_table,
+    application_summary_record,
     application_summary_table,
     application_usgs_screening_disclosure_table,
     write_application_figures,
@@ -40,6 +42,7 @@ from application.outputs import (
 )
 from application.specs import APPLICATION_DESIGN_LIFE_TAUS, APPLICATION_RANDOM_STATE
 from benchmark.design import fit_methods_for_series
+from unibm.ei import ExtremalIndexEstimate
 
 
 def _make_prepared(series: pd.Series, *, name: str, provider: str, role: str) -> PreparedSeries:
@@ -103,7 +106,10 @@ def _make_nfip_bundle() -> object:
     rng = np.random.default_rng(11)
     index = pd.date_range("2005-01-01", periods=365 * 20, freq="D")
     zero_filled = pd.Series(0.0, index=index, dtype=float)
-    active_mask = rng.random(index.size) < 0.07
+    cluster_starts = rng.random(index.size) < 0.025
+    active_mask = np.zeros(index.size, dtype=bool)
+    for lag in range(4):
+        active_mask[lag:] |= cluster_starts[: index.size - lag]
     zero_filled.loc[active_mask] = (rng.pareto(1.8, active_mask.sum()) + 1.0) * 1000.0
     positive_only = zero_filled[zero_filled > 0.0]
     inputs = ApplicationPreparedInputs(
@@ -136,11 +142,24 @@ def _make_nfip_bundle() -> object:
 
 
 class ApplicationOutputTests(unittest.TestCase):
+    def test_application_summary_records_evi_regression_provenance(self) -> None:
+        record = application_summary_record(_make_evi_only_bundle())
+
+        self.assertEqual(record["evi_regression_policy"], "FGLS")
+        self.assertEqual(record["evi_regression"], "FGLS")
+        self.assertEqual(record["evi_ci_variant"], "bootstrap_cov")
+        self.assertEqual(record["evi_bootstrap_reps_policy"], "adaptive")
+        self.assertIn(record["evi_bootstrap_reps_used"], (128, 256, 512, 768, 1024))
+        self.assertEqual(
+            record["evi_bootstrap_precision_met"],
+            _make_evi_only_bundle().evi_fit.bootstrap_precision_met,
+        )
+
     def test_nfip_active_day_rate_uses_retained_calendar_window(self) -> None:
         bundle = _make_nfip_bundle()
         display = bundle.prepared.display.series
         evi = bundle.prepared.evi.series
-        expected_years = (display.index.max() - display.index.min()).days / 365.25
+        expected_years = ((display.index.max() - display.index.min()).days + 1) / 365.25
 
         self.assertLess(evi.index.max(), display.index.max())
         self.assertAlmostEqual(
@@ -187,6 +206,43 @@ class ApplicationOutputTests(unittest.TestCase):
                 "ferro_segers",
             },
         )
+        for row in rows:
+            estimate = bundle.ei_method_map[row["method"]]
+            self.assertEqual(row["bootstrap_reps_policy"], estimate.bootstrap_reps_policy)
+            self.assertEqual(row["bootstrap_reps_used"], estimate.bootstrap_reps_used)
+            self.assertEqual(row["bootstrap_precision_met"], estimate.bootstrap_precision_met)
+
+    def test_application_ei_method_rows_expose_regression_scale_standard_error(self) -> None:
+        pooled = ExtremalIndexEstimate(
+            method="bb_sliding_fgls",
+            theta_hat=0.6,
+            confidence_interval=(0.4, 0.8),
+            standard_error=0.06,
+            z_standard_error=0.1,
+        )
+        threshold = ExtremalIndexEstimate(
+            method="k_gaps",
+            theta_hat=0.5,
+            confidence_interval=(0.3, 0.7),
+            standard_error=0.1,
+        )
+        bundle = SimpleNamespace(
+            spec=SimpleNamespace(key="example", provider="synthetic", formal_ei=True),
+            ei_bb_sliding_fgls=pooled,
+            ei_method_map={
+                "bb_sliding_fgls": pooled,
+                "northrop_sliding_fgls": pooled,
+                "k_gaps": threshold,
+                "ferro_segers": threshold,
+            },
+        )
+
+        rows = application_ei_method_rows(bundle)
+
+        pooled_row = next(row for row in rows if row["method"] == "bb_sliding_fgls")
+        threshold_row = next(row for row in rows if row["method"] == "k_gaps")
+        self.assertEqual(pooled_row["z_standard_error"], 0.1)
+        self.assertTrue(np.isnan(threshold_row["z_standard_error"]))
 
     def test_application_ei_method_rows_skip_evi_only_applications(self) -> None:
         bundle = _make_evi_only_bundle()
@@ -320,7 +376,7 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(table.shape[0], 1)
         self.assertEqual(table.iloc[0]["Application"], "Synthetic streamflow")
-        self.assertIn("Water-year maxima count", table.columns)
+        self.assertIn("Calendar-year maxima count", table.columns)
         self.assertIn("GEV 10y return level", table.columns)
         self.assertNotEqual(table.iloc[0]["GEV 10y return level"], "NA")
         self.assertIn("[", table.iloc[0]["UniBM 10y design-life level"])
@@ -449,6 +505,9 @@ class ApplicationOutputTests(unittest.TestCase):
         self.assertTrue(all(np.isclose(slope, bundle.evi_fit.slope) for slope in slopes))
         headline = next(view for view in views if view.headline)
         self.assertTrue(np.isclose(headline.intercept, bundle.evi_fit.intercept))
+        one_year = headline.design_life_levels(np.asarray([1.0]), observations_per_year=365.25)[0]
+        expected = np.exp(headline.intercept + headline.slope * np.log(366.0))
+        self.assertAlmostEqual(one_year, expected)
         self.assertTrue(
             any(not np.isclose(view.intercept, headline.intercept) for view in views[1:])
         )
@@ -642,6 +701,11 @@ class ApplicationOutputTests(unittest.TestCase):
             registry["phoenix_hot_dry_severity"].design_life_level_yscale,
             "log",
         )
+        self.assertAlmostEqual(
+            registry["houston_hobby_precipitation"].observations_per_year,
+            14_454 / 79,
+        )
+        self.assertEqual(registry["phoenix_hot_dry_severity"].observations_per_year, 214.0)
 
     def test_nfip_application_specs_use_log_annual_max_time_series_scale(self) -> None:
         from application.specs import spec_by_key

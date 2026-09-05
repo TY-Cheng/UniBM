@@ -72,13 +72,69 @@ def candidate_tail_counts(
     max_fraction: float = 0.25,
     num: int = 24,
 ) -> np.ndarray:
-    """Construct a log-spaced threshold grid for raw-sample tail estimators."""
-    upper = int(min(max(min_count + 2, int(np.floor(max_fraction * n_obs))), n_obs - 3))
-    lower = int(min(min_count, upper))
-    if upper <= lower:
+    """Construct a log-spaced tail-count grid or fail if the bounds are infeasible."""
+    for name, value, minimum in (
+        ("n_obs", n_obs, 2),
+        ("min_count", min_count, 1),
+        ("num", num, 1),
+    ):
+        if (
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, np.integer))
+            or value < minimum
+        ):
+            raise ValueError(f"{name} must be an integer at least {minimum}.")
+    if isinstance(max_fraction, (bool, np.bool_)):
+        raise ValueError("max_fraction must be finite and lie in (0, 1].")
+    try:
+        max_fraction = float(max_fraction)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_fraction must be finite and lie in (0, 1].") from exc
+    if not np.isfinite(max_fraction) or not 0.0 < max_fraction <= 1.0:
+        raise ValueError("max_fraction must be finite and lie in (0, 1].")
+    n_obs = int(n_obs)
+    min_count = int(min_count)
+    num = int(num)
+    lower = int(min_count)
+    upper = int(min(np.floor(max_fraction * n_obs), n_obs - 1))
+    if upper < lower:
+        raise ValueError("No feasible tail-count grid satisfies min_count and max_fraction.")
+    if upper == lower:
         return np.array([lower], dtype=int)
     grid = np.unique(np.round(np.geomspace(lower, upper, num=num)).astype(int))
     return grid[(grid >= lower) & (grid <= upper)]
+
+
+def _validate_tail_counts(
+    k_values: np.ndarray,
+    *,
+    n_obs: int,
+    minimum: int = 1,
+    maximum: int | None = None,
+) -> np.ndarray:
+    """Validate a strictly increasing integer tail-count grid."""
+    try:
+        raw = np.asarray(k_values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k_values must be a one-dimensional numeric sequence.") from exc
+    if raw.ndim != 1 or raw.size == 0:
+        raise ValueError("k_values must be a non-empty one-dimensional sequence.")
+    if np.iscomplexobj(raw) or raw.dtype.kind == "b":
+        raise ValueError("k_values must contain finite integer values.")
+    try:
+        numeric = raw.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k_values must contain finite integer values.") from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
+        raise ValueError("k_values must contain finite integer values.")
+    if np.any(numeric < minimum):
+        raise ValueError(f"k_values must be at least {minimum} for this estimator.")
+    if np.any(np.diff(numeric) <= 0):
+        raise ValueError("k_values must be strictly increasing with no duplicates.")
+    upper = n_obs - 1 if maximum is None else int(maximum)
+    if np.any(numeric > upper):
+        raise ValueError(f"k_values cannot exceed {upper} for this estimator and sample.")
+    return numeric.astype(int)
 
 
 def _finite_positive(sample: np.ndarray) -> np.ndarray:
@@ -183,11 +239,40 @@ def select_stable_integer_window(
     *,
     min_window: int = 4,
 ) -> tuple[int, SelectionWindow, np.ndarray]:
-    """Pick a stable integer-indexed window using variability and curvature."""
-    if levels.size != path_xi.size or levels.size == 0:
+    """Pick a stable window and return its lower medoid from the observed grid."""
+    try:
+        raw_levels = np.asarray(levels)
+        path_xi = np.asarray(path_xi, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("levels and path_xi must be one-dimensional numeric arrays.") from exc
+    if raw_levels.ndim != 1 or path_xi.ndim != 1:
+        raise ValueError("levels and path_xi must be one-dimensional arrays.")
+    if raw_levels.size != path_xi.size or raw_levels.size == 0:
         raise ValueError("levels and path_xi must be non-empty and aligned.")
+    if raw_levels.dtype.kind == "b" or np.iscomplexobj(raw_levels):
+        raise ValueError("levels must contain finite strictly increasing integers.")
+    try:
+        numeric_levels = raw_levels.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("levels must contain finite strictly increasing integers.") from exc
+    if (
+        not np.all(np.isfinite(numeric_levels))
+        or not np.all(numeric_levels == np.floor(numeric_levels))
+        or np.any(np.diff(numeric_levels) <= 0)
+    ):
+        raise ValueError("levels must contain finite strictly increasing integers.")
+    if not np.all(np.isfinite(path_xi)):
+        raise ValueError("path_xi must contain only finite values.")
+    if (
+        isinstance(min_window, (bool, np.bool_))
+        or not isinstance(min_window, (int, np.integer))
+        or min_window < 2
+    ):
+        raise ValueError("min_window must be an integer at least 2.")
+    levels = numeric_levels.astype(int)
+    min_window = int(min_window)
     if levels.size <= min_window:
-        center = int(np.median(levels))
+        center = int(levels[(levels.size - 1) // 2])
         window = SelectionWindow(int(levels[0]), int(levels[-1]))
         return center, window, path_xi
 
@@ -207,19 +292,9 @@ def select_stable_integer_window(
     best = windows[int(np.argmin(scores))]
     best_k = levels[best]
     best_xi = path_xi[best]
-    chosen_k = int(np.round(np.median(best_k)))
+    chosen_k = int(best_k[(best_k.size - 1) // 2])
     window = SelectionWindow(int(best_k[0]), int(best_k[-1]))
     return chosen_k, window, best_xi
-
-
-def select_stable_tail_window(
-    k_values: np.ndarray,
-    path_xi: np.ndarray,
-    *,
-    min_window: int = 4,
-) -> tuple[int, SelectionWindow, np.ndarray]:
-    """Backward-compatible wrapper for ``k``-indexed tail paths."""
-    return select_stable_integer_window(k_values, path_xi, min_window=min_window)
 
 
 def _select_from_path(
@@ -243,7 +318,7 @@ def _select_from_path(
         xi_finite,
         min_window=selection_min_window,
     )
-    chosen_idx = int(np.argmin(np.abs(level_finite - selected_level)))
+    chosen_idx = int(np.flatnonzero(level_finite == selected_level)[0])
     xi_hat = float(xi_finite[chosen_idx])
     standard_error = (
         _normalize_standard_error(se_fn(xi_hat, selected_level))
@@ -271,10 +346,11 @@ def estimate_hill_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with Hill's raw-sample tail estimator."""
+    """Estimate ``xi`` with Hill, using an automatic grid when ``k_values`` is absent."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
+    k_values = _validate_tail_counts(k_values, n_obs=ordered.size)
     path_xi = _hill_path(ordered, k_values)
     return _select_from_path("hill_raw", k_values, path_xi, se_fn=_hill_standard_error)
 
@@ -284,10 +360,15 @@ def estimate_pickands_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with the Pickands raw-sample tail estimator."""
+    """Estimate ``xi`` with Pickands over valid tail counts satisfying ``4k <= n``."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
+    k_values = _validate_tail_counts(
+        k_values,
+        n_obs=ordered.size,
+        maximum=ordered.size // 4,
+    )
     path_xi = _pickands_path(ordered, k_values)
     return _select_from_path("pickands_raw", k_values, path_xi, se_fn=_pickands_standard_error)
 
@@ -297,10 +378,11 @@ def estimate_dedh_moment_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with the DEdH moment estimator."""
+    """Estimate ``xi`` with DEdH over an automatic or explicit tail-count grid."""
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
+    k_values = _validate_tail_counts(k_values, n_obs=ordered.size, minimum=2)
     path_xi = _dedh_moment_path(ordered, k_values)
     return _select_from_path(
         "dedh_moment_raw",
@@ -328,6 +410,5 @@ __all__ = [
     "estimate_hill_evi",
     "estimate_pickands_evi",
     "select_stable_integer_window",
-    "select_stable_tail_window",
     "wald_confidence_interval",
 ]

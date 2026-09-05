@@ -6,11 +6,34 @@ they do not. All figures are generated locally from the repository's fixed-cutof
 site performs no data download or statistical computation.
 </p>
 
+The paper's four main cases are Texas and Florida streamflow and NFIP claims.
+The two GHCN cases are broader severity-only illustrations.
+
+**Refreshed with the current defaults.** These figures and numbers were
+recomputed from the same frozen inputs using fixed shrinkage `0.37`, the original
+selected-window rules, and adaptive R at `128/256/512/768/1024`. No provider
+records were downloaded and no stations, analysis windows, or CPI inputs changed.
+
+| Case | EVI R | BB-sliding EI R | Northrop-sliding EI R |
+|---|---:|---:|---:|
+| Texas streamflow | 256 | 256 | 256 |
+| Florida streamflow | 256 | 256 | 512 |
+| Texas NFIP | 128 | 256 | 256 |
+| Florida NFIP | 512 | 256 | 256 |
+| Houston precipitation | 256 | — | — |
+| Phoenix hot–dry severity | 128 | — | — |
+
+All listed fits met the 10%-of-statistical-SE MCSE criterion for the parameter
+estimate and its interval endpoints. This controls finite-bootstrap numerical
+precision conditional on the selected window; it does **not** establish 95%
+empirical coverage or certify the numerical precision of extrapolated
+design-life levels. Explicit fixed integer R remains supported by the API.
+
 <div class="unibm-domain-grid">
   <a class="unibm-domain-card unibm-domain-climate" href="climate-extremes/">
     <span class="unibm-domain-index">GHCN · 2 cases</span>
     <h3>Climate extremes</h3>
-    <p>Wet-season precipitation in Houston and compound hot–dry severity in Phoenix.</p>
+    <p>June–November precipitation in Houston and April–October hot–dry severity in Phoenix.</p>
     <span class="unibm-domain-meta">Severity branch · no formal EI</span>
   </a>
   <a class="unibm-domain-card unibm-domain-streamflow" href="streamflow/">
@@ -38,5 +61,5 @@ site performs no data download or statistical computation.
 All intervals shown here are conditional on the selected block-size window and fixed workflow
 defaults. They do not include post-selection uncertainty or nonstationary future change.
 
-The shared analysis cutoff is **2025-12-31**. See [Validation](../validation.md) for the synthetic
-benchmark evidence that precedes these real-data illustrations.
+The shared analysis cutoff is **2025-12-31**. See [Validation](../validation.md)
+for synthetic benchmark evidence, with its separate data and scope.

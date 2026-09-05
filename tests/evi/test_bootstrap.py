@@ -62,6 +62,12 @@ class EviBootstrapTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "reps must be at least 1"):
             draw_circular_block_bootstrap_samples(self._positive_sample(), reps=0)
+        with self.assertRaisesRegex(ValueError, "one-dimensional"):
+            circular_block_summary_bootstrap(
+                np.ones((8, 8), dtype=float),
+                np.array([4, 8], dtype=int),
+                reps=1,
+            )
 
     def test_sliding_disjoint_and_segment_block_maxima(self) -> None:
         segment = np.array([1.0, 3.0, 2.0, 5.0], dtype=float)
@@ -102,6 +108,9 @@ class EviBootstrapTests(unittest.TestCase):
         evaluated = evaluate_block_summary_bootstrap_backbone(backbone, target="quantile")
         self.assertEqual(tuple(evaluated["block_sizes"]), (4, 8, 16))
         self.assertIsNotNone(evaluated["covariance"])
+        self.assertEqual(evaluated["target"], "quantile")
+        self.assertEqual(evaluated["quantile"], 0.5)
+        self.assertIs(evaluated["sliding"], True)
 
     def test_vectorized_quantile_mean_and_mode_match_loop_reference(self) -> None:
         sample = self._positive_sample(size=512, seed=77)
@@ -146,6 +155,21 @@ class EviBootstrapTests(unittest.TestCase):
             dtype=float,
         )
         observed = _evaluate_mode_bootstrap_column_batched(selected)
+        np.testing.assert_allclose(observed, expected, equal_nan=True)
+
+    def test_batched_mode_column_matches_reference_with_tiny_memory_budget(self) -> None:
+        selected = self._positive_sample(size=120, seed=91).reshape(3, 40)
+        selected[1, ::7] = np.nan
+        expected = np.array(
+            [summarize_block_maxima(row, target="mode", quantile=0.5) for row in selected],
+            dtype=float,
+        )
+
+        observed = _evaluate_mode_bootstrap_column_batched(
+            selected,
+            max_kernel_bytes=256 * np.dtype(float).itemsize,
+        )
+
         np.testing.assert_allclose(observed, expected, equal_nan=True)
 
     def test_warning_and_multi_target_paths(self) -> None:

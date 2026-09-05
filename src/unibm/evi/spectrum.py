@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .._validation import positive_finite_values
+from .._validation import as_1d_float_array
 from .tail import ExternalXiEstimate, _normalize_standard_error, _select_from_path
 
 
@@ -23,14 +23,40 @@ def candidate_max_spectrum_scales(
     return scales[n_blocks >= min_blocks]
 
 
-def _positive_finite_in_order(sample: np.ndarray) -> np.ndarray:
-    """Return positive finite observations in their original time order."""
-    return positive_finite_values(
-        sample,
-        context="spectrum xi estimators",
-        minimum_size=8,
-        stacklevel=3,
-    )
+def _validate_spectrum_series(sample: np.ndarray) -> np.ndarray:
+    """Validate a max-spectrum series without changing its temporal positions."""
+    vec = as_1d_float_array(sample)
+    if not np.all(np.isfinite(vec)):
+        raise ValueError("Max-spectrum requires every observation to be finite.")
+    if vec.size < 8:
+        raise ValueError("Max-spectrum requires at least eight observations.")
+    return vec
+
+
+def _validate_spectrum_scales(scales: np.ndarray, *, n_obs: int) -> np.ndarray:
+    """Validate dyadic scale exponents against the observed series length."""
+    try:
+        raw = np.asarray(scales)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("scales must be a one-dimensional numeric sequence.") from exc
+    if raw.ndim != 1 or raw.size == 0:
+        raise ValueError("scales must be a non-empty one-dimensional sequence.")
+    if np.iscomplexobj(raw) or raw.dtype.kind == "b":
+        raise ValueError("scales must contain finite integer values.")
+    try:
+        numeric = raw.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("scales must contain finite integer values.") from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
+        raise ValueError("scales must contain finite integer values.")
+    if np.any(numeric < 0):
+        raise ValueError("scales must be non-negative.")
+    if np.any(np.diff(numeric) <= 0):
+        raise ValueError("scales must be strictly increasing with no duplicates.")
+    max_scale = int(np.floor(np.log2(n_obs // 2)))
+    if np.any(numeric > max_scale):
+        raise ValueError("scales must each provide at least two complete blocks.")
+    return numeric.astype(int)
 
 
 def _weighted_slope_with_se(
@@ -71,18 +97,17 @@ def _max_spectrum_curve(
     scales: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute the max-spectrum ordinates and effective block counts."""
-    vec = _positive_finite_in_order(sample)
+    vec = _validate_spectrum_series(sample)
+    scales = _validate_spectrum_scales(scales, n_obs=vec.size)
     y_values: list[float] = []
     n_blocks: list[int] = []
-    for scale in np.asarray(scales, dtype=int):
+    for scale in scales:
         block_size = 2 ** int(scale)
         block_count = int(vec.size // block_size)
-        if block_count <= 0:
-            y_values.append(np.nan)
-            n_blocks.append(0)
-            continue
         trimmed = vec[: block_count * block_size].reshape(block_count, block_size)
         maxima = np.max(trimmed, axis=1)
+        if np.any(maxima <= 0):
+            raise ValueError("Max-spectrum block maxima must be strictly positive.")
         y_values.append(float(np.mean(np.log2(maxima))))
         n_blocks.append(block_count)
     return np.asarray(y_values, dtype=float), np.asarray(n_blocks, dtype=int)
@@ -118,10 +143,10 @@ def estimate_max_spectrum_evi(
     min_scale_count: int = 3,
 ) -> ExternalXiEstimate:
     """Estimate ``xi`` with the dependent max-spectrum estimator."""
-    vec = _positive_finite_in_order(sample)
+    vec = _validate_spectrum_series(sample)
     if scales is None:
         scales = candidate_max_spectrum_scales(vec.size, min_scale=1, min_blocks=2)
-    scales = np.asarray(scales, dtype=int)
+    scales = _validate_spectrum_scales(scales, n_obs=vec.size)
     y_values, n_blocks = _max_spectrum_curve(vec, scales)
     start_scales, xi_path, j_max = _max_spectrum_path(
         scales,
@@ -155,7 +180,6 @@ def estimate_max_spectrum_evi(
 __all__ = [
     "_max_spectrum_curve",
     "_max_spectrum_path",
-    "_positive_finite_in_order",
     "_weighted_slope_with_se",
     "candidate_max_spectrum_scales",
     "estimate_max_spectrum_evi",

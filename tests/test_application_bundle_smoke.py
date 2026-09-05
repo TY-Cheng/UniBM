@@ -53,7 +53,10 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
         rs = np.random.default_rng(11)
         index = pd.date_range("2005-01-01", periods=365 * 25, freq="D")
         zero_filled = pd.Series(0.0, index=index, dtype=float)
-        active_mask = rs.random(index.size) < 0.08
+        cluster_starts = rs.random(index.size) < 0.025
+        active_mask = np.zeros(index.size, dtype=bool)
+        for lag in range(4):
+            active_mask[lag:] |= cluster_starts[: index.size - lag]
         zero_filled.loc[active_mask] = (rs.pareto(1.8, active_mask.sum()) + 1.0) * 1000.0
         positive_only = zero_filled[zero_filled > 0.0]
 
@@ -105,7 +108,10 @@ class ApplicationBundleSmokeTests(unittest.TestCase):
         rs = np.random.default_rng(29)
         index = pd.date_range("1990-01-01", periods=365 * 25, freq="D")
         zero_filled = pd.Series(0.0, index=index, dtype=float)
-        active_mask = rs.random(index.size) < 0.25
+        cluster_starts = rs.random(index.size) < 0.08
+        active_mask = np.zeros(index.size, dtype=bool)
+        for lag in range(4):
+            active_mask[lag:] |= cluster_starts[: index.size - lag]
         zero_filled.loc[active_mask] = rs.gamma(shape=2.5, scale=4.0, size=active_mask.sum())
 
         prepared = _make_prepared(

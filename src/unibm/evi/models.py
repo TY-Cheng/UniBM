@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -12,6 +12,9 @@ import numpy as np
 class BlockSummaryCurve:
     """Block-maxima summaries evaluated over a block-size grid."""
 
+    target: str
+    quantile: float | None
+    sliding: bool
     block_sizes: np.ndarray
     counts: np.ndarray
     values: np.ndarray
@@ -54,16 +57,18 @@ class PlateauWindow:
 class ScalingFit:
     """Full output of a UniBM log-log block-summary regression.
 
-    Most users should start with ``slope`` as the headline ``xi`` estimate,
-    ``confidence_interval`` for uncertainty, ``plateau_bounds`` for the selected
-    regression window, and ``bootstrap`` for any covariance-aware fit metadata.
-    The remaining fields retain the full observed curve and fitted window for
-    plotting, diagnostics, and workflow-side reuse.
+    Most users should start with ``slope`` as the headline ``xi`` estimate and
+    ``confidence_interval`` for uncertainty. ``regression_policy``,
+    ``regression``, and ``ci_variant`` distinguish the requested policy from the
+    estimator and interval construction actually used.
     """
 
     target: str
     quantile: float
     sliding: bool
+    regression_policy: Literal["OLS", "FGLS", "AUTO"]
+    regression: Literal["OLS", "FGLS"]
+    ci_variant: Literal["hc0", "bootstrap_cov"]
     intercept: float
     slope: float
     standard_error: float
@@ -72,6 +77,19 @@ class ScalingFit:
     plateau: PlateauWindow
     cov_beta: np.ndarray
     bootstrap: dict[str, Any] | None = None
+    covariance_shrinkage_policy: str | None = None
+    covariance_shrinkage: float | None = None
+    covariance_condition_number_raw: float | None = None
+    covariance_condition_number_regularized: float | None = None
+    bootstrap_block_length_policy: str | None = None
+    bootstrap_block_length: int | None = None
+    bootstrap_reps_requested: int | None = None
+    bootstrap_reps_used: int | None = None
+    bootstrap_reps_policy: str | None = None
+    bootstrap_precision_met: bool | None = None
+    bootstrap_mcse: tuple[float, ...] = ()
+    bootstrap_mcse_max_ratio: float | None = None
+    bootstrap_mcse_targets: tuple[str, ...] = ()
 
     @property
     def block_sizes(self) -> np.ndarray:

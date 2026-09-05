@@ -51,14 +51,13 @@ Package documentation is available at:
 
 - [https://ty-cheng.github.io/UniBM/](https://ty-cheng.github.io/UniBM/)
 
-Useful local docs commands:
+Useful local docs command:
 
 ```bash
-just docs
+uv run mkdocs serve
 ```
 
-`just docs` builds the static site under `site/` and then launches the local
-preview server.
+This builds the static site under `site/` and launches the local preview server.
 
 UniBM is not yet released on PyPI. The documentation therefore describes source
 installation until a separately reviewed package release is approved.
@@ -71,7 +70,6 @@ The stable top-level entrypoints are:
 - `just check-full`
 - `just data`
 - `just refresh-data`
-- `just docs`
 - `just full`
 
 `just check` runs tests affected by local changes in parallel, then checks all
@@ -91,8 +89,20 @@ import numpy as np
 from unibm import estimate_design_life_level, estimate_evi_quantile
 
 sample = np.random.default_rng(7).pareto(2.0, 4096) + 1.0
-fit = estimate_evi_quantile(sample, quantile=0.5, sliding=True, bootstrap_reps=120)
+fit = estimate_evi_quantile(
+    sample,
+    regression="FGLS",
+    quantile=0.5,
+    sliding=True,
+    bootstrap_reps="adaptive",
+)
 design_life = estimate_design_life_level(fit, years=np.array([10.0, 50.0]))
 ```
 
 See the docs site for API details, returned objects, and worked examples.
+
+The example uses the default adaptive policy with checkpoints 128, 256, 512,
+768, and 1024. An explicit integer such as `bootstrap_reps=480` instead fixes R. Inspect
+`bootstrap_reps_used` and `bootstrap_precision_met`: reaching the cap does not
+imply precision was met. Adaptive R controls numerical Monte Carlo error, not
+statistical CI width or coverage. Both EVI/EI FGLS defaults use fixed shrinkage 0.37.

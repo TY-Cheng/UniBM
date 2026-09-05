@@ -36,7 +36,7 @@ class GhcnPrepTests(unittest.TestCase):
             downloaded = read_ghcn_station_csv(path)
         self.assertEqual(downloaded["date"].max(), pd.Timestamp("2025-12-31"))
 
-    def test_precipitation_uses_complete_season_suffix_and_keeps_dry_days(self) -> None:
+    def test_precipitation_uses_covered_season_suffix_and_keeps_dry_days(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "houston.csv"
             missing = pd.Timestamp("2023-08-15")
@@ -52,21 +52,25 @@ class GhcnPrepTests(unittest.TestCase):
         expected = pd.DatetimeIndex(
             [
                 date
-                for date in pd.date_range("2024-06-01", "2025-11-30", freq="D")
-                if date.month in {6, 7, 8, 9, 10, 11}
+                for date in pd.date_range("2022-06-01", "2025-11-30", freq="D")
+                if date.month in {6, 7, 8, 9, 10, 11} and date != missing
             ]
         )
         self.assertTrue(prepared.series.index.equals(expected))
-        self.assertEqual(len(prepared.series), 2 * 183)
+        self.assertEqual(len(prepared.series), 4 * 183 - 1)
         self.assertTrue((prepared.series == 0).any())
-        self.assertEqual(prepared.annual_maxima.index.tolist(), [2024, 2025])
-        self.assertEqual(prepared.metadata["season_start_year"], 2024)
+        self.assertEqual(prepared.annual_maxima.index.tolist(), [2022, 2023, 2024, 2025])
+        self.assertEqual(prepared.metadata["season_start_year"], 2022)
         self.assertEqual(prepared.metadata["maxima_period"], "season")
+        self.assertEqual(prepared.metadata["coverage_threshold"], 0.97)
+        self.assertEqual(prepared.metadata["coverage_expected_days"], 4 * 183)
+        self.assertEqual(prepared.metadata["coverage_valid_days"], 4 * 183 - 1)
+        self.assertAlmostEqual(prepared.metadata["coverage_fraction"], (4 * 183 - 1) / (4 * 183))
 
-    def test_hot_dry_uses_complete_inputs_full_lookback_and_keeps_zero_days(self) -> None:
+    def test_hot_dry_gates_final_rolling_positions_and_keeps_zero_days(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "phoenix.csv"
-            missing_precipitation = pd.Timestamp("2023-03-15")
+            missing_precipitation = pd.Timestamp("2023-10-30")
             lines: list[str] = []
             for date in pd.date_range("2022-01-01", "2025-12-31", freq="D"):
                 tmax = 280 + (date.dayofyear % 30) + 2 * (date.year - 2022)
@@ -81,16 +85,37 @@ class GhcnPrepTests(unittest.TestCase):
         expected = pd.DatetimeIndex(
             [
                 date
-                for date in pd.date_range("2024-04-01", "2025-10-31", freq="D")
+                for date in pd.date_range("2022-04-01", "2025-10-31", freq="D")
                 if date.month in {4, 5, 6, 7, 8, 9, 10}
+                and date not in {missing_precipitation, pd.Timestamp("2023-10-31")}
             ]
         )
         self.assertTrue(prepared.series.index.equals(expected))
-        self.assertEqual(len(prepared.series), 2 * 214)
+        self.assertEqual(len(prepared.series), 4 * 214 - 2)
         self.assertTrue((prepared.series == 0).any())
-        self.assertEqual(prepared.annual_maxima.index.tolist(), [2024, 2025])
-        self.assertEqual(prepared.metadata["season_start_year"], 2024)
+        self.assertEqual(prepared.annual_maxima.index.tolist(), [2022, 2023, 2024, 2025])
+        self.assertEqual(prepared.metadata["season_start_year"], 2022)
         self.assertEqual(prepared.metadata["rolling_min_periods"], 30)
+        self.assertEqual(prepared.metadata["coverage_threshold"], 0.97)
+        self.assertEqual(prepared.metadata["coverage_expected_days"], 4 * 214)
+        self.assertEqual(prepared.metadata["coverage_valid_days"], 4 * 214 - 2)
+        self.assertAlmostEqual(prepared.metadata["coverage_fraction"], (4 * 214 - 2) / (4 * 214))
+
+    def test_precipitation_starts_after_a_season_below_the_coverage_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "houston.csv"
+            missing = set(pd.date_range("2023-06-01", periods=6, freq="D"))
+            lines = [
+                f"USW00012918,{date:%Y%m%d},PRCP,10,,,,\n"
+                for date in pd.date_range("2022-01-01", "2025-12-31", freq="D")
+                if date not in missing
+            ]
+            path.write_text("".join(lines), encoding="utf-8")
+
+            prepared = prepare_precipitation_series(path)
+
+        self.assertEqual(prepared.metadata["season_start_year"], 2024)
+        self.assertEqual(prepared.annual_maxima.index.tolist(), [2024, 2025])
 
     def test_read_ghcn_station_csv_only_materializes_needed_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

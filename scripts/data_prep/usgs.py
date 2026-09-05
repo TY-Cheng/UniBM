@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 
-from .constants import ANALYSIS_END_DATE
+from .constants import ANALYSIS_END_DATE, MIN_PERIOD_COVERAGE
 from .ghcn import PreparedSeries
 from ._io import write_csv_gz_atomic
 
@@ -76,17 +76,26 @@ def _continuous_daily_suffix(series: pd.Series) -> pd.Series:
     return suffix
 
 
-def _complete_water_year_maxima(series: pd.Series) -> pd.Series:
-    """Return daily-mean discharge maxima for complete Oct--Sep water years."""
+def _covered_calendar_year_maxima(series: pd.Series) -> tuple[pd.Series, int, int]:
+    """Return maxima for calendar years meeting the daily-coverage gate."""
     maxima: dict[int, float] = {}
-    water_years = series.index.year + (series.index.month >= 10).astype(int)
-    for water_year in sorted(set(int(year) for year in water_years)):
-        start = pd.Timestamp(year=water_year - 1, month=10, day=1)
-        stop = pd.Timestamp(year=water_year, month=9, day=30)
-        values = series.loc[start:stop]
-        if values.index.equals(pd.date_range(start, stop, freq="D")):
-            maxima[water_year] = float(values.max())
-    return pd.Series(maxima, dtype=float).rename_axis("water_year")
+    expected_total = 0
+    valid_total = 0
+    for year in range(int(series.index.min().year), int(series.index.max().year) + 1):
+        expected = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D")
+        values = series.reindex(expected)
+        finite = np.isfinite(values.to_numpy(dtype=float))
+        n_valid = int(finite.sum())
+        if n_valid < int(np.ceil(MIN_PERIOD_COVERAGE * expected.size)):
+            continue
+        maxima[year] = float(values.iloc[np.flatnonzero(finite)].max())
+        expected_total += int(expected.size)
+        valid_total += n_valid
+    return (
+        pd.Series(maxima, dtype=float).rename_axis("calendar_year"),
+        expected_total,
+        valid_total,
+    )
 
 
 def _extract_usgs_daily_series(payload: dict[str, object]) -> tuple[pd.Series, str]:
@@ -258,7 +267,7 @@ def prepare_usgs_streamflow_series(
     series = series[np.isfinite(series) & (series >= 0)]
     series = series[~series.index.duplicated(keep="last")].sort_index()
     series = _continuous_daily_suffix(series.loc[:ANALYSIS_END_DATE])
-    annual_maxima = _complete_water_year_maxima(series)
+    annual_maxima, expected_days, valid_days = _covered_calendar_year_maxima(series)
     resolved_site = str(site_no) if site_no is not None else str(df["site_no"].iloc[0])
     resolved_name = (
         str(station_name)
@@ -279,8 +288,12 @@ def prepare_usgs_streamflow_series(
             "analysis_end_date": ANALYSIS_END_DATE,
             "continuity_start": str(series.index.min().date()),
             "continuity_end": str(series.index.max().date()),
-            "maxima_period": "water_year",
+            "maxima_period": "calendar_year",
             "maxima_measurement": "daily_mean_discharge",
+            "coverage_threshold": MIN_PERIOD_COVERAGE,
+            "coverage_expected_days": expected_days,
+            "coverage_valid_days": valid_days,
+            "coverage_fraction": (valid_days / expected_days if expected_days else float("nan")),
         },
     )
 

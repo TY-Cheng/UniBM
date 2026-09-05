@@ -85,6 +85,27 @@ class EviSelectionTests(unittest.TestCase):
         )
         self.assertEqual((plateau.start, plateau.stop), (0, 2))
 
+    def test_select_penultimate_window_rejects_invalid_tuning_parameters(self) -> None:
+        x = np.arange(4.0)
+        y = np.arange(4.0)
+        with self.assertRaisesRegex(ValueError, "min_points must be an integer at least 2"):
+            select_penultimate_window(x, y, min_points=1)
+        for trim_fraction in (-0.1, 0.5, np.nan):
+            with self.subTest(trim_fraction=trim_fraction):
+                with self.assertRaisesRegex(ValueError, "trim_fraction must be finite"):
+                    select_penultimate_window(x, y, min_points=2, trim_fraction=trim_fraction)
+        for curvature_penalty in (-1.0, np.nan):
+            with self.subTest(curvature_penalty=curvature_penalty):
+                with self.assertRaisesRegex(ValueError, "curvature_penalty must be finite"):
+                    select_penultimate_window(
+                        x,
+                        y,
+                        min_points=2,
+                        curvature_penalty=curvature_penalty,
+                    )
+        with self.assertRaisesRegex(ValueError, "log_values must be finite"):
+            select_penultimate_window(x, np.array([0.0, 1.0, np.nan, 3.0]), min_points=2)
+
 
 if __name__ == "__main__":
     unittest.main()
