@@ -5,10 +5,19 @@ import tomllib
 import re
 from pathlib import Path
 
+from mkdocs.config import load_config
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocsSiteTests(unittest.TestCase):
+    def test_mermaid_rendering_is_owned_by_material(self) -> None:
+        config = load_config(config_file=str(ROOT / "mkdocs.yml"))
+        self.assertEqual(config.theme.name, "material")
+        fences = config.mdx_configs["pymdownx.superfences"]["custom_fences"]
+        self.assertTrue(any(fence["name"] == fence["class"] == "mermaid" for fence in fences))
+        self.assertFalse(any("mermaid" in str(script) for script in config.extra_javascript))
+
     def test_guide_python_examples_execute(self) -> None:
         for page_name in ("getting-started.md", "worked-examples.md"):
             page = ROOT / "docs" / page_name
