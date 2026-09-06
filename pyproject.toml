@@ -31,7 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
 ]
-dependencies = ["matplotlib>=3.8", "numpy>=2", "pandas>=2", "scipy>=1.13"]
+dependencies = ["matplotlib>=3.8", "numpy>=2", "pandas>=2", "pillow>=12.3.0", "scipy>=1.13"]
 
 [project.urls]
 Homepage = "https://github.com/TY-Cheng/UniBM/"
@@ -44,9 +44,9 @@ Changelog = "https://github.com/TY-Cheng/UniBM/releases"
 dev = [
     "mkdocs>=1.6,<2",
     "mkdocs-autorefs>=1.4",
-    "mkdocs-material>=9.6",
+    "mkdocs-material>=9.7.7",
     "mkdocstrings[python]>=0.29",
-    "pymdown-extensions>=10.14",
+    "pymdown-extensions>=11.0.1",
     "pytest",
     "pytest-cov",
     "pytest-testmon",
