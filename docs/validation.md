@@ -1,9 +1,9 @@
 # Validation
 
 <p class="unibm-case-intro">
-Synthetic benchmarks test whether the finite-sample workflow recovers known severity and
-persistence targets under controlled serial dependence. They support method comparison inside
-the declared grid; they do not guarantee performance for every process or real-data regime.
+Stationary synthetic benchmarks compare severity and extremal-clustering estimates against
+known targets under serial dependence. The clearest gains from covariance-aware FGLS are in
+interval performance, with smaller changes in point accuracy.
 </p>
 
 ## Design and scoring
@@ -18,10 +18,12 @@ one of those datasets; increasing R does not increase M.
 | EVI | Fréchet max-AR, moving maxima (q=99), Pareto additive AR(1) | `xi = 0.01, 0.03, 0.10, 0.30, 1, 3, 10`; `theta = 0.01, 0.10, 0.50, 1` | 84 |
 | EI | Same three families | `xi = 0.01, 0.50, 1, 5`; `theta = 0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1` | 84 |
 
-All internal FGLS methods use **fixed diagonal shrinkage 0.37**, the original
-plateau/stable-window rules, and **adaptive R at 128/256/512/768/1024**. OLS and
-the external reference estimators retain their own interval constructions; they
-are not relabeled as adaptive-bootstrap fits.
+All internal FGLS methods use **fixed diagonal shrinkage 0.37**, the declared
+plateau/stable-window rules, and **adaptive R at 128/256/512/768/1024**. Shrinkage
+0.37 is a pre-specified computational default, not an optimum selected from the
+sensitivity analysis. External baselines use pre-specified, method-specific
+tuning rules consistently across scenarios. OLS and the external estimators
+retain their own interval constructions.
 
 The primary interval metric is the **arithmetic mean 95% Winkler score** on the
 parameter's original scale. For an interval `[l, u]` and known true value `t`,
@@ -31,25 +33,32 @@ each score is:
 W = (u - l) + 40 * max(l - t, 0) + 40 * max(t - u, 0)
 ```
 
-Lower is better. This combines interval width and a penalty for missing the
-truth. Scores are **not normalized**, and the primary score is not the median.
-Compare methods within a branch/scenario; different true-parameter scales can
-have very different raw scores. Coverage and width remain useful diagnostics
-alongside the primary score.
+Lower is better. The **grid-average score** is the equally weighted mean of the
+scenario-level means. Scores are **not normalized**: scenarios with larger
+interval widths and noncoverage penalties contribute more to this average.
+Scenario wins and grid-average scores therefore describe different aspects of
+performance. Empirical coverage complements the score by showing how often
+intervals contain the true parameter.
 
 At each plotted scenario, score bars show the mean **plus or minus one outer
-Monte Carlo SE**, `sd(W) / sqrt(n_score)`. These bars are not 95% confidence
+Monte Carlo standard error (MCSE)**, `sd(W) / sqrt(n_score)`. These bars are not 95% confidence
 intervals and are not the internal MCSE used to select R. The secondary point
 estimation metric remains median absolute percentage error, with its 25th–75th
 percentile range. APE is displayed as a fraction, so `1.0` means 100% error.
 
 ## Severity branch (EVI)
 
-The EVI suite varies true tail severity, extremal dependence, and process family at a short
+The EVI suite varies the true tail index, extremal dependence, and process family at a short
 record length. The full comparison contains 12 internal methods (three summaries,
 two block schemes, two regressions) and four external reference estimators. The
 figure shows the six core methods; the CSV outputs retain all methods, including
 the mean/mode and external comparisons.
+
+Within the BM framework, **median-sliding-FGLS has the lowest grid-average
+Winkler score** and wins 27 of 84 scenarios; all within-BM scenario winners use
+FGLS. For Fréchet max-AR at `theta=0.10`, its score averaged over the `xi` grid
+falls from 39.55 under OLS to 8.32 under FGLS, while median APE remains
+0.55.
 
 <figure class="unibm-figure">
   <a href="../assets/validation/evi_benchmark.png">
@@ -59,16 +68,31 @@ the mean/mode and external comparisons.
 </figure>
 
 [Download all EVI method/scenario summaries (CSV)](assets/validation/evi_benchmark.csv).
-This includes Hill, Pickands, DEdH moment, and max-spectrum comparisons. The EVI
-grid also exhibits undercoverage; use the `coverage` and `n_score` columns
-alongside the primary `interval_score_mean`, including reference-estimator
-failures rather than silently excluding them from the comparison.
+The external comparison considers seven methods: median-, mean-, and mode-based
+sliding-FGLS, Hill, max-spectrum, Pickands, and DEdH moment. Within this set,
+**median-sliding-FGLS is the only method that never ranks last by mean Winkler
+score across the 84 scenarios**. Hill wins 22 scenarios and median-sliding-FGLS
+wins 19, but their grid-average scores are 25.81 and 9.49, respectively.
+
+Hill and max-spectrum often have lower APE, particularly under weaker
+dependence. Among the sliding-FGLS variants, Winkler scores for mean and mode
+targets rise more steeply at large `xi`. At `xi=0.01`, the near-zero denominator
+can magnify APE. The EVI grid also exhibits undercoverage; read `coverage` and
+`n_score` alongside `interval_score_mean`.
 
 ## Persistence branch (EI)
 
-The EI suite varies true persistence, tail severity, and process family. It compares the pooled
-block-maxima estimators on a common `θ` scale. Threshold and native estimators remain useful
-comparators, but the chart below focuses on the internal pooled-BM family used by the workflow.
+The EI suite varies the true extremal index, tail severity, and process family.
+The chart below compares eight pooled-BM estimators on the dimensionless `θ`
+scale.
+
+**BB-sliding-FGLS has lower mean Winkler scores than its pooled OLS counterpart
+in all 84 scenarios.** This improvement also holds for the other combinations
+of EI path and block scheme. Median APE changes little between sliding-OLS and
+sliding-FGLS. For BB-sliding, the mean interval width across the grid increases
+from 0.0093 under OLS to 0.1352 under FGLS, alleviating overly narrow intervals.
+BB-sliding-FGLS and Northrop-sliding-FGLS have the two lowest within-BM
+grid-average scores and together win 54 of 84 within-BM scenarios.
 
 <figure class="unibm-figure">
   <a href="../assets/validation/ei_benchmark.png">
@@ -77,8 +101,17 @@ comparators, but the chart below focuses on the internal pooled-BM family used b
   <figcaption>Eight internal pooled EI methods: BB/Northrop × sliding/disjoint × OLS/FGLS. Mean Winkler score uses ±1 outer MCSE; median absolute percentage error uses its IQR. Click the figure for full size.</figcaption>
 </figure>
 
-The full EI outputs also contain Ferro–Segers, K-gaps, native Northrop sliding,
-and native BB sliding estimates on the same simulated records.
+The eight-method external comparison combines the four pooled-BM FGLS variants
+with Ferro–Segers, K-gaps, native Northrop sliding, and native BB sliding on the
+same simulated records. **BB-sliding-FGLS and native BB are the only methods in
+this comparison that never rank last by mean Winkler score.** BB-sliding-FGLS
+outperforms native BB in 81 of 84 scenarios, with grid-average scores of 1.61
+and 2.08, respectively.
+
+K-gaps has the lowest grid-average score, 1.00, and wins 59 of 84 scenarios.
+It ranks last in all 12 scenarios with `theta=1`. These results distinguish
+BB-sliding-FGLS's consistent within-BM improvement from the advantages of
+threshold-based estimation in much of the examined grid.
 
 [Download all EI method/scenario summaries (CSV)](assets/validation/ei_benchmark.csv).
 `interval_score_mean` is the primary score; `n_rep` counts outer simulated
@@ -89,7 +122,7 @@ nominal 95% interval must not be read as having achieved 95% empirical coverage.
 
 An adaptive fit that reaches R=1024 without meeting its numerical precision
 tolerance is **retained and scored**, with `bootstrap_precision_met=False`.
-This is different from an unusable covariance: strict FGLS does not silently
+This is different from an unusable covariance: strict FGLS does not
 fall back to OLS. Recorded failed estimates count as misses in coverage and have
 no finite interval score. The mean score is consequently conditional on valid
 scored fits; read `n_score` and failure counts alongside it.
@@ -110,10 +143,11 @@ precision-unmet fits.
 
 | Checked here | Boundary |
 |---|---|
-| Known-target estimation error and coverage | Only the simulated families, parameter grid, and record lengths |
+| Known-target estimation error and parameter-interval coverage | Only the simulated families, parameter grid, and record length N=365 |
 | Error and interval-score comparisons | Finite Monte Carlo design, not an asymptotic proof |
 | Sensitivity to dependence and tail severity | Not robustness to arbitrary nonstationarity or model misspecification |
 | Current fixed-shrinkage/adaptive-R workflow | No claim that data-driven selection uncertainty is fully absorbed |
+| EVI/EI parameter intervals | Coverage of derived design-life intervals has not been evaluated |
 
 The [case-study pages](cases/index.md) have also been recomputed from their
 unchanged frozen provider inputs using fixed shrinkage `0.37` and adaptive R.
@@ -144,9 +178,9 @@ data or reruns applications.
 
 ## Shrinkage sensitivity
 
-The manuscript's sensitivity appendix has also been refreshed over
+The shrinkage sensitivity analysis varies
 `delta = 0, 0.15, 0.37, 0.55, 0.75, 1`, using mean Winkler score as the primary
-metric. It covers sliding-median-FGLS EVI and BB/Northrop sliding-FGLS EI on
+metric. It covers median-sliding-FGLS EVI and BB/Northrop sliding-FGLS EI on
 the same main grids. Median coverage and median APE remain secondary
 diagnostics. Family summaries give equal weight to scenario-level mean scores,
 with no normalization.
@@ -157,11 +191,17 @@ R is not independently retuned at each delta, and the default-fit precision
 flag does not certify the other delta fits. Failed EI covariances are retained
 as noncoverage, with no finite score, at every delta.
 
-The grid-average EVI score is 9.485 at the fixed default and reaches its lowest
-value, 8.897, at 0.75. The two EI scores are 1.607 (BB) and 1.648 (Northrop) at
-the default, with minima of 1.561 and 1.601 at 0.15. These descriptive results
-do not establish a universal optimum or nominal coverage. **The default remains
-0.37; this is sensitivity analysis, not a new tuning or promotion step.**
+Diagonal shrinkage reduces the grid-average EVI score from 27.466 at `delta=0`
+to 9.485 at the fixed default. The lowest grid-average score is 8.897 at 0.75,
+while family-specific minima occur at 0.75 for Fréchet max-AR, 0.37 for moving
+maxima, and 1.00 for Pareto additive AR(1). Median APE changes little across
+positive shrinkage values.
+
+The two EI scores are 1.607 (BB) and 1.648 (Northrop) at the default, with minima
+of 1.561 and 1.601 at 0.15. Full diagonal shrinkage worsens these scores to
+2.141 and 2.179 and reduces median coverage. **The common default remains
+0.37.** These descriptive comparisons assess sensitivity; they neither select
+a new default nor establish nominal coverage.
 
 The existing report entrypoints generate the appendix CSVs when absent and
 refresh the manuscript figures:

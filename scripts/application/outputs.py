@@ -638,7 +638,7 @@ def _top_penultimate_windows(
 
 
 def _fit_evi_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> list[ScalingFit]:
-    """Refit the headline EVI workflow across the top scoring plateau windows."""
+    """Refit the headline EVI workflow across the best-ranked plateau windows."""
     windows = _top_penultimate_windows(bundle.evi_fit, top_k=top_k)
     fits: list[ScalingFit] = []
     for plateau in windows:
@@ -666,7 +666,7 @@ def _top_ei_windows(
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> list[tuple[EiStableWindow, np.ndarray, float]]:
-    """Return the top scoring stable EI windows for one transformed path."""
+    """Return the best-ranked stable EI windows for one transformed path."""
     levels = np.asarray(path.block_sizes, dtype=int)
     z = np.asarray(path.z_path, dtype=float)
     mask = np.isfinite(z)
@@ -775,7 +775,7 @@ def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) ->
                 "$\\theta$ [range]": (
                     "NA"
                     if theta_values.size == 0 or not np.isfinite(theta_headline)
-                    else f"{theta_headline:.2f} [{np.min(theta_values):.2f}, {np.max(theta_values):.2f}]"
+                    else f"{theta_headline:.4f} [{np.min(theta_values):.4f}, {np.max(theta_values):.4f}]"
                 ),
             }
         )
@@ -916,7 +916,7 @@ def application_extrapolation_table(bundles: list[ApplicationBundle]) -> pd.Data
     """Build the manuscript-facing design-life extrapolation-distance table."""
     clock_labels = {
         "calendar_year": "calendar day",
-        "claim_active_day": "claim-active day",
+        "claim_active_day": "active day",
     }
     rows: list[dict[str, object]] = []
     for bundle in bundles:
@@ -948,19 +948,20 @@ def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
         r"\scriptsize",
         r"\setlength{\tabcolsep}{4pt}",
         (
-            r"\caption{Selected severity scaling windows and design-life block sizes for the "
-            r"four application cases. The plateau column reports the retained block-size range "
-            r"used in the median sliding-FGLS severity fit. The \(b_{10}\) and \(b_{50}\) "
-            r"columns are the block sizes implied by the application-specific observation clock. "
-            r"The ratios compare each design-life block size with the upper end of the selected "
-            r"plateau and are included only to make the extrapolation distance explicit.}"
+            r"\caption{Selected plateaus and design-life block sizes for the "
+            r"four application cases. The plateau column reports the block-size range "
+            r"retained for the median-sliding-FGLS fit, with maximum block size \(b_{\max,\mathrm{fit}}\). "
+            r"The \(b_{10}\) and \(b_{50}\) columns give the block sizes for 10- and 50-year "
+            r"design lives on the application-specific observation clock. "
+            r"The ratios compare each design-life block size with the largest fitted block size.}"
         ),
         r"\label{tab:application-extrapolation-main}",
         r"\begin{tabular}{p{0.23\textwidth}p{0.17\textwidth}rrrrr}",
         r"\toprule",
         (
-            r"Application & Clock & Plateau & \(b_{10}\) & \(b_{50}\) "
-            r"& \(b_{10}/b_{\max}\) & \(b_{50}/b_{\max}\) \\"
+            r"Application & Clock & \shortstack[c]{Plateau} & \(b_{10}\) & \(b_{50}\) "
+            r"& \(\frac{b_{10}}{b_{\max,\mathrm{fit}}}\) "
+            r"& \(\frac{b_{50}}{b_{\max,\mathrm{fit}}}\) \\"
         ),
         r"\midrule",
     ]
@@ -1029,9 +1030,9 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
             r"rescaled for readability: streamflow entries are in "
             r"\(10^3\,\mathrm{ft}^3\,\mathrm{s}^{-1}\), and NFIP entries are in "
             r"\(10^6\) 2025 U.S. dollars. "
-            r"Streamflow uses the calendar-day basis "
-            r"for both severity and persistence; NFIP uses the positive claim-active-day "
-            r"basis for severity and the zero-filled calendar-day basis for persistence.}"
+            r"Streamflow uses the calendar-day clock "
+            r"for both severity and persistence; NFIP uses the active-day clock "
+            r"for severity and the calendar-day clock for persistence.}"
         ),
         r"\label{tab:application-summary-main}",
         (
@@ -1062,7 +1063,7 @@ def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.
     """Build a compact manuscript-facing design-life-level comparison table."""
     basis_labels = {
         "calendar_year": "calendar-day",
-        "claim_active_day": "claim-active-day",
+        "claim_active_day": "active-day",
     }
     rows: list[dict[str, object]] = []
     for bundle in bundles:
@@ -1109,13 +1110,13 @@ def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[0]),
                     float(bundle.ei_bb_sliding_fgls.confidence_interval[1]),
                 ),
-                "BB stable window": _stable_window_text(bundle.ei_bb_sliding_fgls),
+                "BB EI stable window": _stable_window_text(bundle.ei_bb_sliding_fgls),
                 "$\\theta$ (Northrop-FGLS)": _format_interval(
                     float(bundle.ei_northrop_sliding_fgls.theta_hat),
                     float(bundle.ei_northrop_sliding_fgls.confidence_interval[0]),
                     float(bundle.ei_northrop_sliding_fgls.confidence_interval[1]),
                 ),
-                "Northrop stable window": _stable_window_text(bundle.ei_northrop_sliding_fgls),
+                "Northrop EI stable window": _stable_window_text(bundle.ei_northrop_sliding_fgls),
                 "$\\theta$ (K-gaps)": _format_interval(
                     float(bundle.ei_k_gaps.theta_hat),
                     float(bundle.ei_k_gaps.confidence_interval[0]),
@@ -1311,14 +1312,26 @@ def _draw_target_stability_ax(ax, bundle: ApplicationBundle, *, title: str) -> N
     ax.plot(
         summary["block_size"],
         summary[quantile_column],
-        label="median block quantile"
+        label="Median of block maxima"
         if quantile_column == "median"
         else f"block quantile (tau={bundle.spec.quantile:.2f})",
         color="tab:blue",
         lw=1.2,
     )
-    ax.plot(summary["block_size"], summary["mean"], label="block mean", color="tab:orange", lw=1.0)
-    ax.plot(summary["block_size"], summary["mode"], label="block mode", color="tab:green", lw=1.0)
+    ax.plot(
+        summary["block_size"],
+        summary["mean"],
+        label="Mean of block maxima",
+        color="tab:orange",
+        lw=1.0,
+    )
+    ax.plot(
+        summary["block_size"],
+        summary["mode"],
+        label="Mode surrogate (log scale)",
+        color="tab:green",
+        lw=1.0,
+    )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("block size")
@@ -1398,7 +1411,7 @@ def _draw_scaling_ax(ax, bundle: ApplicationBundle) -> None:
     ax.set_ylabel(bundle.spec.scaling_ylabel)
     ax.set_title(bundle.spec.scaling_title)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, ncols=2, title=f"shared ξ = {headline.slope:.3f}")
+    ax.legend(fontsize=8, ncols=2, title=f"Shared slope: ξ = {headline.slope:.3f}")
 
 
 def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
@@ -1552,7 +1565,7 @@ def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
                 zorder=0.15,
             )
         )
-        band_labels.append("BB stable window")
+        band_labels.append("BB EI stable window")
     if northrop_window is not None:
         band_handles.append(
             _draw_window_band(
@@ -1564,7 +1577,7 @@ def _draw_ei_ax(ax, bundle: ApplicationBundle) -> None:
                 zorder=0.16,
             )
         )
-        band_labels.append("Northrop stable window")
+        band_labels.append("Northrop EI stable window")
     ax.set_xlabel("log(block size)")
     ax.set_ylabel("extremal index")
     ax.set_title(f"{bundle.spec.label} extremal-index comparison")
@@ -2195,12 +2208,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "missing daily observations \\citep{hosking_lmoments_1990}; UniBM entries are median "
                 "design-life levels "
                 "with conditional 95 percent confidence intervals from the selected fit. "
-                "The two sets of entries answer different questions and are not used to validate "
-                "one another. The comparison is included only to place the streamflow estimates "
-                "beside a familiar annual-maxima scale. Large differences, particularly for "
-                "Texas at 50 years, reflect the distinct estimands: UniBM entries are daily-clock "
-                "horizon-maximum quantiles from the selected block-scaling extrapolation, not "
-                "calendar-year-maxima return levels. All discharge entries are in "
+                "The entries represent different quantiles and do not validate one another. "
+                "This distinction alone does not explain the large Texas discrepancy, which "
+                "cautions against extrapolating the selected finite-block scaling relation. "
+                "GEV confidence intervals are not computed here, so the comparison is not a "
+                "formal test of agreement. All discharge entries are in "
                 "\\(10^3\\,\\mathrm{ft}^3\\,\\mathrm{s}^{-1}\\)."
             ),
             label="tab:application-streamflow-gev-check-main",
@@ -2225,13 +2237,13 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_design_life_level_table(manuscript_bundles),
             caption=(
-                "Design-life-level summary for the four focal case studies. Rows show the shared-\\(\\tau\\) "
-                "application grid, with \\(\\tau \\in \\{0.50, 0.90, 0.95, 0.99\\}\\), obtained by evaluating "
+                "Design-life levels for the four application cases. Rows show shared-slope quantile fits "
+                "with \\(\\tau \\in \\{0.50, 0.90, 0.95, 0.99\\}\\), obtained by evaluating "
                 "the fitted block-maximum quantile scaling law at 1-, 10-, and 50-year design-life spans. "
                 "The \\(\\tau=0.50\\) row gives the median design-life level, whereas higher-\\(\\tau\\) rows "
                 "give increasingly conservative upper design-life levels derived by reusing the same plateau "
                 "and slope with \\(\\tau\\)-specific intercept shifts. Streamflow rows are reported on the "
-                "calendar-day basis, whereas NFIP rows are reported on the claim-active-day basis."
+                "calendar-day basis, whereas NFIP rows are reported on the active-day basis."
             ),
             label="tab:application-design-life-levels-main",
             header_latex={
@@ -2259,12 +2271,12 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         render_latex_table(
             application_selection_sensitivity_table(manuscript_bundles),
             caption=(
-                "Local selection sensitivity for the application-side parameter estimates. "
-                "Each cell reports the selected \\(\\xi\\) or \\(\\theta\\) "
-                "estimate together with the min--max range over the three highest-scoring EVI "
-                "plateau windows or EI stable windows under the same fixed selection rule. "
-                "These local ranges complement, but do not replace, the conditional parameter "
-                "and design-life intervals reported in the main-text application summary table."
+                "Window-selection sensitivity of EVI and EI estimates. "
+                "Each cell reports the selected estimate and the min--max range over the three "
+                "best-ranked admissible plateaus (EVI) or EI stable windows under the fixed "
+                "selection rules. EVI uses median-sliding-FGLS and EI uses BB-sliding-FGLS. "
+                "These ranges describe sensitivity to window choice and complement the conditional "
+                "intervals in \\Cref{tab:application-summary-main}."
             ),
             label="tab:application-selection-sensitivity-main",
             header_latex={
@@ -2290,9 +2302,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             caption=(
                 "USGS streamflow candidate pools for the reported streamflow applications. "
                 "Sites were screened with pre-specified criteria: minimum record length 20 years, "
-                "minimum plateau size 5 points, \\(\\xi\\) lower bound at least -0.25, and plateau-maxima "
-                "positive share at least 0.95. Ranking then prioritizes Fréchet-domain support, "
-                "plateau size, record length, and \\(\\xi\\) lower bound."
+                "minimum plateau size 5 block-size points, lower confidence limit for \\(\\xi\\) "
+                "at least -0.25, and positive-maxima share within that window at least 0.95. "
+                "Ranking then prioritizes Fréchet-domain support, number of plateau points, "
+                "record length, and lower confidence limit for \\(\\xi\\)."
             ),
             label="tab:application-usgs-screening-main",
             alignments=(
@@ -2302,7 +2315,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             size=r"\tiny",
             header_latex={
                 "State / site": r"\shortstack[c]{State /\\ site}",
-                "$\\xi$ lower": r"$\xi$ lower",
+                "Plateau pts": "Window points",
+                "$\\xi$ lower": r"\shortstack[c]{$\xi$ lower\\CI limit}",
             },
             caption_raw=True,
             tabcolsep="1pt",

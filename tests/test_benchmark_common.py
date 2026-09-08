@@ -119,6 +119,56 @@ class BenchmarkCommonTests(unittest.TestCase):
         self.assertIn(r"Application & $\xi$ [range] \\", latex)
         self.assertNotIn(r"\$\textbackslash{}xi\$", latex)
 
+    def test_grouped_label_latex_preserves_math_and_escapes_unmapped_labels(self) -> None:
+        table = pd.DataFrame({"method": ["Northrop", "A & B"], "score": [1.0, 2.0]})
+        latex = render_grouped_latex_table(
+            table,
+            row_label="method",
+            groups=[("Moving Maxima (q=99)", [("score", "0.1")])],
+            caption="Labels",
+            label="tab:labels",
+            label_latex={
+                "Northrop": r"\shortstack[l]{Northrop\\(fixed-\(b\))}",
+                "Moving Maxima (q=99)": r"Moving maxima (\(q=99\))",
+            },
+        )
+        self.assertIn(r"\shortstack[l]{Northrop\\(fixed-\(b\))}", latex)
+        self.assertIn(r"\multicolumn{1}{c}{Moving maxima (\(q=99\))}", latex)
+        self.assertIn(r"\shortstack[l]{A \& B}", latex)
+        self.assertNotIn(r"\textbackslash", latex)
+
+    def test_numeric_pairs_bold_each_minimum_without_rounding_away_differences(self) -> None:
+        table = pd.DataFrame(
+            {
+                "method": ["A", "B", "C", "D"],
+                "close": [(1.2344, 0.10004), (1.23449, 0.10003), (1.2344, 0.2), np.nan],
+                "missing": [(np.nan, 0.1), (np.inf, 0.1), (np.nan, 0.2), (np.nan, np.nan)],
+            }
+        )
+        latex = render_grouped_latex_table(
+            table,
+            row_label="method",
+            groups=[("Group", [("close", "1"), ("missing", "2")])],
+            caption="Minima",
+            label="tab:minima",
+            group_break_after_rows=[1],
+            group_break_command=r"\midrule",
+        )
+        rows = [line for line in latex.splitlines() if line.startswith(r"\shortstack[l]")]
+        self.assertEqual(
+            rows[0],
+            r"\shortstack[l]{A} & \shortstack[c]{\textbf{1.2344} \\ 0.10004}"
+            r" & \shortstack[c]{NA \\ \textbf{0.10}} \\",
+        )
+        self.assertEqual(
+            rows[1],
+            r"\shortstack[l]{B} & \shortstack[c]{1.2345 \\ \textbf{0.10003}}"
+            r" & \shortstack[c]{NA \\ \textbf{0.10}} \\",
+        )
+        self.assertIn(r"\shortstack[c]{\textbf{1.2344} \\ 0.20000}", rows[2])
+        self.assertIn(r"\shortstack[c]{NA \\ NA}", rows[3])
+        self.assertEqual(latex.count(r"\textbf{"), 5)
+
     def test_render_grouped_latex_table_supports_raw_caption(self) -> None:
         table = pd.DataFrame({"method": ["A"], "scenario": ["0.10 / 0.20"]})
 

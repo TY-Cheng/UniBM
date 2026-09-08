@@ -153,15 +153,39 @@ def render_grouped_latex_table(
     group_break_commands_by_row: Mapping[int, str] | None = None,
     arraystretch: str | None = None,
     caption_raw: bool = False,
+    label_latex: Mapping[str, str] | None = None,
 ) -> str:
-    """Render a table with one row label column and a two-level grouped header."""
+    """Render a table with one row label column and a two-level grouped header.
+
+    Numeric (mean score, median APE) pairs retain precision until rendering.
+    Their column minima are bold, including exact ties; decimals increase when
+    rounding would otherwise hide the difference from the next distinct value.
+    ``label_latex`` supplies raw LaTeX for selected row labels and group names.
+    """
     flat_columns = [column_key for _, columns in groups for column_key, _ in columns]
     alignment = "l" + "c" * len(flat_columns)
     group_breaks = set(group_break_after_rows or [])
     break_command_map = dict(group_break_commands_by_row or {})
+    label_latex = label_latex or {}
+    pair_formats = {}
+    for column in flat_columns:
+        pairs = [value for value in table[column] if isinstance(value, tuple)]
+        if not pairs:
+            continue
+        pair_formats[column] = []
+        for metric, decimals in enumerate((3, 2)):
+            values = np.asarray([pair[metric] for pair in pairs], dtype=float)
+            ordered = np.unique(values[np.isfinite(values)])
+            minimum = ordered[0] if ordered.size else np.nan
+            if ordered.size > 1:
+                while f"{minimum:.{decimals}f}" == f"{ordered[1]:.{decimals}f}":
+                    decimals += 1
+            pair_formats[column].append((minimum, decimals))
 
     def _render_row_label(value: object) -> str:
         text = str(value)
+        if text in label_latex:
+            return label_latex[text]
         if "-" not in text:
             return r"\shortstack[l]{" + latex_escape(text) + "}"
         if text.count("-") >= 2:
@@ -174,7 +198,15 @@ def render_grouped_latex_table(
             return r"\shortstack[l]{" + r" \\ ".join(latex_escape(part) for part in parts) + "}"
         return r"\shortstack[l]{" + latex_escape(text) + "}"
 
-    def _render_body_cell(value: object, *, compact_pair: bool = False) -> str:
+    def _render_body_cell(value: object, *, column: str, compact_pair: bool = False) -> str:
+        if isinstance(value, tuple):
+            parts = []
+            for number, (minimum, decimals) in zip(value, pair_formats[column], strict=True):
+                part = f"{number:.{decimals}f}" if np.isfinite(number) else "NA"
+                if number == minimum:
+                    part = rf"\textbf{{{part}}}"
+                parts.append(part)
+            return r"\shortstack[c]{" + r" \\ ".join(parts) + "}"
         if compact_pair and isinstance(value, str) and " / " in value:
             parts = [part.strip() for part in value.split(" / ", maxsplit=1)]
             if pair_medians_only:
@@ -209,7 +241,7 @@ def render_grouped_latex_table(
     lines.extend([tabular_begin, r"\hline"])
     top_header = [latex_escape(row_label)]
     top_header.extend(
-        rf"\multicolumn{{{len(columns)}}}{{c}}{{{latex_escape(group)}}}"
+        rf"\multicolumn{{{len(columns)}}}{{c}}{{{label_latex.get(group, latex_escape(group))}}}"
         for group, columns in groups
     )
     lines.append(" & ".join(top_header) + r" \\")
@@ -226,7 +258,10 @@ def render_grouped_latex_table(
     lines.append(r"\hline")
     for row_idx, row in enumerate(table.itertuples(index=False, name=None), start=1):
         rendered_row = [_render_row_label(row[0])]
-        rendered_row.extend(_render_body_cell(value, compact_pair=True) for value in row[1:])
+        rendered_row.extend(
+            _render_body_cell(value, column=column, compact_pair=True)
+            for column, value in zip(flat_columns, row[1:], strict=True)
+        )
         lines.append(" & ".join(rendered_row) + r" \\")
         if row_idx in group_breaks:
             lines.append(break_command_map.get(row_idx, group_break_command))

@@ -324,7 +324,7 @@ def build_evi_shrinkage_sensitivity_summary(
 
     The sensitivity run reuses the existing benchmark scenario cache and the
     original sample's bootstrap backbone. Only the covariance-shrinkage value is
-    varied, and only for the retained sliding-median-FGLS severity workflow.
+    varied, and only for the retained median-sliding-FGLS severity workflow.
     """
     from benchmark.design import (
         default_evi_simulation_configs,
@@ -467,7 +467,7 @@ def plot_evi_shrinkage_sensitivity(
         )
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("mean_interval_score", "mean Winkler interval score"),
+        ("mean_interval_score", "grid-average Winkler score"),
         ("median_coverage", "median coverage"),
         ("median_ape", "median APE"),
     ]
@@ -502,7 +502,7 @@ def plot_evi_shrinkage_sensitivity(
             finite = values[np.isfinite(values)]
             if finite.size:
                 ax.set_ylim(0.0, float(np.max(finite) * 1.08))
-        ax.set_xlabel(r"FGLS shrinkage $\delta$")
+        ax.set_xlabel(r"Covariance shrinkage $\delta$")
         ax.set_ylabel(ylabel)
         ax.set_xticks(EVI_SHRINKAGE_GRID)
         ax.grid(alpha=0.2, linewidth=0.6)
@@ -575,7 +575,7 @@ def _add_explicit_legend(
         bbox_to_anchor=(0.5, anchor_y),
         ncol=min(3, max(1, len(handles))),
         frameon=False,
-        fontsize=9,
+        fontsize=13,
         columnspacing=1.2,
         handletextpad=0.5,
     )
@@ -692,7 +692,7 @@ def plot_benchmark_panels(
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
-        figsize=(3.9 * ncols, 2.8 * nrows),
+        figsize=(3.3 * ncols, 2.1 * nrows),
         dpi=dpi,
         sharex=True,
         sharey="row",
@@ -771,15 +771,22 @@ def plot_benchmark_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                ax.tick_params(axis="both", labelsize=14)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
-                    ax.set_title(f"$\\theta$ = {theta:.2f}")
+                    ax.set_title(f"$\\theta$ = {theta:.2f}", fontsize=14)
                 if col_idx == 0:
-                    ax.set_ylabel(f"{family_label(family)}\n{METRIC_LABELS[metric]}")
+                    ylabel = {"ape": "median APE", "interval_score": "mean Winkler score"}.get(
+                        metric, METRIC_LABELS[metric]
+                    )
+                    family_name = (
+                        family_label(family).replace(" (q=", "\n(q=").replace(" AR(1)", "\nAR(1)")
+                    )
+                    ax.set_ylabel(f"{family_name}\n{ylabel}", fontsize=12)
                 if row_idx == nrows - 1:
-                    ax.set_xlabel("true $\\xi$")
+                    ax.set_xlabel("true $\\xi$", fontsize=14)
     if legend_mode == "explicit":
         _add_explicit_legend(
             fig,
@@ -787,7 +794,7 @@ def plot_benchmark_panels(
             set(subset["method"].unique()),
             anchor_y=0.006,
         )
-        bottom_margin = 0.058
+        bottom_margin = 0.07
     else:
         _add_grouped_legends(fig, subset)
         bottom_margin = 0.09
@@ -903,6 +910,7 @@ def write_evi_benchmark_manuscript_artifacts(
         external_benchmark_summary,
         methods=MERGED_SUMMARY_METHODS,
         benchmark_set=UNIVERSAL_BENCHMARK_SET,
+        numeric_pairs=True,
     )
     evi_method_order = [
         METHOD_LABELS[method] if method in METHOD_LABELS else EXTERNAL_METHOD_LABELS[method]
@@ -917,18 +925,25 @@ def write_evi_benchmark_manuscript_artifacts(
             evi_summary_table,
             row_label="method",
             groups=evi_groups,
+            label_latex={
+                "Moving maxima (q=99)": r"Moving maxima (\(q=99\))",
+                "DEdH": "DEdH",
+            },
             second_header_row_label=r"true $\theta$",
             second_header_row_label_raw=True,
             caption=(
-                f"Consolidated EVI benchmark summary on the synthetic short-record severity suite "
-                f"with \\(\\theta \\in \\{{0.01, 0.10, 0.50, 1.0\\}}\\), "
-                f"\\(\\xi \\in \\{{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
-                f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
-                "Rows report methods and columns group representative scenarios by family and "
-                "\\(\\theta\\). In each cell, the first line reports mean Winkler interval score and "
-                "the second line reports median absolute percentage error, both summarized over "
-                "the \\(\\xi\\) grid. "
-                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\))."
+                f"EVI benchmark results for synthetic records of \\(N={n_obs}\\) observations "
+                "from the Fréchet max-AR, moving-maxima \\(q=99\\), and Pareto additive AR(1) "
+                "families. The parameter grid is \\(\\theta \\in \\{0.01, 0.10, 0.50, 1.0\\}\\) "
+                "and \\(\\xi \\in \\{0.01, 0.03, 0.10, 0.30, 1.0, 3.0, 10.0\\}\\). "
+                "Rows report methods and columns group results by process family and "
+                "\\(\\theta\\). Within each cell, the first line is the grid-average Winkler score "
+                "(mean of scenario-level means) over the \\(\\xi\\) grid; the second is the median "
+                "of scenario-level median absolute percentage errors (APE, expressed as a fraction) "
+                "over the same grid. "
+                "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\)). "
+                "Within each column, the unrounded minimum of each metric is bold, including "
+                "exact ties."
             ),
             label="tab:benchmark-evi-summary-main",
             environment="table",
@@ -1018,7 +1033,7 @@ def write_evi_benchmark_manuscript_artifacts(
         plot_evi_shrinkage_sensitivity(
             shrinkage_sensitivity_summary,
             benchmark_set=UNIVERSAL_BENCHMARK_SET,
-            title="Appendix: EVI shrinkage sensitivity for sliding-median-FGLS",
+            title="Appendix: EVI shrinkage sensitivity for median-sliding-FGLS",
             file_path=fig_dir / "benchmark_shrinkage_sensitivity.pdf",
             save=True,
         )

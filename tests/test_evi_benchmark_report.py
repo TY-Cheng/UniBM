@@ -17,6 +17,7 @@ from benchmark.evi_report import (
     plot_benchmark_panels,
 )
 from benchmark.evi_benchmark import evaluate_config
+from benchmark.evi_external import target_plus_external_story_table
 from unibm.evi import estimate_target_scaling
 
 
@@ -64,6 +65,10 @@ class EviBenchmarkReportTests(unittest.TestCase):
         )
         story = benchmark_story_table(summary, methods=[str(row.method)])
         self.assertTrue(story.iloc[0, 2].startswith("10.000 /"))
+        numeric_story = target_plus_external_story_table(
+            summary, summary.iloc[:0], methods=[str(row.method)], numeric_pairs=True
+        )
+        self.assertEqual(numeric_story.iloc[0, 2], (10.0, row.ape_median))
 
     def test_benchmark_detail_records_actual_regression_provenance(self) -> None:
         cfg = default_evi_simulation_configs(

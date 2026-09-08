@@ -12,8 +12,8 @@ an issue before implementing it. Small fixes can go directly to a pull request.
 
 The project is under active development; APIs may change before a stable release.
 The repository separates the library (`src/unibm/`), research workflows (`scripts/`),
-tests (`tests/`), and documentation (`docs/`). See [CONTEXT.md](CONTEXT.md) for terminology
-and inference contracts.
+tests (`tests/`), and documentation (`docs/`). See [Concepts](docs/concepts.md) and
+[Reading Returned Objects](docs/reading-returned-objects.md) for workflows and inference contracts.
 
 ## Development setup
 

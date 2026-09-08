@@ -99,7 +99,7 @@ EXTERNAL_METHOD_LABELS = {
     "hill_raw": "Hill",
     "max_spectrum_raw": "Max-spectrum",
     "pickands_raw": "Pickands",
-    "dedh_moment_raw": "DEdH-moment",
+    "dedh_moment_raw": "DEdH",
 }
 EXTERNAL_METHOD_COLORS = {
     "sliding_median_fgls": "tab:blue",
@@ -523,6 +523,7 @@ def target_plus_external_story_table(
     *,
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = TARGET_PLUS_EXTERNAL_METHODS,
+    numeric_pairs: bool = False,
 ) -> pd.DataFrame:
     """Combine the sliding-FGLS target comparison with external xi baselines."""
     methods = [
@@ -547,13 +548,18 @@ def target_plus_external_story_table(
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
         mean_interval_score=("interval_score_mean", "mean"),
     )
-    aggregated["summary_cell"] = aggregated.apply(
-        lambda row: (
-            f"{row['mean_interval_score']:.3f} / "
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
-        ),
-        axis=1,
-    )
+    if numeric_pairs:
+        aggregated["summary_cell"] = list(
+            zip(aggregated["mean_interval_score"], aggregated["median_ape"], strict=True)
+        )
+    else:
+        aggregated["summary_cell"] = aggregated.apply(
+            lambda row: (
+                f"{row['mean_interval_score']:.3f} / "
+                f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
+            ),
+            axis=1,
+        )
     table = (
         aggregated.pivot(
             index=["family", "theta_true"],
@@ -777,9 +783,7 @@ def plot_external_comparison_panels(
                     ax.set_title(f"$\\theta$ = {theta:.2f}")
                 if col_idx == 0:
                     ylabel = (
-                        "absolute percentage error"
-                        if metric == "ape"
-                        else "mean Winkler interval score"
+                        "absolute percentage error" if metric == "ape" else "mean Winkler score"
                     )
                     ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
                 if row_idx == len(families) * len(metrics) - 1:
@@ -869,7 +873,7 @@ def plot_target_plus_external_panels(
     fig, axes = plt.subplots(
         nrows=len(families) * len(metrics),
         ncols=len(theta_values),
-        figsize=(3.9 * len(theta_values), 2.8 * len(families) * len(metrics)),
+        figsize=(3.3 * len(theta_values), 2.1 * len(families) * len(metrics)),
         dpi=dpi,
         sharex=True,
         sharey="row",
@@ -935,20 +939,20 @@ def plot_target_plus_external_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                ax.tick_params(axis="both", labelsize=14)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
-                    ax.set_title(f"$\\theta$ = {theta:.2f}")
+                    ax.set_title(f"$\\theta$ = {theta:.2f}", fontsize=14)
                 if col_idx == 0:
-                    ylabel = (
-                        "absolute percentage error"
-                        if metric == "ape"
-                        else "mean Winkler interval score"
+                    ylabel = "median APE" if metric == "ape" else "mean Winkler score"
+                    family_name = (
+                        family_label(family).replace(" (q=", "\n(q=").replace(" AR(1)", "\nAR(1)")
                     )
-                    ax.set_ylabel(f"{family_label(family)}\n{ylabel}")
+                    ax.set_ylabel(f"{family_name}\n{ylabel}", fontsize=12)
                 if row_idx == len(families) * len(metrics) - 1:
-                    ax.set_xlabel("true $\\xi$")
+                    ax.set_xlabel("true $\\xi$", fontsize=14)
 
     handles = [
         Line2D(
@@ -976,7 +980,7 @@ def plot_target_plus_external_panels(
         bbox_to_anchor=(0.5, 0.006),
         ncol=n_legend_cols,
         frameon=False,
-        fontsize=9,
+        fontsize=13,
         columnspacing=1.2,
         handletextpad=0.5,
     )

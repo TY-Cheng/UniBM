@@ -157,7 +157,7 @@ REGRESSION_MARKERS = {
 }
 FAMILY_LABELS = {
     "frechet_max_ar": "Fréchet max-AR",
-    MOVING_MAXIMA_FAMILY: f"Moving Maxima (q={MOVING_MAXIMA_Q})",
+    MOVING_MAXIMA_FAMILY: f"Moving maxima (q={MOVING_MAXIMA_Q})",
     "pareto_additive_ar1": "Pareto additive AR(1)",
 }
 FAMILY_ORDER = (
@@ -185,7 +185,7 @@ METRIC_LABELS = {
     "ape": "absolute percentage error",
     "mape": "mean absolute percentage error",
     "coverage": "interval coverage",
-    "interval_score": "mean Winkler interval score",
+    "interval_score": "mean Winkler score",
 }
 SIMULATION_BURN_IN = 2000
 
@@ -231,7 +231,7 @@ def family_label(family: str) -> str:
     """Render a family id into a stable manuscript-friendly label."""
     q = parse_moving_maxima_q(family)
     if q is not None:
-        return f"Moving Maxima (q={q})"
+        return f"Moving maxima (q={q})"
     return FAMILY_LABELS.get(family, family)
 
 

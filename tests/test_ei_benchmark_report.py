@@ -292,6 +292,8 @@ class EiBenchmarkReportTests(unittest.TestCase):
             self.assertIn(r"\multicolumn{1}{c}{Fréchet max-AR}", summary_tex)
             self.assertIn(r"true $\xi$", summary_tex)
             self.assertIn(r"\shortstack[l]{Northrop-", summary_tex)
+            self.assertIn(r"\textbf{", summary_tex)
+            self.assertIn("unrounded minimum of each metric", summary_tex)
 
             interval_tex = interval_path.read_text()
             self.assertIn(r"\label{tab:benchmark-ei-interval-main}", interval_tex)

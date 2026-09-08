@@ -642,8 +642,8 @@ class ApplicationOutputTests(unittest.TestCase):
             legend = ax.get_legend()
             assert legend is not None
             labels = [text.get_text() for text in legend.get_texts()]
-            self.assertIn("BB stable window", labels)
-            self.assertIn("Northrop stable window", labels)
+            self.assertIn("BB EI stable window", labels)
+            self.assertIn("Northrop EI stable window", labels)
             self.assertNotIn("shared BB/Northrop stable window", labels)
             self.assertEqual(len(ax.collections), 2)
             self.assertTrue(all(patch.get_linewidth() == 0.0 for patch in ax.patches))

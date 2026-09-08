@@ -123,6 +123,7 @@ def _story_table(
     *,
     methods: Iterable[str],
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+    numeric_pairs: bool = False,
 ) -> pd.DataFrame:
     """Collapse a method list into the manuscript-friendly EI story-table layout."""
     methods = [method for method in methods if method in summary["method"].unique()]
@@ -141,13 +142,18 @@ def _story_table(
         ape_q75=("ape_median", quantile_agg(IQR_UPPER)),
         mean_interval_score=("interval_score_mean", "mean"),
     )
-    aggregated["summary_cell"] = aggregated.apply(
-        lambda row: (
-            f"{row['mean_interval_score']:.3f} / "
-            f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
-        ),
-        axis=1,
-    )
+    if numeric_pairs:
+        aggregated["summary_cell"] = list(
+            zip(aggregated["mean_interval_score"], aggregated["median_ape"], strict=True)
+        )
+    else:
+        aggregated["summary_cell"] = aggregated.apply(
+            lambda row: (
+                f"{row['mean_interval_score']:.3f} / "
+                f"{format_median_iqr(row['median_ape'], row['ape_q25'], row['ape_q75'])}"
+            ),
+            axis=1,
+        )
     table = (
         aggregated.pivot(
             index=["family", "xi_true"], columns="method_label", values="summary_cell"
@@ -187,11 +193,14 @@ def ei_merged_story_table(
     external_summary: pd.DataFrame,
     *,
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
+    numeric_pairs: bool = False,
 ) -> pd.DataFrame:
     """Return the merged EI benchmark table spanning within-BM and external methods."""
     combined = pd.concat([internal_summary, external_summary], ignore_index=True)
     methods = [*EI_INTERNAL_METHODS, *EI_EXTERNAL_METHODS]
-    return _story_table(combined, methods=methods, benchmark_set=benchmark_set)
+    return _story_table(
+        combined, methods=methods, benchmark_set=benchmark_set, numeric_pairs=numeric_pairs
+    )
 
 
 def ei_interval_story_table(
@@ -510,7 +519,7 @@ def plot_ei_shrinkage_sensitivity(
         methods = sorted(str(method) for method in subset["method"].drop_duplicates())
     families = ordered_families(subset["family"].drop_duplicates().tolist())
     metrics = [
-        ("mean_interval_score", "mean Winkler interval score"),
+        ("mean_interval_score", "grid-average Winkler score"),
         ("median_coverage", "median coverage"),
         ("median_ape", "median APE"),
     ]
@@ -555,7 +564,7 @@ def plot_ei_shrinkage_sensitivity(
                 ax.set_ylabel(f"{EI_METHOD_LABELS.get(method, method)}\n{ylabel}")
             else:
                 ax.set_ylabel(ylabel)
-            ax.set_xlabel(r"FGLS shrinkage $\delta$")
+            ax.set_xlabel(r"Covariance shrinkage $\delta$")
             ax.set_xticks(EI_SHRINKAGE_GRID)
             ax.grid(alpha=0.2, linewidth=0.6)
     axes[0, 0].legend(frameon=False, fontsize=9, loc="best")
@@ -607,7 +616,7 @@ def _plot_panels(
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
-        figsize=(4.6 * ncols, 3.0 * nrows),
+        figsize=(3.3 * ncols, 2.1 * nrows),
         dpi=600,
         sharex=True,
         sharey="row",
@@ -674,30 +683,30 @@ def _plot_panels(
                         zorder=2.0 + 0.2 * method_idx,
                     )
                 ax.set_xscale("log")
+                ax.tick_params(axis="y", labelsize=14)
                 ax.xaxis.set_minor_formatter(plt.NullFormatter())
                 ax.set_xlim(theta_lo, theta_hi)
                 if ylim is not None:
                     ax.set_ylim(*ylim)
                 ax.set_xticks(theta_ticks)
                 ax.set_xticklabels(
-                    [f"{theta:.2f}" for theta in theta_ticks],
-                    fontsize=7,
-                    rotation=35,
+                    [f"{theta:g}" for theta in theta_ticks],
+                    fontsize=12,
+                    rotation=40,
                     ha="right",
                 )
                 ax.tick_params(axis="x", pad=2)
                 ax.grid(alpha=0.25)
                 if row_idx == 0:
-                    ax.set_title(f"$\\xi$ = {xi:.2f}")
+                    ax.set_title(f"$\\xi$ = {xi:.2f}", fontsize=14)
                 if col_idx == 0:
-                    ylabel = (
-                        "absolute percentage error"
-                        if metric == "ape"
-                        else "mean Winkler interval score"
+                    ylabel = "median APE" if metric == "ape" else "mean Winkler score"
+                    family_name = (
+                        family_label(family).replace(" (q=", "\n(q=").replace(" AR(1)", "\nAR(1)")
                     )
-                    ax.set_ylabel(f"{family_label(family)}\n{ylabel}", fontsize=8)
+                    ax.set_ylabel(f"{family_name}\n{ylabel}", fontsize=12)
                 if row_idx == nrows - 1:
-                    ax.set_xlabel("true $\\theta$")
+                    ax.set_xlabel("true $\\theta$", fontsize=14)
     n_legend_cols = min(4, max(1, len(methods)))
     legend_rows = int(np.ceil(len(methods) / n_legend_cols))
     bottom_margin = 0.03 + 0.022 * legend_rows
@@ -723,7 +732,7 @@ def _plot_panels(
         bbox_to_anchor=(0.5, 0.004),
         ncol=n_legend_cols,
         frameon=False,
-        fontsize=8,
+        fontsize=13,
     )
     show_title = bool(title)
     if show_title:
@@ -955,6 +964,7 @@ def write_ei_benchmark_manuscript_artifacts(
         benchmark_summary,
         external_benchmark_summary,
         benchmark_set=UNIVERSAL_BENCHMARK_SET,
+        numeric_pairs=True,
     )
     ei_method_order = [
         EI_METHOD_LABELS[method]
@@ -982,18 +992,26 @@ def write_ei_benchmark_manuscript_artifacts(
             ei_summary_table,
             row_label="method",
             groups=ei_groups,
+            label_latex={
+                "Moving maxima (q=99)": r"Moving maxima (\(q=99\))",
+                "Northrop": r"\shortstack[l]{Northrop\\(fixed-\(b\))}",
+                "BB": r"\shortstack[l]{BB\\(fixed-\(b\))}",
+            },
             second_header_row_label=r"true $\xi$",
             second_header_row_label_raw=True,
             caption=(
-                f"Consolidated EI benchmark summary on the synthetic short-record persistence suite with "
-                f"\\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
-                f"\\(\\theta \\in \\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), and the Fréchet max-AR, moving-maxima \\(q=99\\), "
-                f"and Pareto additive AR(1) families, with \\(n={n_obs}\\). "
-                "Rows report methods and columns group representative scenarios by family and \\(\\xi\\). "
-                "In each cell, the first line reports mean Winkler interval score and the "
-                "second line reports median absolute percentage error, both summarized over "
-                "the \\(\\theta\\) grid. "
+                f"EI benchmark results for synthetic records of \\(N={n_obs}\\) observations "
+                "from the Fréchet max-AR, moving-maxima \\(q=99\\), and Pareto additive AR(1) "
+                "families. The parameter grid is \\(\\xi \\in \\{0.01, 0.50, 1.0, 5.0\\}\\) "
+                "and \\(\\theta \\in \\{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}\\). "
+                "Rows report methods and columns group results by process family and \\(\\xi\\). "
+                "Within each cell, the first line is the grid-average Winkler score "
+                "(mean of scenario-level means) over the \\(\\theta\\) grid; the second is the median "
+                "of scenario-level median absolute percentage errors (APE, expressed as a fraction) "
+                "over the same grid. "
                 "All interval metrics use 95\\% confidence intervals (\\(\\alpha = 0.05\\)). "
+                "Within each column, the unrounded minimum of each metric is bold, including "
+                "exact ties. "
                 "An FGLS attempt with degenerate bootstrap covariance is retained as noncoverage; "
                 "interval-score and point-error summaries are conditional on successful fits."
             ),
