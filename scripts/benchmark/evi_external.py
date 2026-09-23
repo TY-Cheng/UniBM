@@ -1,4 +1,4 @@
-"""Appendix-focused published EVI xi-estimator comparisons.
+"""Published EVI xi-estimator comparisons.
 
 These benchmarks reuse the same synthetic series as the main UniBM workflow but
 compare against published xi estimators outside the UniBM regression pipeline.
@@ -243,7 +243,7 @@ def evaluate_external_config(
     ci_method: Literal["asymptotic", "bootstrap"] = "asymptotic",
     cache_dir: Path | None = None,
 ) -> pd.DataFrame:
-    """Evaluate the appendix external xi estimators on one benchmark scenario.
+    """Evaluate the supplementary external xi estimators on one benchmark scenario.
 
     The external benchmark uses each estimator's native asymptotic Gaussian/Wald
     interval and does not maintain a separate shared-bootstrap sensitivity path.
@@ -431,7 +431,7 @@ def external_story_table(
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     methods: Iterable[str] = EXTERNAL_METHOD_ORDER,
 ) -> pd.DataFrame:
-    """Create a compact appendix table for proposed-vs-external xi comparison."""
+    """Create a compact supplementary table for proposed-vs-external xi comparison."""
     methods = [method for method in methods if method in EXTERNAL_METHOD_ORDER]
     combined = _stack_benchmark_summaries(
         internal_summary,
@@ -508,7 +508,7 @@ def external_story_latex(
     caption: str,
     label: str,
 ) -> str:
-    """Render the appendix external-comparison table as standalone LaTeX."""
+    """Render the supplementary external-comparison table as standalone LaTeX."""
     table = external_story_table(
         internal_summary,
         external_summary,
@@ -662,7 +662,7 @@ def interval_sharpness_story_latex(
     caption: str,
     label: str,
 ) -> str:
-    """Render the interval sharpness-calibration appendix table as LaTeX."""
+    """Render the interval sharpness-calibration supplementary table as LaTeX."""
     table = interval_sharpness_story_table(
         internal_summary,
         external_summary,
@@ -695,7 +695,7 @@ def plot_external_comparison_panels(
     title: str | None = None,
     save: bool = False,
 ) -> None:
-    """Plot appendix xi-comparison curves with interval score above APE."""
+    """Plot supplementary xi-comparison curves with interval score above APE."""
     methods = [method for method in methods if method in EXTERNAL_METHOD_ORDER]
     combined = _stack_benchmark_summaries(
         internal_summary,
@@ -815,7 +815,7 @@ def plot_external_comparison_panels(
         handletextpad=0.5,
     )
     if title is None:
-        title = "Appendix: proposed method versus published xi baselines"
+        title = "Proposed method versus published xi baselines"
     fig.suptitle(title, y=0.985)
     fig.tight_layout(rect=(0, 0.09, 1, 0.94))
     if save and file_path is not None:
@@ -1009,7 +1009,7 @@ def plot_interval_sharpness_scatter(
 ) -> None:
     """Plot median 95% interval width against median coverage for mixed methods.
 
-    This is a compact appendix diagnostic: the ideal region is narrow intervals
+    This is a compact supplementary diagnostic: the ideal region is narrow intervals
     with coverage close to the 0.95 reference line.
     """
     table = interval_sharpness_story_table(
@@ -1091,7 +1091,7 @@ def plot_interval_sharpness_scatter(
         fontsize=9,
     )
     if title is None:
-        title = "Appendix: 95% interval sharpness versus calibration"
+        title = "95% interval sharpness versus calibration"
     fig.suptitle(title, y=0.985)
     fig.tight_layout(rect=(0, 0.08, 1, 0.94))
     if save and file_path is not None:
@@ -1108,7 +1108,7 @@ def run_external_benchmark(
     cache_dir: Path | None = None,
     max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run the appendix external-xi benchmark on the default simulation grid."""
+    """Run the supplementary external-xi benchmark on the default simulation grid."""
     _validate_external_ci_method(ci_method)
     if configs is None:
         configs = default_simulation_configs()

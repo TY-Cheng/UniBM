@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 from .._runtime import prepare_matplotlib_env
 
@@ -13,7 +17,7 @@ from .models import ScalingFit
 
 
 def _pyplot():
-    """Import pyplot only when a plot is requested."""
+    """Prepare writable Matplotlib caches and lazily import pyplot on first plotting use."""
     prepare_matplotlib_env()
     import matplotlib.pyplot as plt
 
@@ -21,21 +25,14 @@ def _pyplot():
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
-    """Coerce optional output paths to ``Path`` objects."""
+    """Convert an optional output path to Path without resolving or creating it."""
     if file_path is None:
         return None
     return Path(file_path)
 
 
-def _should_close_figure(close: bool | None) -> bool:
-    """Close figures automatically in non-notebook batch usage by default."""
-    if close is not None:
-        return bool(close)
-    return "ipykernel" not in sys.modules
-
-
 def _save_figure_outputs(fig, file_path: Path) -> None:
-    """Save the requested figure to disk."""
+    """Create parent directories and save the figure, overwriting an existing file."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(file_path)
 
@@ -44,14 +41,22 @@ def plot_scaling_fit(
     fit: ScalingFit,
     *,
     file_path: Path | str | None = None,
-    dpi: int = 1200,
+    dpi: int = 150,
     title: str | None = None,
     save: bool = False,
-    close: bool | None = None,
+    close: bool = False,
     xlabel: str = "log(block size)",
     ylabel: str | None = None,
-) -> None:
-    """Plot an EVI scaling fit on the log-log block-size scale."""
+) -> tuple[Figure, Axes]:
+    """Plot an EVI scaling fit on the log-log block-size scale.
+
+    Return ``(fig, ax)`` for customization. No file is saved by default; set
+    ``save=True`` and ``file_path`` to save. Use ``close=True`` for batch jobs.
+    Both axes show natural-log coordinates. Highlight the selected plateau
+    and draw its fitted line; points outside it are shown for context.
+    Saving creates parent directories and replaces an existing output file.
+    A missing ``file_path`` skips saving even when ``save=True``.
+    """
     plt = _pyplot()
     if ylabel is None:
         if fit.target == "quantile":
@@ -91,8 +96,9 @@ def plot_scaling_fit(
     file_path = _resolved_file_path(file_path)
     if save and file_path is not None:
         _save_figure_outputs(fig, file_path)
-    if _should_close_figure(close):
+    if close:
         plt.close(fig)
+    return fig, ax
 
 
 __all__ = ["plot_scaling_fit"]

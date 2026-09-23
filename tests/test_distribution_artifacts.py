@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -33,7 +35,8 @@ class DistributionArtifactTests(unittest.TestCase):
         cls._tmpdir = tempfile.TemporaryDirectory()
         build_dir = Path(cls._tmpdir.name)
         subprocess.run(
-            ["uv", "build", "--wheel", "--sdist", "--out-dir", str(build_dir)],
+            # The default build creates the wheel from the sdist, not the checkout.
+            ["uv", "build", "--out-dir", str(build_dir)],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -52,12 +55,18 @@ class DistributionArtifactTests(unittest.TestCase):
             names = wheel.namelist()
             package_files = {name for name in names if name.startswith("unibm/")}
             self.assertEqual(package_files, EXPECTED_PACKAGE_FILES)
-            self.assertFalse(any(name.startswith("scripts/") for name in names))
-            self.assertFalse(any(name.startswith("data/") for name in names))
+            self.assertTrue(
+                all(
+                    name.startswith(("unibm/", f"unibm-{PACKAGE_VERSION}.dist-info/"))
+                    for name in names
+                )
+            )
             metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
             metadata = wheel.read(metadata_name).decode("utf-8")
 
         self.assertIn(f"Version: {PACKAGE_VERSION}", metadata)
+        self.assertIn("Author-email: Tuoyuan Cheng <tuoyuan.cheng@nus.edu.sg>", metadata)
+        self.assertIn("Maintainer-email: Tuoyuan Cheng <tuoyuan.cheng@nus.edu.sg>", metadata)
         self.assertIn(
             "Project-URL: Documentation, https://ty-cheng.github.io/UniBM/",
             metadata,
@@ -67,6 +76,32 @@ class DistributionArtifactTests(unittest.TestCase):
             "Project-URL: Changelog, https://github.com/TY-Cheng/UniBM/releases",
             metadata,
         )
+
+    def test_distributions_install_and_run_without_the_checkout(self) -> None:
+        """Exercise both install routes using only declared runtime dependencies."""
+        for artifact in (self._wheel, self._sdist):
+            with self.subTest(artifact=artifact.name):
+                result = subprocess.run(
+                    [
+                        "uv",
+                        "run",
+                        "--isolated",
+                        "--no-project",
+                        "--python",
+                        sys.executable,
+                        "--with",
+                        str(artifact),
+                        "python",
+                        "-I",
+                        str(ROOT / "tests" / "test_unibm_package_smoke.py"),
+                    ],
+                    cwd=self._tmpdir.name,
+                    env={**os.environ, "MPLBACKEND": "Agg"},
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_sdist_contains_library_sources_but_not_repo_workflow_directories(self) -> None:
         with tarfile.open(self._sdist, "r:gz") as sdist:
@@ -81,11 +116,9 @@ class DistributionArtifactTests(unittest.TestCase):
         }
         self.assertEqual(package_files, EXPECTED_PACKAGE_FILES)
         self.assertIn(f"{prefix}README.md", names)
-        self.assertIn(f"{prefix}pyproject.toml", names)
-        self.assertFalse(any(name.startswith(f"{prefix}scripts/application/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}scripts/benchmark/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}scripts/data_prep/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}scripts/shared/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}docs/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}tests/") for name in names))
-        self.assertFalse(any(name.startswith(f"{prefix}data/") for name in names))
+        # Hatchling preserves .gitignore as part of the source build configuration.
+        build_files = {".gitignore", "LICENSE", "README.md", "pyproject.toml", "PKG-INFO"}
+        self.assertEqual(
+            {name.removeprefix(prefix) for name in names if not name.startswith(package_prefix)},
+            build_files,
+        )

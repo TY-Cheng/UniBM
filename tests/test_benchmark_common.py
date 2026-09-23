@@ -109,13 +109,13 @@ class BenchmarkCommonTests(unittest.TestCase):
 
         latex = render_latex_table(
             table,
-            caption=r"Appendix \(\xi\) summary",
+            caption=r"Supplementary \(\xi\) summary",
             label="tab:test-raw",
             header_latex={"$\\xi$ [range]": r"$\xi$ [range]"},
             caption_raw=True,
         )
 
-        self.assertIn(r"\caption{Appendix \(\xi\) summary}", latex)
+        self.assertIn(r"\caption{Supplementary \(\xi\) summary}", latex)
         self.assertIn(r"Application & $\xi$ [range] \\", latex)
         self.assertNotIn(r"\$\textbackslash{}xi\$", latex)
 

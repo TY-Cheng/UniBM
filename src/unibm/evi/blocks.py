@@ -16,7 +16,13 @@ def block_maxima(
     block_size: int,
     sliding: bool = True,
 ) -> np.ndarray:
-    """Compute sliding or disjoint block maxima."""
+    """Return maxima of complete windows in a one-dimensional series.
+
+    ``block_size`` must be an integer at least two. Sliding windows advance
+    one observation at a time; disjoint windows discard the incomplete tail.
+    Windows containing any nonfinite observation are omitted without joining
+    observations across the gap. Return an empty array if no window fits.
+    """
     arr = as_1d_float_array(vec)
     if (
         isinstance(block_size, (bool, np.bool_))
@@ -46,7 +52,15 @@ def block_summary_curve(
     quantile: float = 0.5,
     target: str = "quantile",
 ) -> BlockSummaryCurve:
-    """Summarize block maxima over multiple block sizes."""
+    """Compute one block-maxima summary for each validated block size.
+
+    ``target`` is ``"quantile"``, ``"mean"``, or ``"mode"``; quantiles use
+    ``0 < quantile < 1``. Return aligned sizes, maxima counts, and summary
+    values, including unavailable values as NaN. Zeros remain in quantile
+    and mean calculations. ``positive_mask`` selects only finite, positive
+    summaries with at least one maximum for subsequent log-log regression;
+    it does not filter the original observations.
+    """
     arr = as_1d_float_array(vec)
     if target not in {"quantile", "mean", "mode"}:
         raise ValueError(f"Unsupported target: {target}")

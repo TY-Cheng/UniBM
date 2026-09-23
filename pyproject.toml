@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Block-maxima inference methods for heavy-tailed time series under serial dependence."
 requires-python = ">=3.11"
 authors = [{ name = "Tuoyuan Cheng", email = "tuoyuan.cheng@nus.edu.sg" }]
+maintainers = [{ name = "Tuoyuan Cheng", email = "tuoyuan.cheng@nus.edu.sg" }]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

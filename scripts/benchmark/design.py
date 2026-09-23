@@ -32,7 +32,7 @@ from unibm.evi import (
 )
 
 
-# The full benchmark grid is expensive, but the paper-scale design should still
+# The full benchmark grid is expensive, but the report-scale design should still
 # use enough Monte Carlo replicates to stabilize scenario summaries and enough
 # covariance-bootstrap draws to support the internal FGLS fits.
 BENCHMARK_MONTE_CARLO_REPS = 100
@@ -207,7 +207,7 @@ def sort_by_method_order(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def ordered_families(values: Iterable[str]) -> list[str]:
-    """Return families in the manuscript order, preserving unknown extras last."""
+    """Return families in the report order, preserving unknown extras last."""
     seen = {str(value) for value in values}
     ordered = [family for family in FAMILY_ORDER if family in seen]
     extras = sorted(seen.difference(FAMILY_ORDER))
@@ -228,7 +228,7 @@ def parse_moving_maxima_q(family: str) -> int | None:
 
 
 def family_label(family: str) -> str:
-    """Render a family id into a stable manuscript-friendly label."""
+    """Render a family id into a stable report-friendly label."""
     q = parse_moving_maxima_q(family)
     if q is not None:
         return f"Moving maxima (q={q})"
@@ -505,7 +505,7 @@ def default_evi_simulation_configs(
     """Build the default EVI benchmark grid.
 
     The EVI workflow keeps the full xi range but only a representative slice of
-    theta values so manuscript plots stay readable and routine reruns remain
+    theta values so report plots stay readable and routine reruns remain
     tractable.
     """
     configs: list[SimulationConfig] = []

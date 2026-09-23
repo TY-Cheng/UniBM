@@ -18,7 +18,13 @@ def scale_1d_pseudo_likelihood(
     hessian: float,
     empirical_variance: float,
 ) -> Callable[[float], float]:
-    """Apply a 1D Chandler-Bate scale adjustment to a pseudo-log-likelihood."""
+    """Return a Chandler--Bate adjusted scalar pseudo-log-likelihood.
+
+    Rescale distance from ``mle`` by ``sqrt(-hessian / empirical_variance)``.
+    ``hessian`` is the second derivative of the total log-likelihood at its
+    maximum; ``empirical_variance`` is the caller's positive score-variance
+    estimate. This helper does not estimate dependence between scores.
+    """
     if hessian >= 0:
         raise ValueError("Hessian must be strictly negative at the MLE maximum.")
     if empirical_variance <= 0:
@@ -26,6 +32,7 @@ def scale_1d_pseudo_likelihood(
     scale = float(np.sqrt(-hessian / empirical_variance))
 
     def adjusted_loglik(theta: float) -> float:
+        """Evaluate the original likelihood at the rescaled displacement from the MLE."""
         adjusted_theta = float(mle + scale * (theta - mle))
         return float(loglik_func(adjusted_theta))
 
@@ -40,11 +47,19 @@ def find_1d_profile_likelihood_intervals(
     *,
     alpha: float = EI_ALPHA,
 ) -> tuple[float, float]:
-    """Return a central profile-likelihood interval for a scalar parameter."""
+    """Find scalar likelihood-ratio endpoints using a chi-square(1) cutoff.
+
+    Search each side of ``mle`` within the supplied bounds for a log-likelihood
+    drop of ``chi2.ppf(1 - alpha, 1) / 2``. A bound is returned if it remains
+    inside the likelihood-ratio region; root-finding exceptions also return
+    that side's bound with a warning. Calibration is asymptotic and does not
+    provide an exact boundary correction or an equal-tailed interval.
+    """
     max_loglik = float(loglik_func(mle))
     threshold_value = max_loglik - 0.5 * float(chi2.ppf(1.0 - alpha, df=1))
 
     def root_func(theta: float) -> float:
+        """Measure log-likelihood above the cutoff; treat evaluation errors as outside."""
         try:
             return float(loglik_func(theta)) - threshold_value
         except (ValueError, ZeroDivisionError, OverflowError):

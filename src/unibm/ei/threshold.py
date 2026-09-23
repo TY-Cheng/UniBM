@@ -17,7 +17,11 @@ from .models import EiPreparedBundle, ExtremalIndexEstimate, ThresholdCandidate
 
 
 def _validate_k_grid(k_grid: tuple[int, ...]) -> tuple[int, ...]:
-    """Return a non-empty, strictly increasing grid of non-negative integers."""
+    """Return an increasing tuple of non-negative integer run lengths.
+
+    Reject empty/non-1D grids, duplicates, non-finite or fractional values,
+    complex inputs and boolean arrays; preserve the supplied selection order.
+    """
     try:
         raw = np.asarray(k_grid)
     except (TypeError, ValueError) as exc:
@@ -43,7 +47,11 @@ def _resolve_threshold_quantiles(
     bundle: EiPreparedBundle,
     threshold_quantiles: tuple[float, ...] | None,
 ) -> tuple[float, ...]:
-    """Resolve an optional estimator subset against its prepared bundle."""
+    """Return all prepared threshold quantiles or a validated increasing subset.
+
+    Explicit quantiles must already exist as bundle keys. This does not compute
+    new exceedance indices or silently reorder thresholds.
+    """
     available = _validate_threshold_quantiles(tuple(bundle.threshold_candidates))
     if threshold_quantiles is None:
         return available
@@ -63,7 +71,12 @@ def _select_between_candidates(
     preferred: ThresholdCandidate,
     alternative: ThresholdCandidate,
 ) -> ThresholdCandidate:
-    """Prefer the first candidate when the intervals overlap, else the second."""
+    """Keep the preferred candidate when finite estimates have overlapping CIs.
+
+    Otherwise choose the alternative; a non-finite point estimate loses to a
+    finite one. If both estimates are non-finite, return the alternative. This
+    is a sequential tuning rule, not a calibrated multiple-comparison test.
+    """
     if not np.isfinite(preferred.theta_hat):
         return alternative
     if not np.isfinite(alternative.theta_hat):
@@ -74,7 +87,11 @@ def _select_between_candidates(
 
 
 def _inter_exceedance_times(indices: np.ndarray) -> np.ndarray:
-    """Return the raw inter-exceedance times from exceedance indices."""
+    """Return successive differences of sorted exceedance indices in observation steps.
+
+    The caller supplies increasing indices on the intended EI clock. Fewer than
+    two indices yield an empty float array; no sorting or gap correction occurs.
+    """
     indices = np.asarray(indices, dtype=int)
     if indices.size < 2:
         return np.asarray([], dtype=float)
@@ -82,7 +99,15 @@ def _inter_exceedance_times(indices: np.ndarray) -> np.ndarray:
 
 
 def _ferro_segers_from_times(times: np.ndarray) -> tuple[float, float]:
-    """Return the Ferro-Segers point estimate and asymptotic SE from inter-exceedance times."""
+    """Return the Ferro--Segers moment estimate and a delta-method theta-scale SE.
+
+    Require two finite positive times after filtering. Use moments of ``T``
+    and ``T**2`` when every gap is at most two, otherwise moments of ``T - 1``
+    and ``(T - 1) * (T - 2)``. Clip theta to [EI_TINY, 1], but compute the SE
+    from the untruncated moment formula. The covariance-of-means approximation
+    divides the empirical moment covariance by the number of gaps; it does not
+    estimate serial covariances between gaps.
+    """
     t = np.asarray(times, dtype=float)
     t = t[np.isfinite(t) & (t > 0)]
     if t.size < 2:
@@ -111,7 +136,19 @@ def estimate_ferro_segers(
     *,
     threshold_quantiles: tuple[float, ...] | None = None,
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` using all bundle thresholds or an increasing explicit subset."""
+    """Estimate theta from Ferro--Segers inter-exceedance-time moments.
+
+    Use ``prepare_ei_bundle`` output and either all its threshold quantiles or
+    an increasing subset of existing quantiles. Skip thresholds with fewer than
+    three strict exceedances; raise ``ValueError`` if none are usable.
+
+    Traverse thresholds in order, retaining the current candidate when its
+    nominal 95% Wald interval overlaps the next candidate's interval, otherwise
+    replacing it. Return the selected theta, bounded interval, delta-method SE,
+    and threshold metadata in an ``ExtremalIndexEstimate``. The interval
+    conditions on the selected threshold and does not include tuning uncertainty
+    or serial covariance between successive gaps.
+    """
     candidates: list[ThresholdCandidate] = []
     for quantile in _resolve_threshold_quantiles(bundle, threshold_quantiles):
         indices = bundle.threshold_candidates[float(quantile)]
@@ -155,7 +192,14 @@ def estimate_ferro_segers(
 def _kgaps_profile_fit(
     times: np.ndarray, *, run_k: int, exceedance_rate: float
 ) -> ThresholdCandidate:
-    """Fit K-gaps with a profile interval and observed-information ``theta`` SE."""
+    """Fit the zero/exponential K-gap likelihood at a fixed threshold and run length.
+
+    Scale ``max(times - run_k, 0)`` by the exceedance rate. Zero gaps contribute
+    ``log(1 - theta)`` and positive gaps contribute ``2 * log(theta) - theta * gap``.
+    At least two finite scaled gaps must remain. Return a candidate with nominal
+    95% profile endpoints and observed-information SE; threshold fields remain
+    NaN for the caller to fill. No serial score covariance is estimated here.
+    """
     raw_gaps = np.maximum(np.asarray(times, dtype=float) - float(run_k), 0.0)
     scaled_gaps = exceedance_rate * raw_gaps
     scaled_gaps = scaled_gaps[np.isfinite(scaled_gaps)]
@@ -167,6 +211,7 @@ def _kgaps_profile_fit(
     n_pos = int(positive.size)
 
     def loglik(theta: float) -> float:
+        """Evaluate the K-gap log-likelihood inside the numerically bounded theta domain."""
         theta = float(theta)
         if not (EI_TINY <= theta <= 1.0 - EI_TINY):
             return -np.inf
@@ -176,6 +221,7 @@ def _kgaps_profile_fit(
         return float(value)
 
     def objective(theta: float) -> float:
+        """Negate the K-gap log-likelihood for bounded scalar minimization."""
         return -loglik(theta)
 
     optimum = minimize_scalar(objective, bounds=(EI_TINY, 1.0 - EI_TINY), method="bounded")
@@ -207,7 +253,22 @@ def estimate_k_gaps(
     threshold_quantiles: tuple[float, ...] | None = None,
     k_grid: tuple[int, ...] = (1, 2),
 ) -> ExtremalIndexEstimate:
-    """Estimate ``theta`` over all bundle thresholds or an increasing explicit subset."""
+    """Estimate theta from K-gap likelihoods and select a threshold/run-length pair.
+
+    ``bundle`` supplies strict-exceedance indices on the caller's observation
+    clock. ``threshold_quantiles`` selects an increasing subset of prepared
+    quantiles or all of them when omitted. ``k_grid`` is an increasing sequence
+    of non-negative integer run lengths in observation steps (default 1 and 2).
+
+    At each threshold with at least three exceedances, compare candidates in
+    increasing K order: retain the current fit if its nominal 95% profile CI
+    overlaps the next, otherwise replace it. Apply the same rule across threshold
+    winners. Raise ``ValueError`` if no threshold has enough exceedances.
+
+    Return theta, its profile interval and observed-information SE, and selected
+    threshold/K metadata. Inference conditions on this selected pair; it does not
+    include tuning uncertainty or a serial-dependence score adjustment.
+    """
     k_grid = _validate_k_grid(k_grid)
     threshold_winners: list[ThresholdCandidate] = []
     for quantile in _resolve_threshold_quantiles(bundle, threshold_quantiles):

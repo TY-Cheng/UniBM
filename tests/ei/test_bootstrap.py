@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from unibm.ei._validation import _finite_nonnegative_series, _finite_positive_series
+from unibm.ei._validation import _validate_ei_series
 from unibm.ei.bootstrap import bootstrap_bm_ei_path, bootstrap_bm_ei_path_draws
 from unibm.ei.paths import _build_bm_paths_from_values
 
@@ -25,11 +25,7 @@ def _baseline_bootstrap_bm_ei_path_draws(
     }
     for rep, sample in enumerate(samples):
         try:
-            sample_values = (
-                _finite_nonnegative_series(sample)
-                if allow_zeros
-                else _finite_positive_series(sample)
-            )
+            sample_values = _validate_ei_series(sample, allow_zeros=allow_zeros)
             sample_paths = _build_bm_paths_from_values(sample_values, block_sizes)
         except ValueError:
             continue

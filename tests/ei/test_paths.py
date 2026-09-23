@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from unibm.ei._validation import _finite_nonnegative_series, _finite_positive_series
+from unibm.ei._validation import _validate_ei_series
 from unibm.ei.models import EiPathBundle, EiStableWindow
 from unibm.ei.paths import (
     _build_bm_paths_from_values,
@@ -74,9 +74,9 @@ class EiPathsTests(unittest.TestCase):
         return values
 
     def test_series_validation_preserves_positions_and_rejects_invalid_support(self) -> None:
-        positive = _finite_positive_series(np.arange(1.0, 40.0, dtype=float))
-        nonnegative = _finite_nonnegative_series(
-            np.concatenate([[0.0], np.arange(1.0, 40.0, dtype=float)])
+        positive = _validate_ei_series(np.arange(1.0, 40.0, dtype=float), allow_zeros=False)
+        nonnegative = _validate_ei_series(
+            np.concatenate([[0.0], np.arange(1.0, 40.0, dtype=float)]), allow_zeros=True
         )
         np.testing.assert_array_equal(positive, np.arange(1.0, 40.0, dtype=float))
         np.testing.assert_array_equal(
@@ -87,21 +87,21 @@ class EiPathsTests(unittest.TestCase):
         invalid_positive = np.arange(1.0, 40.0, dtype=float)
         invalid_positive[10] = np.nan
         with self.assertRaisesRegex(ValueError, "finite"):
-            _finite_positive_series(invalid_positive)
+            _validate_ei_series(invalid_positive, allow_zeros=False)
         with self.assertRaisesRegex(ValueError, "strictly positive"):
-            _finite_positive_series(np.concatenate([[0.0], np.arange(1.0, 40.0)]))
+            _validate_ei_series(np.concatenate([[0.0], np.arange(1.0, 40.0)]), allow_zeros=False)
 
         invalid_nonnegative = np.arange(40.0, dtype=float)
         invalid_nonnegative[10] = np.inf
         with self.assertRaisesRegex(ValueError, "finite"):
-            _finite_nonnegative_series(invalid_nonnegative)
+            _validate_ei_series(invalid_nonnegative, allow_zeros=True)
         with self.assertRaisesRegex(ValueError, "non-negative"):
-            _finite_nonnegative_series(np.concatenate([[-1.0], np.arange(39.0)]))
+            _validate_ei_series(np.concatenate([[-1.0], np.arange(39.0)]), allow_zeros=True)
 
         with self.assertRaisesRegex(ValueError, "at least 32 observations"):
-            _finite_positive_series(np.arange(1.0, 10.0, dtype=float))
+            _validate_ei_series(np.arange(1.0, 10.0, dtype=float), allow_zeros=False)
         with self.assertRaisesRegex(ValueError, "at least 32 observations"):
-            _finite_nonnegative_series(np.arange(10.0, dtype=float))
+            _validate_ei_series(np.arange(10.0, dtype=float), allow_zeros=True)
 
     def test_prepare_bundle_requires_clock_choice_and_valid_block_grid(self) -> None:
         values = self._positive_sample()

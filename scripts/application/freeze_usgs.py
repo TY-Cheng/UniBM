@@ -1,4 +1,4 @@
-"""Freeze the manuscript USGS streamflow sites from a curated candidate pool."""
+"""Freeze the report USGS streamflow sites from a curated candidate pool."""
 # ruff: noqa: E402
 
 from __future__ import annotations

@@ -109,7 +109,17 @@ class UniBmPackageStructureTests(unittest.TestCase):
         self.assertIs(unibm.ei, ei_module)
         self.assertEqual(
             set(unibm.__all__),
-            {"__version__", "ei", "evi", "estimate_design_life_level", "estimate_evi_quantile"},
+            {
+                "__version__",
+                "ei",
+                "evi",
+                "estimate_evi_quantile",
+                "prepare_ei_bundle",
+                "bootstrap_bm_ei_path",
+                "estimate_pooled_bm_ei",
+                "estimate_design_life_level",
+                "estimate_design_life_level_interval",
+            },
         )
 
     def test_numerical_imports_do_not_load_optional_plotting_stack(self) -> None:
@@ -119,11 +129,22 @@ import os
 import sys
 
 import unibm
-from unibm import estimate_design_life_level, estimate_evi_quantile
-import unibm.ei
+root_is_lazy = not any(name.startswith(("unibm.evi", "unibm.ei")) for name in sys.modules)
+from unibm import (
+    estimate_evi_quantile,
+    prepare_ei_bundle,
+    bootstrap_bm_ei_path,
+    estimate_pooled_bm_ei,
+    estimate_design_life_level,
+    estimate_design_life_level_interval,
+)
 
 print(json.dumps({
-    "callable_headline_api": callable(estimate_design_life_level) and callable(estimate_evi_quantile),
+    "root_is_lazy": root_is_lazy,
+    "callable_headline_api": all(callable(func) for func in (
+        estimate_evi_quantile, prepare_ei_bundle, bootstrap_bm_ei_path,
+        estimate_pooled_bm_ei, estimate_design_life_level, estimate_design_life_level_interval,
+    )),
     "matplotlib_loaded": any(name == "matplotlib" or name.startswith("matplotlib.") for name in sys.modules),
     "pandas_loaded": any(name == "pandas" or name.startswith("pandas.") for name in sys.modules),
     "mplconfigdir": os.environ.get("MPLCONFIGDIR"),
@@ -142,6 +163,7 @@ print(json.dumps({
         )
         result = json.loads(completed.stdout)
 
+        self.assertTrue(result["root_is_lazy"])
         self.assertTrue(result["callable_headline_api"])
         self.assertFalse(result["matplotlib_loaded"])
         self.assertFalse(result["pandas_loaded"])

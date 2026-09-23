@@ -14,7 +14,11 @@ def candidate_max_spectrum_scales(
     min_scale: int = 1,
     min_blocks: int = 2,
 ) -> np.ndarray:
-    """Construct dyadic block-size scales for max-spectrum estimation."""
+    """Return integer exponents j with at least ``min_blocks`` blocks of size 2**j.
+
+    The grid starts at ``min_scale`` and is empty when the series is too
+    short. These are scale exponents, not block sizes themselves.
+    """
     if n_obs < 2**min_scale:
         return np.empty(0, dtype=int)
     j_max = int(np.floor(np.log2(n_obs)))
@@ -24,7 +28,11 @@ def candidate_max_spectrum_scales(
 
 
 def _validate_spectrum_series(sample: np.ndarray) -> np.ndarray:
-    """Validate a max-spectrum series without changing its temporal positions."""
+    """Require a 1D finite series with at least eight observations.
+
+    Keep temporal positions and nonpositive observations; positivity is
+    checked later on each block maximum rather than on individual values.
+    """
     vec = as_1d_float_array(sample)
     if not np.all(np.isfinite(vec)):
         raise ValueError("Max-spectrum requires every observation to be finite.")
@@ -64,7 +72,13 @@ def _weighted_slope_with_se(
     y: np.ndarray,
     weights: np.ndarray,
 ) -> tuple[float, float]:
-    """Return the weighted slope and HC1-style sandwich SE in one dimension."""
+    """Fit an intercept and weighted slope with an HC1 residual sandwich SE.
+
+    Inputs are aligned 1D arrays; discard nonfinite entries and nonpositive
+    weights. Fewer than three retained points gives (NaN, NaN). The sandwich
+    uses squared weights and a residual degrees-of-freedom correction;
+    it does not model correlations between scale ordinates.
+    """
     w = np.asarray(weights, dtype=float)
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -96,7 +110,11 @@ def _max_spectrum_curve(
     sample: np.ndarray,
     scales: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the max-spectrum ordinates and effective block counts."""
+    """Return mean log2 maxima and complete-block counts for each dyadic scale.
+
+    Keep original time order and drop each scale's incomplete tail. Every
+    complete-block maximum must be positive, otherwise raise ValueError.
+    """
     vec = _validate_spectrum_series(sample)
     scales = _validate_spectrum_scales(scales, n_obs=vec.size)
     y_values: list[float] = []
@@ -120,7 +138,12 @@ def _max_spectrum_path(
     *,
     min_scale_count: int = 3,
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Construct the start-scale path for the max-spectrum slope estimator."""
+    """Fit a weighted slope for each eligible suffix of the dyadic scale grid.
+
+    Each suffix contains at least ``min_scale_count`` entries and ends at
+    the largest scale; weights are complete-block counts. Return start
+    scales, their slopes, and the common largest scale exponent.
+    """
     if scales.size < min_scale_count:
         raise ValueError("Max-spectrum requires at least three usable dyadic scales.")
     j_max = int(scales[-1])
@@ -142,7 +165,15 @@ def estimate_max_spectrum_evi(
     scales: np.ndarray | None = None,
     min_scale_count: int = 3,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with the dependent max-spectrum estimator."""
+    """Estimate xi from weighted slopes of mean log2 block maxima versus scale.
+
+    Preserve the finite series' time order and require positive maxima at
+    every chosen dyadic scale. Fit suffixes of at least ``min_scale_count``
+    scales, then choose a stable start-scale window and its lower-middle
+    observed start. Return the selected slope, path, and a nominal 95% Wald
+    interval using a scale-regression HC1 SE. That SE does not explicitly
+    adjust for dependence between scales or start-scale selection.
+    """
     vec = _validate_spectrum_series(sample)
     if scales is None:
         scales = candidate_max_spectrum_scales(vec.size, min_scale=1, min_blocks=2)
@@ -156,6 +187,7 @@ def estimate_max_spectrum_evi(
     )
 
     def se_fn(_: float, selected_level: int) -> float:
+        """Recompute the selected suffix regression SE; the passed xi value is unused."""
         matching = np.flatnonzero(scales == selected_level)
         if matching.size != 1:
             return float("nan")

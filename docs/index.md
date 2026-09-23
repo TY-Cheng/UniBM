@@ -90,8 +90,8 @@
 
 <div class="unibm-card-grid">
   <a class="unibm-card" href="api/public-api/">
-    <h3>Public API</h3>
-    <p>Start from the top-level package namespace and the recommended entrypoints.</p>
+    <h3>API Overview</h3>
+    <p>Find EVI, EI, and design-life estimators, their defaults, and explicit choices.</p>
   </a>
   <a class="unibm-card" href="api/evi/">
     <h3>EVI Namespace</h3>

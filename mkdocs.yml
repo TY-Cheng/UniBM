@@ -47,7 +47,7 @@ nav:
       - NFIP claims: cases/nfip-claims.md
   - Validation: validation.md
   - API Reference:
-      - Public API: api/public-api.md
+      - API Overview: api/public-api.md
       - EVI Namespace: api/evi.md
       - EI Namespace: api/ei.md
       - CDF Helper: api/cdf.md

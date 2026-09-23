@@ -1,4 +1,4 @@
-"""Paper-subset artifact manifest for the manuscript-facing build."""
+"""Index the curated report artifacts; this is not a record of numerical provenance."""
 # ruff: noqa: E402
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _relative(path: Path, *, root: Path) -> str:
 
 
 def _git_output(repo_root: Path, *args: str) -> str:
-    """Return one Git query result for provenance serialization."""
+    """Return the code checkout state recorded when the index is written."""
     return subprocess.check_output(["git", *args], cwd=repo_root, text=True).strip()
 
 
@@ -72,49 +72,54 @@ def _table_entry(
     return entry
 
 
-def build_paper_subset_manifest(root: Path | str = ".") -> Path:
-    """Write the paper-subset artifact manifest for the current manuscript."""
+def build_report_subset_manifest(root: Path | str = ".") -> Path:
+    """Write expected paths, labels, producers, and placements for the report subset.
+
+    Version fields describe this index's creation state, not the versions used
+    to calculate its listed artifacts. Writing the index neither regenerates
+    nor verifies those files, which may not yet exist at the destination.
+    """
     dirs = resolve_repo_dirs(root)
     repo_root = dirs["DIR_WORK"]
     workspace_root = dirs["DIR_WORKSPACE"]
-    manuscript_dir = dirs["DIR_MANUSCRIPT"]
-    figure_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
-    table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
-    manifest_path = manuscript_dir / "paper_subset_manifest.json"
-    manuscript_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = dirs["DIR_REPORT"]
+    figure_dir = dirs["DIR_REPORT_FIGURE"]
+    table_dir = dirs["DIR_REPORT_TABLE"]
+    manifest_path = report_dir / "report_subset_manifest.json"
+    report_dir.mkdir(parents=True, exist_ok=True)
 
     entries = [
         _figure_entry(
             label="fig:benchmark-evi-main",
-            placement="main",
+            placement="primary",
             generated_by="scripts/benchmark/evi_report.py",
-            paths=[figure_dir / "benchmark_summary.pdf"],
+            paths=[figure_dir / "benchmark_evi_summary.pdf"],
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:benchmark-evi-targets",
-            placement="main",
+            placement="primary",
             generated_by="scripts/benchmark/evi_report.py",
-            paths=[figure_dir / "benchmark_targets.pdf"],
+            paths=[figure_dir / "benchmark_evi_targets.pdf"],
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:benchmark-ei-main",
-            placement="main",
+            placement="primary",
             generated_by="scripts/benchmark/ei_report.py",
             paths=[figure_dir / "benchmark_ei_summary.pdf"],
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:benchmark-ei-targets",
-            placement="main",
+            placement="primary",
             generated_by="scripts/benchmark/ei_report.py",
             paths=[figure_dir / "benchmark_ei_targets.pdf"],
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:application-streamflow",
-            placement="main",
+            placement="primary",
             generated_by="scripts/application/build.py",
             paths=[
                 figure_dir / "application_composite_tx_streamflow.pdf",
@@ -124,7 +129,7 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
         ),
         _figure_entry(
             label="fig:application-nfip",
-            placement="main",
+            placement="primary",
             generated_by="scripts/application/build.py",
             paths=[
                 figure_dir / "application_composite_tx_nfip_claims.pdf",
@@ -133,81 +138,80 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-summary-main",
-            placement="main-supporting",
+            label="tab:application-summary",
+            placement="primary-supporting",
             generated_by="scripts/application/build.py",
-            path=table_dir / "application_summary_main.tex",
-            note="Paper-facing snapshot aligned to the curated four-case subset.",
+            path=table_dir / "application_summary.tex",
+            note="Report-facing snapshot aligned to the curated four-case subset.",
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:benchmark-evi-shrinkage",
-            placement="appendix",
+            placement="supplementary",
             generated_by="scripts/benchmark/evi_report.py",
-            paths=[figure_dir / "benchmark_shrinkage_sensitivity.pdf"],
+            paths=[figure_dir / "benchmark_evi_shrinkage_sensitivity.pdf"],
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:benchmark-evi-summary-main",
-            placement="appendix",
+            label="tab:benchmark-evi-summary",
+            placement="supplementary",
             generated_by="scripts/benchmark/evi_report.py",
-            path=table_dir / "benchmark_evi_summary_main.tex",
+            path=table_dir / "benchmark_evi_summary.tex",
             root=workspace_root,
         ),
         _figure_entry(
             label="fig:benchmark-ei-shrinkage",
-            placement="appendix",
+            placement="supplementary",
             generated_by="scripts/benchmark/ei_report.py",
             paths=[figure_dir / "benchmark_ei_shrinkage_sensitivity.pdf"],
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:benchmark-ei-summary-main",
-            placement="appendix",
+            label="tab:benchmark-ei-summary",
+            placement="supplementary",
             generated_by="scripts/benchmark/ei_report.py",
-            path=table_dir / "benchmark_ei_summary_main.tex",
+            path=table_dir / "benchmark_ei_summary.tex",
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-selection-sensitivity-main",
-            placement="appendix",
+            label="tab:application-selection-sensitivity",
+            placement="supplementary",
             generated_by="scripts/application/build.py",
-            path=table_dir / "application_selection_sensitivity_main.tex",
+            path=table_dir / "application_selection_sensitivity.tex",
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-extrapolation-main",
-            placement="appendix",
+            label="tab:application-extrapolation",
+            placement="supplementary",
             generated_by="scripts/application/build.py",
-            path=table_dir / "application_extrapolation_main.tex",
+            path=table_dir / "application_extrapolation.tex",
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-streamflow-gev-check-main",
-            placement="appendix",
+            label="tab:application-streamflow-gev-check",
+            placement="supplementary",
             generated_by="scripts/application/build.py",
-            path=table_dir / "application_streamflow_gev_check_main.tex",
+            path=table_dir / "application_streamflow_gev_check.tex",
             root=workspace_root,
         ),
         _table_entry(
-            label="tab:application-usgs-screening-main",
-            placement="appendix",
+            label="tab:application-usgs-screening",
+            placement="supplementary",
             generated_by="scripts/application/build.py",
-            path=table_dir / "application_usgs_screening_main.tex",
+            path=table_dir / "application_usgs_screening.tex",
             root=workspace_root,
         ),
     ]
     payload = {
-        "paper_scope": "curated four-case manuscript subset",
+        "report_scope": "curated four-case report subset",
         "analysis_end_date": ANALYSIS_END_DATE,
-        "code_commit": _git_output(repo_root, "rev-parse", "HEAD"),
-        "code_worktree_dirty": bool(
+        "manifest_code_commit": _git_output(repo_root, "rev-parse", "HEAD"),
+        "manifest_code_worktree_dirty": bool(
             _git_output(repo_root, "status", "--porcelain", "--untracked-files=normal")
         ),
         "workspace_root": _relative(workspace_root, root=workspace_root),
         "code_repo_root": _relative(repo_root, root=workspace_root),
-        "manuscript_repo_root": _relative(manuscript_dir, root=workspace_root),
-        "manuscript_source": _relative(manuscript_dir / "0_manuscript.tex", root=workspace_root),
+        "report_root": _relative(report_dir, root=workspace_root),
         "entries": entries,
     }
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n")
@@ -215,11 +219,11 @@ def build_paper_subset_manifest(root: Path | str = ".") -> Path:
 
 
 def main() -> None:
-    manifest_path = build_paper_subset_manifest()
-    status("manuscript", f"paper_subset_manifest: {manifest_path}")
+    manifest_path = build_report_subset_manifest()
+    status("report", f"report_subset_manifest: {manifest_path}")
 
 
-__all__ = ["build_paper_subset_manifest"]
+__all__ = ["build_report_subset_manifest"]
 
 
 if __name__ == "__main__":

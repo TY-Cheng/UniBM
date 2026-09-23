@@ -1,11 +1,19 @@
 # Worked Examples
 
+These examples use the current source checkout's core imports. With PyPI
+0.1.0, import the EI functions from `unibm.ei` and
+`estimate_design_life_level_interval` from `unibm.evi` instead; see the
+[version note](api/public-api.md#top-level-convenience-imports).
+
 ## Example 1: Median sliding-block EVI fit
 
 ```python
 import numpy as np
-from unibm import estimate_evi_quantile, estimate_design_life_level
-from unibm.evi import estimate_design_life_level_interval
+from unibm import (
+    estimate_evi_quantile,
+    estimate_design_life_level,
+    estimate_design_life_level_interval,
+)
 
 sample = np.random.default_rng(7).pareto(2.0, 4096) + 1.0
 fit = estimate_evi_quantile(
@@ -81,9 +89,7 @@ Parquet files.
 
 ```python
 import numpy as np
-from unibm.ei.preparation import prepare_ei_bundle
-from unibm.ei.bm import estimate_pooled_bm_ei
-from unibm.ei.bootstrap import bootstrap_bm_ei_path
+from unibm import prepare_ei_bundle, estimate_pooled_bm_ei, bootstrap_bm_ei_path
 
 sample = np.random.default_rng(21).pareto(2.0, 4096) + 1.0
 bundle = prepare_ei_bundle(sample, allow_zeros=False)

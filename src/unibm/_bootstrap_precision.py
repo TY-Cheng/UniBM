@@ -20,11 +20,25 @@ def adaptive_covariance(
     *,
     random_state: int | None,
 ) -> dict:
-    """Append paired draws until all reported targets satisfy the MCSE rule.
+    """Estimate covariance, extending paired bootstrap draws until MCSE is small.
 
-    ``evaluate`` re-fits the SAME observed path/window with the supplied full-grid
-    covariance and returns targets plus their statistical-SE denominators. Deletion
-    acts on whole bootstrap rows. Failed covariance fits remain errors, not OLS.
+    ``draw(count, rng)`` must return ``(count, n_levels)`` finite rows, each
+    representing one resampled path across the same grid. ``evaluate(cov)``
+    refits the same observed path and selected window using that covariance,
+    returning target values and their positive statistical standard errors.
+    Fit errors propagate; this helper never substitutes an OLS fit.
+
+    At checkpoints 128, 256, 512, 768 and 1024, delete-group jackknifing
+    estimates each target's Monte Carlo standard error (MCSE) due to the
+    estimated covariance. Stop when every MCSE/statistical-SE ratio is at
+    most 0.10. Two random partitions into eight groups are averaged; deletion
+    removes whole rows to preserve pairing across levels.
+
+    Return the accumulated samples, their full-grid covariance, and precision
+    metadata. If the cap is reached, return the last result with a warning
+    and ``bootstrap_precision_met=False``. Passing this numerical diagnostic
+    does not establish confidence-interval coverage or account for selection
+    uncertainty. ``random_state`` seeds local generators.
     """
     rng = np.random.default_rng(random_state)
     # Diagnostic randomness must not perturb the raw-bootstrap RNG prefix.
@@ -80,7 +94,13 @@ def adaptive_covariance(
 def matching_precision_metadata(
     bootstrap: dict | None, levels: np.ndarray, shrinkage: float
 ) -> dict:
-    """Do not claim precision for a reused covariance fitted with a different window."""
+    """Copy precision diagnostics only when the grid and shrinkage still match.
+
+    ``None`` gives an empty mapping. Otherwise retain the bootstrap policy,
+    but include MCSE diagnostics only if the supplied level labels and
+    shrinkage equal those recorded for the original precision check. This
+    prevents presenting a window-specific diagnostic as valid for another fit.
+    """
     if bootstrap is None:
         return {}
     policy = {"bootstrap_reps_policy": bootstrap.get("bootstrap_reps_policy", "fixed")}

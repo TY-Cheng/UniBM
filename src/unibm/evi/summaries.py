@@ -23,7 +23,14 @@ def _validate_quantile(quantile: float) -> float:
 
 
 def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True) -> float:
-    """Estimate a positive-sample mode via a log-scale KDE surrogate."""
+    """Approximate a positive-sample mode using a Gaussian KDE on ``log1p(x)``.
+
+    Nonfinite and nonpositive observations are removed; ``warn`` controls
+    warnings about the latter. Evaluate 256 evenly spaced transformed
+    points and apply the Jacobian before maximizing density on the original
+    scale. Return NaN for no retained values and the value itself for a
+    singleton. This grid-based surrogate is not an exact density mode.
+    """
     sample_arr = as_1d_float_array(sample)
     if warn:
         excluded = int(np.sum(np.isfinite(sample_arr) & (sample_arr <= 0)))
@@ -58,6 +65,7 @@ def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True)
         kernel = np.exp(-0.5 * ((grid[:, None] - chunk[None, :]) / bandwidth) ** 2)
         density += kernel.sum(axis=1)
     density /= log_sample.size
+    # For z = log(1 + x), dz/dx = exp(-z); maximize density in x, not in z.
     density_on_original_scale = density * np.exp(-grid)
     return float(np.expm1(grid[int(np.nanargmax(density_on_original_scale))]))
 
@@ -68,7 +76,14 @@ def summarize_block_maxima(
     target: str,
     quantile: float = 0.5,
 ) -> float:
-    """Evaluate the requested summary target on one set of block maxima."""
+    """Return a quantile, arithmetic mean, or KDE mode of finite maxima.
+
+    An empty finite sample returns NaN. Quantiles use NumPy's
+    ``median_unbiased`` interpolation with ``0 < quantile < 1``. Quantiles
+    and means retain zeros and negatives; the mode surrogate uses only
+    positive maxima. An unsupported target raises ValueError for a
+    nonempty finite sample.
+    """
     maxima_arr = np.asarray(maxima, dtype=float)
     maxima_arr = maxima_arr[np.isfinite(maxima_arr)]
     if maxima_arr.size == 0:

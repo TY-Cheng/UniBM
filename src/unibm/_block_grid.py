@@ -13,7 +13,12 @@ def validate_block_sizes(
     *,
     n_obs: int | None = None,
 ) -> np.ndarray:
-    """Return a validated, strictly increasing integer block-size grid."""
+    """Return a nonempty, strictly increasing 1D array of integer block sizes.
+
+    Integer-valued floats are accepted. Sizes must be at least two and, when
+    ``n_obs`` is supplied, no larger than the series. Invalid input raises
+    ``ValueError``; the function does not sort or deduplicate a supplied grid.
+    """
     try:
         raw = np.asarray(block_sizes)
     except (TypeError, ValueError) as exc:
@@ -46,7 +51,17 @@ def generate_block_sizes(
     geom: bool = True,
     min_disjoint_blocks: int = DEFAULT_MIN_DISJOINT_BLOCKS,
 ) -> np.ndarray:
-    """Generate an intermediate-range grid of block sizes."""
+    """Build a rounded, unique geometric or linear grid for a series of length n.
+
+    At least 32 observations are required. By default the lower bound is
+    ``max(5, ceil(n_obs**0.2))``; the upper bound balances ``n_obs**0.55``
+    against the requested number of disjoint blocks. A minimum span of four
+    takes precedence over that block-count target. Explicit bounds override
+    these defaults, except that a nonincreasing upper bound is expanded.
+
+    ``num_step`` counts grid points before rounding and deduplication, so the
+    returned 1D integer array can be shorter. All sizes must fit the series.
+    """
     if n_obs < 32:
         raise ValueError("At least 32 observations are required for block-size selection.")
     if min_block_size is None:

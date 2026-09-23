@@ -16,7 +16,17 @@ def select_penultimate_window(
     trim_fraction: float = 0.15,
     curvature_penalty: float = 2.0,
 ) -> PlateauWindow:
-    """Choose an intermediate block-size window by balancing linearity and curvature."""
+    """Select the lowest-scoring contiguous window of paired log summaries.
+
+    Inputs must be finite one-dimensional arrays of equal length, with
+    strictly increasing ``log_block_sizes``. Trim ``trim_fraction`` from
+    each end when at least ``min_points`` remain, then score every eligible
+    window by ``(OLS MSE + curvature_penalty * curvature) / sqrt(length)``.
+    Curvature is the mean absolute change between adjacent local slopes.
+    Return a ``PlateauWindow`` whose start/stop and mask index the input
+    arrays; stop is exclusive. This is a heuristic selection rule, not a
+    statistical test for a true scaling plateau.
+    """
     x = np.asarray(log_block_sizes, dtype=float)
     y = np.asarray(log_values, dtype=float)
     if x.ndim != 1 or y.ndim != 1 or y.size != x.size:
@@ -46,6 +56,7 @@ def select_penultimate_window(
     if hi - lo < min_points:
         lo = 0
         hi = n
+    # Prefix moments make each candidate OLS score independent of window length.
     prefix_x = prefix_sum(x)
     prefix_y = prefix_sum(y)
     prefix_x2 = prefix_sum(x * x)

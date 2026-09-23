@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from importlib import resources
+from importlib.metadata import version
+from pathlib import Path
 
 import numpy as np
 
 import unibm
-from unibm.ei import estimate_pooled_bm_ei, prepare_ei_bundle
+from unibm import estimate_pooled_bm_ei, prepare_ei_bundle
 
 
 class UniBmPackageSmokeTests(unittest.TestCase):
@@ -30,7 +33,15 @@ class UniBmPackageSmokeTests(unittest.TestCase):
         self.assertEqual(len(fit.plateau_bounds), 2)
         np.testing.assert_equal(design_life.shape, (2,))
         self.assertTrue(np.all(np.isfinite(design_life)))
-        self.assertEqual(unibm.__version__, "0.1.0")
+        self.assertEqual(unibm.__version__, version("unibm"))
+        lower, upper = unibm.estimate_design_life_level_interval(fit, years=np.array([10.0, 50.0]))
+        self.assertTrue(np.all(np.isfinite([lower, upper])))
+        self.assertTrue(np.all(lower <= design_life))
+        self.assertTrue(np.all(design_life <= upper))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "evi.png"
+            unibm.evi.plot_scaling_fit(fit, file_path=output, save=True, close=True)
+            self.assertTrue(output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_top_level_package_import_supports_minimal_formal_ei_workflow(self) -> None:
         sample = self._sample(seed=654)
@@ -45,6 +56,10 @@ class UniBmPackageSmokeTests(unittest.TestCase):
         self.assertGreater(len(fit.path_level), 0)
         self.assertEqual(len(fit.path_level), len(fit.path_theta))
         self.assertTrue(resources.files("unibm").joinpath("py.typed").is_file())
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "ei.png"
+            unibm.ei.plot_ei_fit(fit, file_path=output, save=True, close=True)
+            self.assertTrue(output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_top_level_package_keeps_new_grouped_subpackages_available(self) -> None:
         self.assertIs(unibm.evi.estimate_evi_quantile, unibm.estimate_evi_quantile)

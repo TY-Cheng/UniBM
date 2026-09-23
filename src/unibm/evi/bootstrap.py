@@ -20,13 +20,8 @@ _MODE_BOOTSTRAP_GRID_POINTS = 256
 _MODE_BOOTSTRAP_MAX_WORKING_BYTES = 64 * 1024 * 1024
 
 
-def _sliding_block_maxima(segment: np.ndarray, block_size: int) -> np.ndarray:
-    """Return circular sliding maxima inside one super-block segment."""
-    return circular_sliding_window_maximum(segment, block_size)
-
-
 def _disjoint_block_maxima(segment: np.ndarray, block_size: int) -> np.ndarray:
-    """Return disjoint maxima inside one super-block segment."""
+    """Return nonoverlapping segment maxima, discarding an incomplete final block."""
     n_block = segment.size // block_size
     if n_block < 1:
         return np.asarray([], dtype=float)
@@ -40,15 +35,24 @@ def _segment_block_maxima(
     *,
     sliding: bool,
 ) -> np.ndarray:
-    """Return the requested block-maxima scheme inside one super-block segment."""
+    """Return circular sliding or complete disjoint maxima within one segment.
+
+    Circular windows wrap inside this segment, never across the boundary
+    between independently resampled super-blocks.
+    """
     if sliding:
-        return _sliding_block_maxima(segment, block_size)
+        return circular_sliding_window_maximum(segment, block_size)
     return _disjoint_block_maxima(segment, block_size)
 
 
 @dataclass(frozen=True)
 class BlockSummaryBootstrapBackbone:
-    """Reusable super-block bootstrap state for multiple block-summary targets."""
+    """Cached maxima and common segment draws for resampling summary targets.
+
+    ``segment_draws`` has shape (replicates, segments). Each maxima bank has
+    shape (segments, maxima_per_segment) for its block size. Reusing the
+    backbone makes different summary targets share the same resampled data.
+    """
 
     block_sizes: np.ndarray
     sliding: bool
@@ -68,7 +72,13 @@ def _adaptive_block_summary_bootstrap(
     random_state: int | None,
     evaluate: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
 ) -> dict[str, Any]:
-    """Append path rows while reusing the existing maxima backbone."""
+    """Grow log-summary bootstrap samples until MC precision or the cap is reached.
+
+    Cache segment maxima once, draw additional rows in batches, and pass
+    covariance estimates to ``evaluate`` for the monitored statistics and
+    SE scales. If too few super-blocks exist, return empty samples and no
+    covariance; adaptive precision does not certify statistical coverage.
+    """
     backbone = build_block_summary_bootstrap_backbone(
         vec, block_sizes, sliding=sliding, reps=2, super_block_size=super_block_size
     )
@@ -85,6 +95,11 @@ def _adaptive_block_summary_bootstrap(
         return {**identity, "covariance": None, "samples": np.empty((0, len(block_sizes)))}
 
     def draw(reps: int, rng: np.random.Generator) -> np.ndarray:
+        """Generate up to ``reps`` valid log-summary rows using the supplied RNG.
+
+        Evaluation drops a draw if any requested summary cannot be logged,
+        so the returned row count can be smaller than the requested count.
+        """
         n_super = backbone.segment_draws.shape[1]
         rows = []
         for offset in range(0, reps, 32):
@@ -107,7 +122,11 @@ def _selected_bootstrap_maxima(
     *,
     block_size: int,
 ) -> np.ndarray:
-    """Return all replicate maxima for one block size as a 2D matrix."""
+    """Gather a block-size maxima bank into a (replicates, pooled_maxima) array.
+
+    Repeated segment indices repeat their entire maxima vectors, preserving
+    within-segment structure while resampling segments with replacement.
+    """
     maxima_bank = np.asarray(backbone.maxima_by_block[int(block_size)], dtype=float)
     selected = maxima_bank[backbone.segment_draws]
     return selected.reshape(backbone.segment_draws.shape[0], -1)
@@ -119,7 +138,7 @@ def _evaluate_quantile_bootstrap_column(
     block_size: int,
     quantile: float,
 ) -> np.ndarray:
-    """Evaluate one quantile bootstrap column across all replicates at once."""
+    """Return one median-unbiased block-maxima quantile per bootstrap replicate."""
     selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
     return np.quantile(selected, quantile, axis=1, method="median_unbiased")
 
@@ -129,7 +148,7 @@ def _evaluate_mean_bootstrap_column(
     *,
     block_size: int,
 ) -> np.ndarray:
-    """Evaluate one mean bootstrap column across all replicates at once."""
+    """Return the arithmetic mean of pooled maxima in each bootstrap replicate."""
     selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
     return np.mean(selected, axis=1)
 
@@ -140,7 +159,12 @@ def _rowwise_linear_quantile(
     *,
     quantile: float,
 ) -> np.ndarray:
-    """Return one linear-interpolation quantile for every row of a sorted matrix."""
+    """Interpolate a quantile within each sorted row's first ``counts`` entries.
+
+    Trailing padding is ignored; a zero count returns NaN. This uses linear
+    interpolation for KDE bandwidth estimation, not the median-unbiased
+    quantiles used by the block-quantile estimator.
+    """
     result = np.full(sorted_rows.shape[0], np.nan, dtype=float)
     valid = counts > 0
     if not np.any(valid):
@@ -163,7 +187,13 @@ def _evaluate_mode_bootstrap_column_batched(
     *,
     max_kernel_bytes: int = _MODE_BOOTSTRAP_MAX_WORKING_BYTES,
 ) -> np.ndarray:
-    """Evaluate modes while limiting each three-dimensional KDE kernel temporary."""
+    """Compute a positive-maxima KDE mode surrogate separately for each matrix row.
+
+    Use the same log1p transform, bandwidth rule, 256-point grid, and
+    original-scale Jacobian as ``estimate_sample_mode``. Empty positive rows
+    return NaN; singleton rows return their observation. ``max_kernel_bytes``
+    bounds each KDE kernel temporary, not total process memory.
+    """
     selected = np.asarray(selected, dtype=float)
     if selected.ndim != 2:
         raise ValueError("selected maxima must be a 2D matrix.")
@@ -240,6 +270,7 @@ def _evaluate_mode_bootstrap_column_batched(
             kernel *= chunk_valid[:, None, :]
             density[row_slice] += kernel.sum(axis=2)
     density /= active_counts_f[:, None]
+    # Convert transformed KDE density back to the original response scale.
     density_on_original_scale = density * np.exp(-grid)
     mode_index = np.argmax(density_on_original_scale, axis=1)
     summaries[multi_mask] = np.expm1(grid[row_index, mode_index])
@@ -252,7 +283,10 @@ def _evaluate_mode_bootstrap_column(
     block_size: int,
     quantile: float,
 ) -> np.ndarray:
-    """Evaluate one mode bootstrap column with an exact batched surrogate."""
+    """Return the batched KDE mode surrogate for each resampled maxima row.
+
+    ``quantile`` is ignored; it is present for a common summary-call interface.
+    """
     del quantile
     selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
     return _evaluate_mode_bootstrap_column_batched(selected)
@@ -264,7 +298,14 @@ def evaluate_block_summary_bootstrap_backbone(
     target: str = "quantile",
     quantile: float = 0.5,
 ) -> dict[str, Any]:
-    """Evaluate one block-summary target on a precomputed bootstrap backbone."""
+    """Return log-summary samples and covariance from cached segment draws.
+
+    For ``target`` quantile, mean, or mode, evaluate every block-size column
+    on the same replicates. Drop a whole replicate if any summary is
+    nonfinite or nonpositive. ``samples`` is (valid_replicates, block_sizes);
+    ``covariance`` is its sample covariance, or None with fewer than two
+    valid rows. A None backbone returns empty arrays and no covariance.
+    """
     if target not in {"quantile", "mean", "mode"}:
         raise ValueError(f"Unsupported target: {target}")
     resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
@@ -314,6 +355,7 @@ def evaluate_block_summary_bootstrap_backbone(
             RuntimeWarning,
             stacklevel=3,
         )
+    # Use the same replicate set for every covariance entry, not pairwise deletion.
     valid_rows = np.all(np.isfinite(samples), axis=1)
     valid_samples = samples[valid_rows]
     covariance = None
@@ -340,7 +382,15 @@ def build_block_summary_bootstrap_backbone(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> BlockSummaryBootstrapBackbone | None:
-    """Precompute the shared super-block state for UniBM bootstrap fitting."""
+    """Cache segment maxima and draw segment indices with replacement.
+
+    Split the 1D series into equal complete super-blocks, discarding the
+    incomplete tail. Sliding maxima wrap within each segment; disjoint
+    maxima discard each segment's incomplete block. The requested
+    ``super_block_size`` is adjusted to fit the largest block and, when
+    possible, allow four segments. Return None for fewer than two segments
+    or ``reps < 2``. A fixed ``random_state`` reproduces segment draws.
+    """
     warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
     arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
@@ -389,7 +439,13 @@ def circular_block_summary_bootstrap_multi_target(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> dict[str, dict[str, Any]]:
-    """Bootstrap multiple block-summary targets from one shared backbone."""
+    """Bootstrap targets using identical segment draws and cached maxima.
+
+    Return a dictionary keyed by target (quantile, mean, or mode), with each
+    value following ``evaluate_block_summary_bootstrap_backbone``. Targets
+    may retain different replicate counts because invalid log summaries
+    are removed separately for each target.
+    """
     backbone = build_block_summary_bootstrap_backbone(
         vec=vec,
         block_sizes=block_sizes,
@@ -419,7 +475,15 @@ def circular_block_summary_bootstrap(
     super_block_size: int | None = None,
     random_state: int | None = 0,
 ) -> dict[str, Any]:
-    """Bootstrap one block-summary target by resampling time-series super-blocks."""
+    """Estimate log-summary covariance by resampling time-series super-blocks.
+
+    Return valid log-summary rows, covariance, block-size labels, and target
+    metadata. ``sliding=True`` wraps windows within each original segment;
+    False uses disjoint maxima. Invalid log-summary rows are removed jointly
+    across scales. Fewer than two requested draws or usable segments gives
+    empty samples and no covariance. See the backbone builder for how the
+    super-block length is adjusted.
+    """
     arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
     if target not in {"quantile", "mean", "mode"}:

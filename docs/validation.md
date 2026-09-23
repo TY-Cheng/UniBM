@@ -161,14 +161,14 @@ After source installation with development dependencies, force the two main
 grids from the repository root:
 
 ```bash
-UNIBM_FORCE_BENCHMARK=1 uv run python scripts/benchmark/evi_benchmark.py
-UNIBM_FORCE_BENCHMARK=1 uv run python scripts/benchmark/ei_benchmark.py
+UNIBM_FORCE_BENCHMARK=1 just --command uv run python scripts/benchmark/evi_benchmark.py
+UNIBM_FORCE_BENCHMARK=1 just --command uv run python scripts/benchmark/ei_benchmark.py
 ```
 
 `UNIBM_BENCHMARK_WORKERS` optionally limits parallel workers. These commands
 reuse the cached raw simulated records but recompute the estimates. Adaptive
 fitting bypasses old fixed-R covariance caches. The canonical outputs are
-`out/benchmark/{detail,summary,external_detail,external_summary}.csv` and the
+`out/benchmark/evi_{detail,summary,external_detail,external_summary}.csv` and the
 matching `ei_` files. Report functions in `scripts/benchmark/evi_report.py` and
 `ei_report.py` generate the static plots from those summaries.
 
@@ -203,15 +203,20 @@ of 1.561 and 1.601 at 0.15. Full diagonal shrinkage worsens these scores to
 0.37.** These descriptive comparisons assess sensitivity; they neither select
 a new default nor establish nominal coverage.
 
-The existing report entrypoints generate the appendix CSVs when absent and
-refresh the manuscript figures:
+The existing report entrypoints generate the supplementary CSVs when absent and
+refresh the report figures:
 
 ```bash
-uv run python scripts/benchmark/evi_report.py
-uv run python scripts/benchmark/ei_report.py
+just --command uv run python scripts/benchmark/evi_report.py
+just --command uv run python scripts/benchmark/ei_report.py
 ```
 
 The corresponding `build_evi_shrinkage_sensitivity_summary` and
 `build_ei_shrinkage_sensitivity_summary` functions accept `force=True` to
-recompute an existing sensitivity CSV. Outputs remain under `out/benchmark/`;
+recompute an existing sensitivity CSV. Both accept `max_workers`; otherwise
+they use `UNIBM_BENCHMARK_WORKERS`, including the worker count passed to
+`just benchmark` or `just reports`. Scenarios run in separate processes with
+unchanged scenario seeds; `max_workers=1` runs serially. Adaptive EI sensitivity
+computes only the requested paths (the two sliding paths by default).
+Outputs remain under `out/benchmark/`;
 no separate validation suite or intermediate storage format is introduced.

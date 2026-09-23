@@ -84,7 +84,11 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazily expose optional plotting and pandas-backed helpers."""
+    """Load plotting or pandas-backed helpers on first attribute access.
+
+    Cache the imported helper in module globals for later accesses; unknown
+    names raise AttributeError. Ordinary EVI imports avoid these modules.
+    """
     import importlib
 
     if name == "plot_scaling_fit":

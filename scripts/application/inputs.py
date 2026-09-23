@@ -22,7 +22,7 @@ from data_prep.usgs import (
 from application.metadata import ensure_application_metadata
 from application.specs import (
     CLIMATE_APPLICATIONS,
-    PAPER_APPLICATIONS,
+    REPORT_APPLICATIONS,
     ApplicationPreparedInputs,
     ApplicationSpec,
 )
@@ -114,7 +114,7 @@ def build_application_inputs(
     dirs: dict[str, Path],
     *,
     raw_paths: dict[str, Path] | None = None,
-    specs: tuple[ApplicationSpec, ...] = PAPER_APPLICATIONS,
+    specs: tuple[ApplicationSpec, ...] = REPORT_APPLICATIONS,
 ) -> dict[str, ApplicationPreparedInputs]:
     """Build role-specific prepared series for the requested applications."""
     keys = {spec.key for spec in specs}

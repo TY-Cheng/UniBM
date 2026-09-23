@@ -15,7 +15,7 @@ from .._bootstrap_sampling import (
 from .._bootstrap_precision import adaptive_covariance
 from .._validation import subset_covariance_by_labels, validate_covariance_shrinkage
 from ._stats import Z_CRIT_95, _log_scale_theta_interval
-from ._validation import _finite_nonnegative_series, _finite_positive_series
+from ._validation import _validate_ei_series
 from .bm import EI_DEFAULT_COVARIANCE_SHRINKAGE, _fit_pooled_z_model
 from .paths import BM_PATH_KEYS, _build_bm_z_paths_from_values
 from .selection import select_stable_path_window
@@ -27,7 +27,12 @@ def _resolve_ei_bootstrap_block_length(
     base_path: str,
     bootstrap_block_length: int | None,
 ) -> tuple[str, int | None]:
-    """Resolve one EI bootstrap block-length policy before drawing samples."""
+    """Validate the base path and return a default or fixed raw resampling length.
+
+    A fixed length must be an integer from 1 through the series length; ``None``
+    defers default-length selection to the circular-bootstrap sampler. This is
+    distinct from the BM block sizes at which the EI path is evaluated.
+    """
     if base_path not in {"bb", "northrop"}:
         raise ValueError("base_path must be 'bb' or 'northrop'.")
     if bootstrap_block_length is None:
@@ -51,7 +56,12 @@ def _summarize_bm_ei_path_draws(
     bootstrap_block_length: int,
     reps: int,
 ) -> dict[str, Any]:
-    """Summarize transformed EI bootstrap path draws and their sampling metadata."""
+    """Summarize an ``(n_draws, n_levels)`` matrix of log-reciprocal EI paths.
+
+    Drop whole rows containing non-finite values. Return retained samples,
+    level labels, path identity, and fixed-replicate metadata. The sample
+    covariance is ``None`` if fewer than two complete draws remain.
+    """
     valid_draws = np.asarray(z_draws, dtype=float)
     valid_draws = valid_draws[np.all(np.isfinite(valid_draws), axis=1)]
     covariance = (
@@ -71,14 +81,25 @@ def _summarize_bm_ei_path_draws(
     }
 
 
-def _build_bm_ei_path_draws(
+def bootstrap_bm_ei_path_draws(
     bootstrap_samples: np.ndarray,
     *,
     block_sizes: np.ndarray,
-    path_keys: tuple[tuple[str, bool], ...],
     allow_zeros: bool,
+    path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
 ) -> dict[tuple[str, bool], np.ndarray]:
-    """Transform one raw bootstrap bank into selected BM-EI z-path draw matrices."""
+    """Transform supplied resamples into BM-EI paths without generating new draws.
+
+    ``bootstrap_samples`` is a 2D array with one series per row and at least 32
+    observations per series. Values must be finite and positive, or non-negative
+    when ``allow_zeros=True``; zeros retain their positions. ``block_sizes`` is
+    an increasing integer grid from 2 through the number of observations.
+
+    Return a dictionary keyed by requested ``(base_path, sliding)`` pairs, where
+    ``base_path`` is ``"northrop"`` or ``"bb"``. Each value is an array of shape
+    ``(n_draws, n_block_sizes)`` containing ``z = log(1 / theta)``. All four paths
+    are returned by default. The caller controls the resampling design and clock.
+    """
     samples = np.asarray(bootstrap_samples, dtype=float)
     if samples.ndim != 2:
         raise ValueError("bootstrap_samples must be a two-dimensional matrix.")
@@ -88,9 +109,7 @@ def _build_bm_ei_path_draws(
         for key in path_keys
     }
     for rep, sample in enumerate(samples):
-        sample_values = (
-            _finite_nonnegative_series(sample) if allow_zeros else _finite_positive_series(sample)
-        )
+        sample_values = _validate_ei_series(sample, allow_zeros=allow_zeros)
         sample_paths = _build_bm_z_paths_from_values(
             sample_values,
             block_sizes,
@@ -99,22 +118,6 @@ def _build_bm_ei_path_draws(
         for key, z_path in sample_paths.items():
             draws[key][rep] = z_path
     return draws
-
-
-def bootstrap_bm_ei_path_draws(
-    bootstrap_samples: np.ndarray,
-    *,
-    block_sizes: np.ndarray,
-    allow_zeros: bool,
-    path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
-) -> dict[tuple[str, bool], np.ndarray]:
-    """Transform a bootstrap bank while preserving its caller-chosen EI clock."""
-    return _build_bm_ei_path_draws(
-        bootstrap_samples,
-        block_sizes=block_sizes,
-        path_keys=path_keys,
-        allow_zeros=allow_zeros,
-    )
 
 
 def bootstrap_bm_ei_path(
@@ -131,12 +134,19 @@ def bootstrap_bm_ei_path(
 ) -> dict[str, Any]:
     """Bootstrap BM-EI covariance; default adaptive precision targets pooled theta and z.
 
-    An explicit integer retains fixed-R sampling. Adaptive precision is conditional
+    Resample contiguous circular blocks of the observed series. The raw
+    resampling length defaults to ``min(n, max(16, round(sqrt(n))))`` and can be
+    set with ``bootstrap_block_length``; it is separate from the increasing
+    ``block_sizes`` grid used to evaluate the EI path. ``random_state`` seeds
+    NumPy's generator (default 0); ``None`` requests non-reproducible seeding.
+
+    An explicit integer of at least two retains fixed-R sampling. Adaptive precision is conditional
     on the original stable window and the declared covariance shrinkage.
     Checkpoints are 128, 256, 512, 768, and 1024. The target vector includes theta
     and its CI endpoints plus the unconstrained z fit and endpoints, so the
     theta=1 boundary cannot hide Monte Carlo error. The cap retains the result
     with a warning and ``bootstrap_precision_met=False`` if tolerance is unmet.
+    This flag measures Monte Carlo precision, not confidence-interval coverage.
 
     The returned in-memory dictionary contains full-grid covariance, path draws,
     block-size labels, estimator identity, and sampling/precision metadata. Pass
@@ -145,7 +155,7 @@ def bootstrap_bm_ei_path(
     ``allow_zeros`` declares whether observed zeros are legal; non-finite inputs
     are always rejected rather than removed from the observation clock.
     """
-    values = _finite_nonnegative_series(vec) if allow_zeros else _finite_positive_series(vec)
+    values = _validate_ei_series(vec, allow_zeros=allow_zeros)
     block_sizes = validate_block_sizes(block_sizes, n_obs=values.size)
     block_length_policy, resolved_block_length = _resolve_ei_bootstrap_block_length(
         values,
@@ -164,6 +174,7 @@ def bootstrap_bm_ei_path(
         levels, z_values = block_sizes[mask], observed_z[mask]
 
         def draw(count: int, rng: np.random.Generator) -> np.ndarray:
+            """Draw a batch of full-grid z paths using the shared bootstrap RNG."""
             # Process each raw series immediately; do not retain an R x n_obs bank.
             rows = []
             for _ in range(count):
@@ -176,6 +187,7 @@ def bootstrap_bm_ei_path(
             return np.asarray(rows)
 
         def evaluate(covariance: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """Return theta/z targets and their SE scales for covariance-precision checks."""
             selected = subset_covariance_by_labels(
                 covariance, block_sizes, levels, context="EI bootstrap covariance"
             )

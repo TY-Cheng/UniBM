@@ -20,7 +20,12 @@ def default_circular_bootstrap_block_size(
     *,
     minimum: int = 16,
 ) -> int:
-    """Choose a simple dependence-preserving block length for raw-series bootstrap."""
+    """Return ``round(sqrt(n_obs))``, bounded below by minimum and above by n_obs.
+
+    This heuristic retains short runs of temporal dependence; it does not
+    estimate the dependence range. A nonpositive series length raises
+    ``ValueError``.
+    """
     if n_obs <= 0:
         raise ValueError("n_obs must be positive.")
     return int(min(max(minimum, round(np.sqrt(n_obs))), n_obs))
@@ -32,7 +37,15 @@ def draw_circular_block_bootstrap_sample(
     block_size: int,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Draw one circular block-bootstrap sample of the same length as the input series."""
+    """Join randomly started circular blocks and truncate to the input length.
+
+    The input is flattened to floats and ``block_size`` is clamped to [1, n].
+    Block starts are sampled independently using, and advancing, ``rng``.
+    Observations keep their order within each block, wrapping at the end of
+    the series. Non-finite values are retained if sampled; callers that need
+    entirely finite data must validate it first. Empty or wholly non-finite
+    input raises ``ValueError``.
+    """
     arr = np.asarray(vec, dtype=float).reshape(-1)
     if arr.size == 0 or not np.any(np.isfinite(arr)):
         raise ValueError("Cannot bootstrap a series without any finite observations.")
@@ -51,7 +64,14 @@ def draw_circular_block_bootstrap_samples(
     block_size: int | None = None,
     random_state: int | None = None,
 ) -> CircularBootstrapSampleBank:
-    """Draw a reusable bank of circular block-bootstrap samples."""
+    """Return a bank with one length-n circular bootstrap sample per row.
+
+    ``reps`` must be positive. A missing block size uses the square-root
+    heuristic, and ``random_state`` seeds a local generator. The returned
+    ``samples`` array has shape ``(reps, n)``. The bank records the requested
+    block size; each draw clamps it to [1, n]. Input is flattened, and any
+    non-finite observations are retained rather than silently removed.
+    """
     arr = np.asarray(vec, dtype=float).reshape(-1)
     if arr.size == 0 or not np.any(np.isfinite(arr)):
         raise ValueError("Cannot bootstrap a series without any finite observations.")

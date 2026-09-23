@@ -52,7 +52,11 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazily expose optional plotting helpers."""
+    """Load and cache public plotting helpers only when they are first requested.
+
+    Unknown names raise ``AttributeError``. Keeping plotting imports here lets
+    estimation-only imports avoid loading the plotting module.
+    """
     import importlib
 
     if name in {"plot_ei_fit", "plot_ei_path"}:

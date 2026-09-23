@@ -1,4 +1,4 @@
-"""GHCN daily data preparation for the current manuscript-facing applications.
+"""GHCN daily data preparation for the current report-facing applications.
 
 This module deliberately keeps the application engineering separate from the
 UniBM methods package. The Houston and Phoenix series are both derived from

@@ -22,7 +22,7 @@ from application.specs import (
     APPLICATION_EI_BOOTSTRAP_REPS,
     APPLICATION_EI_THRESHOLD_QUANTILES,
     APPLICATION_RANDOM_STATE,
-    PAPER_APPLICATIONS,
+    REPORT_APPLICATIONS,
     ApplicationBundle,
     ApplicationPreparedInputs,
     ApplicationSpec,
@@ -156,7 +156,7 @@ def build_application_bundle(
 def build_application_bundles_from_inputs(
     inputs: dict[str, ApplicationPreparedInputs],
     *,
-    specs: tuple[ApplicationSpec, ...] = PAPER_APPLICATIONS,
+    specs: tuple[ApplicationSpec, ...] = REPORT_APPLICATIONS,
 ) -> list[ApplicationBundle]:
     """Build every configured application bundle from prepared inputs."""
     tasks = [(spec, inputs[spec.key]) for spec in specs]
@@ -178,7 +178,7 @@ def build_application_bundles(
     dirs: dict[str, Path],
     *,
     raw_paths: dict[str, Path] | None = None,
-    specs: tuple[ApplicationSpec, ...] = PAPER_APPLICATIONS,
+    specs: tuple[ApplicationSpec, ...] = REPORT_APPLICATIONS,
 ) -> list[ApplicationBundle]:
     """Compatibility wrapper that prepares inputs before fitting bundles."""
     from application.inputs import build_application_inputs

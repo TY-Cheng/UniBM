@@ -1,4 +1,4 @@
-"""Application-side workflow facade for manuscript-ready real-data analyses."""
+"""Application-side workflow facade for report-ready real-data analyses."""
 # ruff: noqa: E402
 
 from __future__ import annotations

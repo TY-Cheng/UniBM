@@ -1,4 +1,4 @@
-"""OpenFEMA NFIP claims preparation for manuscript applications."""
+"""OpenFEMA NFIP claims preparation for report applications."""
 
 from __future__ import annotations
 

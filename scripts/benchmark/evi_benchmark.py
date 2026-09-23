@@ -1,8 +1,8 @@
 """Synthetic EVI benchmark main entrypoint.
 
 This module owns the raw benchmark computation and CSV materialization. The
-manuscript workflow reads those cached CSVs and is solely responsible for
-manuscript-facing figures and LaTeX tables.
+report workflow reads those cached CSVs and is solely responsible for
+report-facing figures and LaTeX tables.
 """
 # ruff: noqa: E402
 
@@ -304,10 +304,10 @@ def _output_paths(out_dir: Path, *, n_obs: int) -> dict[str, Path]:
     """Return the canonical CSV paths for one benchmark sample-size regime."""
     suffix = _output_suffix_for_n_obs(n_obs)
     return {
-        "detail": out_dir / f"detail{suffix}.csv",
-        "summary": out_dir / f"summary{suffix}.csv",
-        "external_detail": out_dir / f"external_detail{suffix}.csv",
-        "external_summary": out_dir / f"external_summary{suffix}.csv",
+        "detail": out_dir / f"evi_detail{suffix}.csv",
+        "summary": out_dir / f"evi_summary{suffix}.csv",
+        "external_detail": out_dir / f"evi_external_detail{suffix}.csv",
+        "external_summary": out_dir / f"evi_external_summary{suffix}.csv",
     }
 
 

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 from .._runtime import prepare_matplotlib_env
 
@@ -13,7 +17,7 @@ from .models import EiPathBundle, ExtremalIndexEstimate
 
 
 def _pyplot():
-    """Import pyplot only when a plot is requested."""
+    """Prepare writable Matplotlib cache locations, then import pyplot on demand."""
     prepare_matplotlib_env()
     import matplotlib.pyplot as plt
 
@@ -21,21 +25,18 @@ def _pyplot():
 
 
 def _resolved_file_path(file_path: Path | str | None) -> Path | None:
-    """Coerce optional output paths to ``Path`` objects."""
+    """Convert a supplied output name to ``Path``, preserving ``None`` and relative paths."""
     if file_path is None:
         return None
     return Path(file_path)
 
 
-def _should_close_figure(close: bool | None) -> bool:
-    """Close figures automatically in non-notebook batch usage by default."""
-    if close is not None:
-        return bool(close)
-    return "ipykernel" not in sys.modules
-
-
 def _save_figure_outputs(fig, file_path: Path) -> None:
-    """Save the requested figure to disk."""
+    """Create missing parent directories and save using Matplotlib's path-based format.
+
+    An existing destination may be overwritten; filesystem and format errors
+    propagate to the caller.
+    """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(file_path)
 
@@ -49,7 +50,10 @@ def _finite_path_arrays(
     block_sizes: np.ndarray,
     theta_path: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return aligned finite block-size and theta-path arrays."""
+    """Filter aligned block-size and theta arrays using finite theta values.
+
+    Block sizes are assumed to have been validated by the path constructor.
+    """
     levels = np.asarray(block_sizes, dtype=int)
     theta = np.asarray(theta_path, dtype=float)
     mask = np.isfinite(theta)
@@ -66,14 +70,24 @@ def plot_ei_path(
     path: EiPathBundle,
     *,
     file_path: Path | str | None = None,
-    dpi: int = 1200,
+    dpi: int = 150,
     title: str | None = None,
     save: bool = False,
-    close: bool | None = None,
+    close: bool = False,
     xlabel: str = "log(block size)",
     ylabel: str = "extremal index",
-) -> None:
-    """Plot one observed EI path together with its selected stable window."""
+) -> tuple[Figure, Axes]:
+    """Plot one observed EI path together with its selected stable window.
+
+    Plot finite theta values against the natural log of block size, shade the
+    stored stable window, and mark the native estimator's selected level. Raise
+    ``ValueError`` if the path has no finite theta values.
+
+    Return ``(fig, ax)`` for customization at the requested ``dpi``. Saving
+    requires both ``save=True`` and a non-None ``file_path``; parent directories
+    are created and an existing file may be overwritten. ``close=True`` closes
+    the figure in pyplot after drawing/saving but still returns its objects.
+    """
     plt = _pyplot()
     levels, theta = _finite_path_arrays(path.block_sizes, path.theta_path)
     if levels.size == 0:
@@ -98,8 +112,9 @@ def plot_ei_path(
     resolved = _resolved_file_path(file_path)
     if save and resolved is not None:
         _save_figure_outputs(fig, resolved)
-    if _should_close_figure(close):
+    if close:
         plt.close(fig)
+    return fig, ax
 
 
 def _default_fit_title(fit: ExtremalIndexEstimate) -> str:
@@ -108,7 +123,11 @@ def _default_fit_title(fit: ExtremalIndexEstimate) -> str:
 
 
 def _plot_path_aware_fit(ax, fit: ExtremalIndexEstimate) -> None:
-    """Draw one path-aware EI estimate from retained path metadata."""
+    """Draw retained theta values, tuning markers, and a horizontal estimate/CI.
+
+    Mutate the supplied axes; require at least one finite path value and show
+    the confidence band only when both interval endpoints are finite.
+    """
     levels, theta = _finite_path_arrays(np.asarray(fit.path_level, dtype=int), fit.path_theta)
     if levels.size == 0:
         raise ValueError("Path-aware EI plotting requires retained finite path values.")
@@ -145,7 +164,11 @@ def _threshold_fit_label(fit: ExtremalIndexEstimate) -> str:
 
 
 def _plot_threshold_fit(ax, fit: ExtremalIndexEstimate) -> None:
-    """Draw one threshold-side EI estimate as a point-and-interval summary."""
+    """Draw theta with its finite CI, or a point alone when endpoints are unavailable.
+
+    Mutate the supplied axes and label the chosen threshold quantile/run length.
+    Valid CI endpoints are assumed to enclose the point estimate.
+    """
     lo, hi = fit.confidence_interval
     if np.isfinite(lo) and np.isfinite(hi):
         ax.errorbar(
@@ -170,12 +193,22 @@ def plot_ei_fit(
     fit: ExtremalIndexEstimate,
     *,
     file_path: Path | str | None = None,
-    dpi: int = 1200,
+    dpi: int = 150,
     title: str | None = None,
     save: bool = False,
-    close: bool | None = None,
-) -> None:
-    """Plot one EI fit either as a retained path view or a threshold summary."""
+    close: bool = False,
+) -> tuple[Figure, Axes]:
+    """Plot one EI fit either as a retained path view or a threshold summary.
+
+    Fits with retained path levels and theta values use a log-block-size view;
+    other fits use a single point with the stored interval when finite. The
+    plotted interval is supplied by the estimator, not recomputed by this helper.
+
+    Return ``(fig, ax)`` at the requested ``dpi``. Saving requires both
+    ``save=True`` and a non-None ``file_path``; missing parent directories are
+    created and existing files may be overwritten. ``close=True`` closes the
+    pyplot figure after drawing/saving while still returning its objects.
+    """
     plt = _pyplot()
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6.5, 4), dpi=dpi)
     if fit.path_level and fit.path_theta:
@@ -187,8 +220,9 @@ def plot_ei_fit(
     resolved = _resolved_file_path(file_path)
     if save and resolved is not None:
         _save_figure_outputs(fig, resolved)
-    if _should_close_figure(close):
+    if close:
         plt.close(fig)
+    return fig, ax
 
 
 __all__ = ["plot_ei_fit", "plot_ei_path"]
