@@ -10,7 +10,6 @@ from unibm._block_grid import generate_block_sizes, validate_block_sizes
 from unibm.evi._regression import (
     _aligned_bootstrap_covariance,
     _fit_linear_model,
-    _fit_scaling_model,
 )
 from unibm.evi.blocks import block_summary_curve
 from unibm.evi.design import (
@@ -501,7 +500,7 @@ class EviEstimationTests(unittest.TestCase):
         block_sizes = np.array([4, 8, 16, 32, 64], dtype=int)
         curve = block_summary_curve(values, block_sizes, sliding=True, target="quantile")
         plateau = select_penultimate_window(curve.log_block_sizes, curve.log_values, min_points=3)
-        fit = _fit_scaling_model(
+        fit = estimate_target_scaling(
             values,
             target="quantile",
             regression="OLS",
@@ -542,7 +541,7 @@ class EviEstimationTests(unittest.TestCase):
         self.assertTrue(np.isfinite(quantile_fit.slope))
         self.assertTrue(np.isfinite(mean_fit.slope))
         self.assertTrue(np.isfinite(mode_fit.slope))
-        auto_fit = _fit_scaling_model(
+        auto_fit = estimate_target_scaling(
             values,
             target="mean",
             regression="AUTO",
@@ -560,12 +559,12 @@ class EviEstimationTests(unittest.TestCase):
         self.assertTrue(np.isfinite(auto_fit.slope))
 
         with self.assertRaisesRegex(ValueError, "At least 32 finite observations"):
-            _fit_scaling_model(np.array([1.0, 2.0, 3.0]), target="quantile", regression="OLS")
+            estimate_target_scaling(np.array([1.0, 2.0, 3.0]), target="quantile", regression="OLS")
         with (
             self.assertWarnsRegex(RuntimeWarning, "non-positive block summaries"),
             self.assertRaisesRegex(ValueError, "Not enough positive block summaries"),
         ):
-            _fit_scaling_model(np.zeros(64, dtype=float), target="quantile", regression="OLS")
+            estimate_target_scaling(np.zeros(64, dtype=float), target="quantile", regression="OLS")
 
     def test_prediction_and_design_life_level_helpers(self) -> None:
         values = self._positive_sample(seed=202)

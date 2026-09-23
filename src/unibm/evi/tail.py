@@ -24,7 +24,13 @@ ThresholdWindow = SelectionWindow
 
 @dataclass(frozen=True)
 class ExternalXiEstimate:
-    """Point estimate plus diagnostic path information for comparator estimators."""
+    """Selected tail-index estimate with its retained finite diagnostic path.
+
+    ``selected_level`` is a tail count or start-scale exponent according to
+    ``tuning_axis``. ``confidence_interval`` is a nominal 95% Wald interval
+    using the method's SE; it does not propagate automatic window selection.
+    The ``ci_method`` label describes construction, not a coverage guarantee.
+    """
 
     method: str
     xi_hat: float
@@ -40,12 +46,12 @@ class ExternalXiEstimate:
 
     @property
     def selected_k(self) -> int | None:
-        """Backward-compatible alias for threshold-indexed comparator paths."""
+        """Alias for ``selected_level``; a scale-based estimator still returns a scale."""
         return self.selected_level
 
     @property
     def path_k(self) -> tuple[int, ...]:
-        """Backward-compatible alias for threshold-indexed comparator paths."""
+        """Alias for ``path_level`` without converting scale exponents to tail counts."""
         return self.path_level
 
 
@@ -55,7 +61,12 @@ def wald_confidence_interval(
     *,
     ci_level: float = 0.95,
 ) -> tuple[float, float]:
-    """Construct a Gaussian/Wald confidence interval around one xi estimate."""
+    """Return the two-sided normal interval ``xi_hat +/- z * standard_error``.
+
+    ``ci_level`` must lie strictly between zero and one. Invalid estimates
+    or negative/nonfinite SEs give (NaN, NaN); a zero SE gives equal bounds.
+    The caller is responsible for the validity of the normal approximation.
+    """
     if not (0.0 < ci_level < 1.0):
         raise ValueError("ci_level must lie strictly between 0 and 1.")
     if not np.isfinite(xi_hat) or not np.isfinite(standard_error) or standard_error < 0:
@@ -72,7 +83,14 @@ def candidate_tail_counts(
     max_fraction: float = 0.25,
     num: int = 24,
 ) -> np.ndarray:
-    """Construct a log-spaced tail-count grid or fail if the bounds are infeasible."""
+    """Return a deduplicated, rounded geometric grid of valid tail counts.
+
+    Counts range from ``min_count`` through
+    ``min(floor(max_fraction * n_obs), n_obs - 1)``; rounding may give fewer
+    than ``num`` entries. Raise ValueError for invalid arguments or no
+    feasible count. Estimators may impose additional restrictions, such as
+    Pickands' ``4*k <= n_obs``.
+    """
     for name, value, minimum in (
         ("n_obs", n_obs, 2),
         ("min_count", min_count, 1),
@@ -112,7 +130,12 @@ def _validate_tail_counts(
     minimum: int = 1,
     maximum: int | None = None,
 ) -> np.ndarray:
-    """Validate a strictly increasing integer tail-count grid."""
+    """Require a nonempty 1D strictly increasing grid of integer tail counts.
+
+    Reject booleans, nonfinite values, and counts outside ``minimum`` through
+    ``maximum`` (default ``n_obs - 1``). Return an integer array without
+    sorting, deduplicating, or silently clipping the caller's grid.
+    """
     try:
         raw = np.asarray(k_values)
     except (TypeError, ValueError) as exc:
@@ -138,7 +161,11 @@ def _validate_tail_counts(
 
 
 def _finite_positive(sample: np.ndarray) -> np.ndarray:
-    """Return positive finite observations sorted in descending order."""
+    """Filter to at least eight positive finite observations and sort descending.
+
+    Nonpositive finite values trigger a warning; nonfinite values are also
+    removed. Sorting discards time order for these marginal tail estimators.
+    """
     vec = positive_finite_values(
         sample,
         context="tail xi estimators",
@@ -157,14 +184,23 @@ def _normalize_standard_error(value: float) -> float:
 
 
 def _hill_standard_error(xi_hat: float, k: int) -> float:
-    """Return the classical Hill asymptotic standard error."""
+    """Return ``abs(xi_hat) / sqrt(k)``, the classical independent-tail Hill SE.
+
+    Invalid xi or nonpositive k gives NaN. This has no serial-dependence,
+    threshold-selection, or tail-bias adjustment.
+    """
     if k <= 0 or not np.isfinite(xi_hat):
         return float("nan")
     return _normalize_standard_error(abs(float(xi_hat)) / np.sqrt(float(k)))
 
 
 def _pickands_standard_error(xi_hat: float, k: int) -> float:
-    """Return the Pickands asymptotic standard error."""
+    """Return the classical Pickands asymptotic SE, with its limit near xi=0.
+
+    Use the continuous limit when ``abs(xi_hat) < 1e-8`` to avoid numerical
+    cancellation. Invalid inputs or an unusable denominator give NaN; the
+    formula does not adjust for serial dependence or threshold selection.
+    """
     if k <= 0 or not np.isfinite(xi_hat):
         return float("nan")
     xi_hat = float(xi_hat)
@@ -180,14 +216,23 @@ def _pickands_standard_error(xi_hat: float, k: int) -> float:
 
 
 def _dedh_standard_error(xi_hat: float, k: int) -> float:
-    """Return the DEdH asymptotic SE for the Fréchet-domain heavy-tail benchmark."""
+    """Return ``sqrt(1 + xi_hat**2) / sqrt(k)`` for the heavy-tail DEdH regime.
+
+    This is the independent-sample Fréchet-domain asymptotic formula, not
+    a general negative-xi variance formula or a dependence adjustment.
+    Invalid xi or nonpositive k gives NaN.
+    """
     if k <= 0 or not np.isfinite(xi_hat):
         return float("nan")
     return _normalize_standard_error(np.sqrt(1.0 + float(xi_hat) ** 2) / np.sqrt(float(k)))
 
 
 def _hill_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
-    """Compute the Hill path from descending positive order statistics."""
+    """Average the top-k log excesses above descending order statistic k+1.
+
+    ``ordered`` must already be positive and descending, and each validated
+    k must leave a threshold observation. Return estimates aligned with k.
+    """
     log_ordered = np.log(ordered)
     estimates = []
     for k in k_values:
@@ -197,7 +242,11 @@ def _hill_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
 
 
 def _pickands_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
-    """Compute the Pickands path from descending positive order statistics."""
+    """Compute log2 ratios of spacings at descending ranks k, 2k, and 4k.
+
+    Return NaN when a required rank is unavailable or ties produce a
+    nonpositive spacing. Output positions match ``k_values``.
+    """
     n_obs = ordered.size
     estimates = []
     for k in k_values:
@@ -214,7 +263,12 @@ def _pickands_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
 
 
 def _dedh_moment_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
-    """Compute the DEdH moment-estimator path from descending order statistics."""
+    """Compute DEdH xi from the first two moments of the top-k log excesses.
+
+    Use descending observation k+1 as the threshold. Return NaN for a zero
+    second moment or a nearly singular moment-ratio correction; the input
+    must already be positive, descending, and paired with valid k values.
+    """
     log_ordered = np.log(ordered)
     estimates = []
     for k in k_values:
@@ -239,7 +293,15 @@ def select_stable_integer_window(
     *,
     min_window: int = 4,
 ) -> tuple[int, SelectionWindow, np.ndarray]:
-    """Pick a stable window and return its lower medoid from the observed grid."""
+    """Choose a low-variation path window and its lower-middle observed level.
+
+    Require finite paired 1D arrays and strictly increasing integer levels.
+    Score contiguous windows of ``min_window`` entries by path variance
+    plus half the mean absolute second difference. If the path is shorter,
+    use all entries. Return the selected level, inclusive level bounds,
+    and selected path values. Levels need not be consecutive integers;
+    this is a stability heuristic, not a hypothesis test.
+    """
     try:
         raw_levels = np.asarray(levels)
         path_xi = np.asarray(path_xi, dtype=float)
@@ -307,7 +369,12 @@ def _select_from_path(
     fixed_upper_level: int | None = None,
     selection_min_window: int = 4,
 ) -> ExternalXiEstimate:
-    """Filter invalid path values and return the automatically selected estimate."""
+    """Remove nonfinite path estimates, select a level, and attach a Wald interval.
+
+    Evaluate ``se_fn(xi_hat, selected_level)`` only at the selected point;
+    without it the SE and interval are NaN. Selection uses the retained
+    finite grid, which can contain gaps. Raise ValueError if no point remains.
+    """
     mask = np.isfinite(path_xi)
     if not np.any(mask):
         raise ValueError(f"{method} produced no finite path estimates.")
@@ -346,7 +413,15 @@ def estimate_hill_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with Hill, using an automatic grid when ``k_values`` is absent."""
+    """Estimate a positive heavy-tail index with a stability-selected Hill threshold.
+
+    Keep positive finite observations (at least eight) and sort descending.
+    ``k_values`` counts upper observations above rank k+1; omit it for the
+    rounded geometric grid. Return the chosen estimate and finite path with
+    a nominal 95% Wald interval based on ``abs(xi) / sqrt(k)``. This classical
+    SE assumes the independent-tail regime and omits serial dependence,
+    tail bias, and threshold-selection uncertainty.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -360,7 +435,15 @@ def estimate_pickands_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with Pickands over valid tail counts satisfying ``4k <= n``."""
+    """Estimate xi from order-statistic spacings at ranks k, 2k, and 4k.
+
+    This implementation retains only positive finite observations (at
+    least eight). Supplied ``k_values`` must satisfy ``4*k <= n`` after
+    filtering; otherwise use the default tail grid. Tied spacings produce
+    invalid path entries, which are dropped before stability selection.
+    Return the selected estimate, retained path, and a classical asymptotic
+    95% Wald interval without dependence or selection adjustments.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)
@@ -378,7 +461,15 @@ def estimate_dedh_moment_evi(
     *,
     k_values: np.ndarray | None = None,
 ) -> ExternalXiEstimate:
-    """Estimate ``xi`` with DEdH over an automatic or explicit tail-count grid."""
+    """Estimate xi from top-tail log moments at a stability-selected threshold.
+
+    Retain at least eight positive finite observations. ``k_values`` must
+    satisfy ``2 <= k < n`` after filtering, or is generated automatically.
+    Singular moment corrections are removed before path selection. The
+    returned nominal 95% Wald interval uses the Fréchet-domain formula
+    ``sqrt(1 + xi**2) / sqrt(k)``; it is not a general negative-xi interval
+    and does not adjust for serial dependence or threshold selection.
+    """
     ordered = _finite_positive(sample)
     if k_values is None:
         k_values = candidate_tail_counts(ordered.size)

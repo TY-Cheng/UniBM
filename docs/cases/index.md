@@ -5,7 +5,7 @@ Six case studies illustrate severity scaling and extremal clustering in environm
 records. The figures and numerical summaries use the repository's archived provider inputs.
 </p>
 
-The paper's four main cases are Texas and Florida streamflow and NFIP claims.
+The four report cases are Texas and Florida streamflow and NFIP claims.
 The two GHCN cases are broader severity-only illustrations.
 
 **Analysis settings.** These results use fixed shrinkage `0.37`, the declared

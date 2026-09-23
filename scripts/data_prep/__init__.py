@@ -1,4 +1,4 @@
-"""Dataset-specific preparation helpers for manuscript applications."""
+"""Dataset-specific preparation helpers for report applications."""
 
 from .constants import ANALYSIS_END_DATE
 from .cpi import download_monthly_cpi

@@ -8,7 +8,11 @@ import numpy as np
 
 
 def as_1d_float_array(vec: np.ndarray | list[float]) -> np.ndarray:
-    """Convert a one-dimensional array-like input to a float array."""
+    """Convert to a float array, rejecting scalars and multidimensional input.
+
+    Empty arrays and non-finite values are allowed here; callers apply the
+    length and support requirements of their own estimator.
+    """
     arr = np.asarray(vec, dtype=float)
     if arr.ndim != 1:
         raise ValueError("Input series must be one-dimensional.")
@@ -21,7 +25,12 @@ def warn_on_negative_values(
     context: str,
     stacklevel: int = 2,
 ) -> None:
-    """Warn once when negative values enter a positive-support workflow."""
+    """Emit one RuntimeWarning per call if any finite observations are negative.
+
+    ``context`` identifies the calling workflow and ``stacklevel`` controls
+    the reported source location. This helper does not filter or mutate input;
+    zeros and non-finite values do not trigger the warning.
+    """
     arr = as_1d_float_array(vec)
     negative_count = int(np.sum(np.isfinite(arr) & (arr < 0)))
     if negative_count:
@@ -43,7 +52,11 @@ def warn_on_nonpositive_values(
     noun: str = "values",
     stacklevel: int = 2,
 ) -> None:
-    """Warn when non-positive finite values are excluded by a positive-only step."""
+    """Report how many finite values a positive-only step will exclude.
+
+    The warning counts both zeros and negative values. Filtering remains the
+    caller's responsibility; ``context`` and ``noun`` describe that operation.
+    """
     arr = as_1d_float_array(vec)
     nonpositive_count = int(np.sum(np.isfinite(arr) & (arr <= 0)))
     if nonpositive_count:
@@ -64,7 +77,13 @@ def positive_finite_values(
     minimum_size: int = 0,
     stacklevel: int = 2,
 ) -> np.ndarray:
-    """Return positive finite values after warning about excluded non-positive entries."""
+    """Filter to strictly positive finite observations, preserving their order.
+
+    Warn about finite non-positive values; drop NaN and infinities silently.
+    Raise ``ValueError`` if fewer than ``minimum_size`` observations survive.
+    Removing entries compresses the time axis, so this helper is unsuitable
+    when the original spacing must be retained for dependence estimation.
+    """
     arr = as_1d_float_array(vec)
     warn_on_nonpositive_values(
         arr, context=context, noun="observations", stacklevel=stacklevel + 1
@@ -78,7 +97,11 @@ def positive_finite_values(
 
 
 def validate_covariance_shrinkage(value: float) -> float:
-    """Return a finite fixed covariance shrinkage weight in [0, 1]."""
+    """Convert a scalar shrinkage weight to float and require it to lie in [0, 1].
+
+    Reject booleans, non-finite values and unconvertible inputs with
+    ``ValueError``. Zero keeps off-diagonal covariances; one removes them.
+    """
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("covariance_shrinkage must be finite and lie in [0, 1].")
     try:
@@ -95,7 +118,14 @@ def _validated_covariance_matrix(
     *,
     context: str,
 ) -> tuple[np.ndarray, float]:
-    """Return a finite, symmetric, positive-scale covariance and its scale."""
+    """Validate a covariance copy and return it with its mean diagonal variance.
+
+    Require a nonempty finite square matrix, symmetry and positive
+    semidefiniteness up to scale-dependent floating-point tolerances, and a
+    strictly positive mean variance. Symmetrize tiny asymmetries and shift
+    roundoff-sized negative eigenvalues to zero. Larger violations raise
+    ``ValueError`` labelled with ``context``; the input is never modified.
+    """
     try:
         cov = np.asarray(covariance, dtype=float).copy()
     except (TypeError, ValueError) as exc:
@@ -133,7 +163,12 @@ def _block_label_indices(
     *,
     context: str,
 ) -> np.ndarray:
-    """Return indices for selected unique integer block-size labels."""
+    """Map selected block sizes to positions in the full covariance grid.
+
+    Validate full-grid labels as unique finite integers of at least two.
+    Selected labels are supplied by an already validated caller and their
+    requested order is preserved. Missing labels raise ``ValueError``.
+    """
     try:
         labels = np.asarray(block_sizes, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -160,7 +195,13 @@ def subset_covariance_by_labels(
     *,
     context: str,
 ) -> np.ndarray:
-    """Subset a square covariance matrix by unique integer block-size labels."""
+    """Validate the full covariance, then extract rows and columns by block size.
+
+    ``block_sizes`` labels both axes of the square input matrix. Return a
+    square matrix ordered by ``selected_block_sizes``, even if that order
+    differs from the input. Invalid covariance entries outside the selected
+    subset still cause validation to fail; they are not silently discarded.
+    """
     try:
         cov = np.asarray(covariance, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -178,7 +219,11 @@ def subset_covariance_by_labels(
 
 
 def matrix_condition_number(matrix: np.ndarray) -> float:
-    """Return a matrix condition number, using infinity for numerical failures."""
+    """Return the 2-norm condition number, or infinity on a linear-algebra error.
+
+    NumPy linear-algebra errors, including invalid dimensionality, return
+    infinity. Input conversion errors propagate to the caller.
+    """
     try:
         return float(np.linalg.cond(np.asarray(matrix, dtype=float)))
     except np.linalg.LinAlgError:
@@ -191,7 +236,14 @@ def regularize_covariance(
     covariance_shrinkage: float,
     context: str,
 ) -> np.ndarray:
-    """Validate, shrink, and ridge-regularize a covariance matrix."""
+    """Return a validated covariance shrunk toward its diagonal, plus a ridge.
+
+    For weight a, use ``(1 - a) * covariance + a * diag(covariance)``. Then
+    add ``max(mean_variance * 1e-8, 1e-12)`` to every diagonal entry to make
+    the result positive definite for subsequent solves. Validation rejects
+    materially indefinite or zero-scale input before regularization, so the
+    ridge does not conceal an unusable covariance. The input is not modified.
+    """
     shrinkage = validate_covariance_shrinkage(covariance_shrinkage)
     cov, scale = _validated_covariance_matrix(covariance, context=context)
     if shrinkage > 0.0:

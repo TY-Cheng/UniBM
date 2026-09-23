@@ -21,18 +21,18 @@ Use Python 3.11 or later, [uv](https://docs.astral.sh/uv/), and
 [just](https://just.systems/). From your clone of the repository:
 
 ```sh
-uv sync --locked --dev
+just --command uv sync --locked --dev
 ```
 
 Library development, tests, and documentation builds do not require provider credentials,
-a manuscript checkout, or a custom `.env` file.
+a report checkout, or a custom `.env` file.
 
 ## Checks
 
 Start with the tests relevant to your change, for example:
 
 ```sh
-uv run pytest -q tests/test_unibm_cdf.py
+just --command uv run pytest -q tests/test_unibm_cdf.py
 ```
 
 Use `just check` for incremental tests and formatting/lint checks, or `just check-full`
@@ -40,7 +40,7 @@ for the full test suite and coverage check. `just format` applies the existing f
 For documentation changes, run:
 
 ```sh
-uv run mkdocs build --strict
+just --command uv run mkdocs build --strict
 ```
 
 CI tests Python 3.11–3.14 and builds the documentation. In the pull request, state the
@@ -53,8 +53,10 @@ the random seed and relevant settings, and explain changes to estimates or uncer
 Prefer synthetic examples; do not post personal data, credentials, or large raw datasets.
 
 `just full` is a research-artifact rebuild, not a routine contribution check: it removes
-and regenerates outputs, including files in the separate manuscript repository. Coordinate
-benchmark, application, data-refresh, and manuscript reruns with the maintainers. Do not
+and regenerates named outputs in the code repository and selected report destination.
+The latter defaults to `out/reports/`; set `UNIBM_REPORT_DIR` explicitly for an external
+project. Caches, research notes, and unrecognized files are preserved. Coordinate
+benchmark, application, data-refresh, and report reruns with the maintainers. Do not
 hand-edit generated results or silently replace frozen provider data.
 
 ## Dependencies and pull requests
@@ -68,3 +70,50 @@ Keep each pull request focused, describe its purpose, and update tests and docum
 when behavior changes. Contributors are responsible for reviewing and understanding all
 submitted code, including tool-assisted changes. Code contributions are made under the
 project's [MIT License](LICENSE).
+
+## Local release preparation
+
+The first intended release is `0.1.0`; it has not been uploaded to PyPI. Build and
+inspect both distributions locally. The version is defined in
+`src/unibm/__about__.py`:
+
+```sh
+just --command uv run pytest -q tests/test_distribution_artifacts.py
+just --command uv build --out-dir dist/release-0.1.0
+just --command uvx twine check --strict dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
+```
+
+The artifact test checks archive contents and installs both the wheel and source
+distribution into isolated environments outside the checkout. It runs EVI/EI
+estimation, design-life intervals, and PNG export using only declared runtime
+dependencies. `uv build` also builds its wheel from the source distribution by
+default. CI runs the artifact test on each supported Python version.
+
+Run `just check-full` and the strict documentation build before release. Review
+the exact two files being uploaded; do not publish a wildcard covering old builds.
+The wheel contains only `unibm` and distribution metadata; the source distribution
+adds the build configuration, README, and license. Neither contains research
+scripts, datasets, local configuration, or generated reports.
+
+Building does not publish anything. When the maintainer is ready to upload, the
+existing `testpypi` index can be used for a rehearsal:
+
+```sh
+just --command uv publish --index testpypi dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
+```
+
+For local uploads, supply the appropriate index's API token through the process
+environment variable `UV_PUBLISH_TOKEN`; do not put token values in repository
+files or command history. Trusted publishing instead requires a configured CI
+publisher. After verifying the TestPyPI installation, use PyPI credentials to
+upload the same reviewed files to PyPI as a separate action:
+
+```sh
+just --command uv publish dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
+```
+
+Confirm the uploaded version installs outside the checkout before updating the
+source-only installation instructions in the README and getting-started guide.
+Creating Git tags, GitHub releases, and publishing the documentation are separate
+maintainer actions. See the [uv publishing guide](https://docs.astral.sh/uv/guides/package/)
+for authentication and installation details.

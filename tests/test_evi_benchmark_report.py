@@ -85,7 +85,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
         self.assertTrue((detail["regression_policy"] == detail["regression"]).all())
         self.assertEqual(set(detail["ci_variant"]), {"hc0", "bootstrap_cov"})
 
-    def test_benchmark_panels_can_save_publication_and_web_formats(self) -> None:
+    def test_benchmark_panels_can_save_pdf_and_web_formats(self) -> None:
         summary = pd.DataFrame(
             {
                 "benchmark_set": ["universal", "universal"],
@@ -110,18 +110,18 @@ class EviBenchmarkReportTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
-            publication_path = output_dir / "summary.pdf"
+            pdf_path = output_dir / "summary.pdf"
             web_path = output_dir / "summary.png"
             plot_benchmark_panels(
                 summary,
                 benchmark_set="universal",
                 methods=("sliding_median_fgls",),
-                file_path=publication_path,
+                file_path=pdf_path,
                 web_path=web_path,
                 save=True,
             )
 
-            self.assertGreater(publication_path.stat().st_size, 0)
+            self.assertGreater(pdf_path.stat().st_size, 0)
             self.assertGreater(web_path.stat().st_size, 0)
 
     def test_build_evi_shrinkage_sensitivity_summary_emits_expected_grid_and_columns(self) -> None:

@@ -1,7 +1,7 @@
-"""EI benchmark reporting, tables, plotting, and manuscript artifact emission.
+"""EI benchmark reporting, tables, plotting, and report artifact emission.
 
 This module consolidates internal EI benchmark reporting (summary tables, panel
-plots, interval-sharpness scatter) with manuscript-facing artifact generation
+plots, interval-sharpness scatter) with report-facing artifact generation
 (LaTeX tables, PDF figures).
 
 Reporting functions
@@ -11,14 +11,17 @@ ei_story_latex, build_ei_shrinkage_sensitivity_summary,
 plot_ei_core_panels, plot_ei_targets_panels, plot_ei_overview_panels,
 plot_ei_interval_sharpness_scatter, plot_ei_shrinkage_sensitivity
 
-Manuscript functions
+Report functions
 --------------------
-write_ei_benchmark_manuscript_artifacts, build_ei_benchmark_manuscript_outputs
+write_ei_benchmark_report_artifacts, build_ei_benchmark_report_outputs
 """
 # ruff: noqa: E402
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
+import os
 from pathlib import Path
 import sys
 from typing import Iterable
@@ -60,6 +63,7 @@ from benchmark.design import (
     family_label,
     load_or_simulate_series_bank,
     ordered_families,
+    resolve_benchmark_workers,
     scenario_random_state,
     sort_by_family_order,
 )
@@ -125,7 +129,7 @@ def _story_table(
     benchmark_set: str = UNIVERSAL_BENCHMARK_SET,
     numeric_pairs: bool = False,
 ) -> pd.DataFrame:
-    """Collapse a method list into the manuscript-friendly EI story-table layout."""
+    """Collapse a method list into the report-friendly EI story-table layout."""
     methods = [method for method in methods if method in summary["method"].unique()]
     subset = summary.loc[
         (summary["benchmark_set"] == benchmark_set) & (summary["method"].isin(methods))
@@ -271,7 +275,7 @@ def ei_story_latex(
 
 
 def _ei_shrinkage_sensitivity_output_path(out_dir: Path) -> Path:
-    """Return the canonical appendix CSV for EI shrinkage sensitivity."""
+    """Return the canonical supplementary CSV for EI shrinkage sensitivity."""
     return out_dir / "benchmark_ei_shrinkage_sensitivity.csv"
 
 
@@ -313,6 +317,97 @@ def _ei_shrinkage_sensitivity_contract_ok(
     )
 
 
+def _ei_shrinkage_scenario(args: tuple) -> list[dict[str, float | int | str]]:
+    """Evaluate one scenario with seeds independent of process scheduling."""
+    cfg, cache_dir, shrinkage_values, selected_methods = args
+    from benchmark.ei_benchmark import EI_BENCHMARK_RANDOM_STATE
+
+    path_keys = tuple(dict.fromkeys(_ei_method_components(method) for method in selected_methods))
+    detail_rows: list[dict[str, float | int | str]] = []
+    scenario_seed = scenario_random_state(cfg, master_seed=EI_BENCHMARK_RANDOM_STATE)
+    series_bank = load_or_simulate_series_bank(
+        cfg,
+        random_state=scenario_seed,
+        cache_dir=cache_dir,
+    )
+    for rep, vec in enumerate(series_bank):
+        bundle = prepare_ei_bundle(
+            vec,
+            allow_zeros=False,
+            threshold_quantiles=EI_BENCHMARK_THRESHOLD_QUANTILES,
+        )
+        cache_key = f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}"
+        bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
+            vec,
+            bundle=bundle,
+            cache_dir=cache_dir,
+            cache_key=cache_key,
+            reps=FGLS_BOOTSTRAP_REPS,
+            random_state=scenario_seed + 10_000 * rep,
+            path_keys=path_keys,
+        )
+        for method in selected_methods:
+            base_path, sliding = _ei_method_components(method)
+            bootstrap_result = bootstrap_results[(base_path, sliding)]
+            covariance_unavailable = _unavailable_bootstrap_covariance(bootstrap_result)
+            for delta in shrinkage_values:
+                if covariance_unavailable:
+                    detail_rows.append(
+                        {
+                            "benchmark_set": cfg.benchmark_set,
+                            "family": cfg.family,
+                            "n_obs": int(cfg.n_obs),
+                            "xi_true": float(cfg.xi_true),
+                            "theta_true": float(cfg.theta_true),
+                            "phi": float(cfg.phi),
+                            "rep": int(rep),
+                            "method": method,
+                            "delta": float(delta),
+                            "ape": np.nan,
+                            "interval_score": np.nan,
+                            "covered": 0.0,
+                            "fit_succeeded": False,
+                        }
+                    )
+                    continue
+                estimate = estimate_pooled_bm_ei(
+                    bundle,
+                    base_path=base_path,
+                    sliding=sliding,
+                    regression="FGLS",
+                    bootstrap_result=bootstrap_result,
+                    covariance_shrinkage=delta,
+                )
+                ci_lo, ci_hi = estimate.confidence_interval
+                detail_rows.append(
+                    {
+                        "benchmark_set": cfg.benchmark_set,
+                        "family": cfg.family,
+                        "n_obs": int(cfg.n_obs),
+                        "xi_true": float(cfg.xi_true),
+                        "theta_true": float(cfg.theta_true),
+                        "phi": float(cfg.phi),
+                        "rep": int(rep),
+                        "method": method,
+                        "delta": float(delta),
+                        "ape": float(
+                            abs(estimate.theta_hat - cfg.theta_true) / abs(cfg.theta_true)
+                        ),
+                        "interval_score": float(
+                            interval_score(
+                                cfg.theta_true,
+                                ci_lo,
+                                ci_hi,
+                                alpha=EI_ALPHA,
+                            )
+                        ),
+                        "covered": float(interval_contains((ci_lo, ci_hi), cfg.theta_true)),
+                        "fit_succeeded": True,
+                    }
+                )
+    return detail_rows
+
+
 def build_ei_shrinkage_sensitivity_summary(
     root: Path | str = ".",
     *,
@@ -320,15 +415,17 @@ def build_ei_shrinkage_sensitivity_summary(
     deltas: Iterable[float] = EI_SHRINKAGE_GRID,
     methods: Iterable[str] = EI_SHRINKAGE_METHODS,
     force: bool = False,
+    max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, Path]:
-    """Materialize the appendix EI shrinkage-sensitivity CSV.
+    """Materialize the supplementary EI shrinkage-sensitivity CSV.
 
-    The sensitivity run reuses the cached synthetic series and pooled-BM EI
-    bootstrap bundles. Only the covariance-shrinkage value is varied, and only
-    for the retained sliding-window pooled-FGLS EI workflows.
+    The sensitivity run reuses cached synthetic series. Adaptive bootstrap
+    covariance is recomputed only for the requested paths; fixed-R runs can reuse
+    cached pooled-BM EI bootstrap bundles. Each path's covariance is shared across
+    all shrinkage values without changing the bootstrap precision policy.
+    Scenario workers preserve the serial seeds; ``max_workers=1`` runs serially.
     """
     from benchmark.design import default_ei_simulation_configs
-    from benchmark.ei_benchmark import EI_BENCHMARK_RANDOM_STATE
     from config import resolve_repo_dirs
 
     dirs = resolve_repo_dirs(root)
@@ -363,90 +460,27 @@ def build_ei_shrinkage_sensitivity_summary(
 
     status(
         "ei_report",
-        "building appendix EI shrinkage sensitivity from cached scenario series",
+        "building supplementary EI shrinkage sensitivity from cached scenario series",
     )
+    workers = resolve_benchmark_workers(len(resolved_configs), max_workers=max_workers)
+    tasks = [(cfg, cache_dir, shrinkage_values, selected_methods) for cfg in resolved_configs]
+    status("ei_report", f"evaluating {len(tasks)} sensitivity scenarios with {workers} workers")
     detail_rows: list[dict[str, float | int | str]] = []
-    for cfg in resolved_configs:
-        scenario_seed = scenario_random_state(cfg, master_seed=EI_BENCHMARK_RANDOM_STATE)
-        series_bank = load_or_simulate_series_bank(
-            cfg,
-            random_state=scenario_seed,
-            cache_dir=cache_dir,
-        )
-        for rep, vec in enumerate(series_bank):
-            bundle = prepare_ei_bundle(
-                vec,
-                allow_zeros=False,
-                threshold_quantiles=EI_BENCHMARK_THRESHOLD_QUANTILES,
-            )
-            cache_key = f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}"
-            bootstrap_results = _load_or_compute_ei_bootstrap_bundle(
-                vec,
-                bundle=bundle,
-                cache_dir=cache_dir,
-                cache_key=cache_key,
-                reps=FGLS_BOOTSTRAP_REPS,
-                random_state=scenario_seed + 10_000 * rep,
-            )
-            for method in selected_methods:
-                base_path, sliding = _ei_method_components(method)
-                bootstrap_result = bootstrap_results[(base_path, sliding)]
-                covariance_unavailable = _unavailable_bootstrap_covariance(bootstrap_result)
-                for delta in shrinkage_values:
-                    if covariance_unavailable:
-                        detail_rows.append(
-                            {
-                                "benchmark_set": cfg.benchmark_set,
-                                "family": cfg.family,
-                                "n_obs": int(cfg.n_obs),
-                                "xi_true": float(cfg.xi_true),
-                                "theta_true": float(cfg.theta_true),
-                                "phi": float(cfg.phi),
-                                "rep": int(rep),
-                                "method": method,
-                                "delta": float(delta),
-                                "ape": np.nan,
-                                "interval_score": np.nan,
-                                "covered": 0.0,
-                                "fit_succeeded": False,
-                            }
-                        )
-                        continue
-                    estimate = estimate_pooled_bm_ei(
-                        bundle,
-                        base_path=base_path,
-                        sliding=sliding,
-                        regression="FGLS",
-                        bootstrap_result=bootstrap_result,
-                        covariance_shrinkage=delta,
-                    )
-                    ci_lo, ci_hi = estimate.confidence_interval
-                    detail_rows.append(
-                        {
-                            "benchmark_set": cfg.benchmark_set,
-                            "family": cfg.family,
-                            "n_obs": int(cfg.n_obs),
-                            "xi_true": float(cfg.xi_true),
-                            "theta_true": float(cfg.theta_true),
-                            "phi": float(cfg.phi),
-                            "rep": int(rep),
-                            "method": method,
-                            "delta": float(delta),
-                            "ape": float(
-                                abs(estimate.theta_hat - cfg.theta_true) / abs(cfg.theta_true)
-                            ),
-                            "interval_score": float(
-                                interval_score(
-                                    cfg.theta_true,
-                                    ci_lo,
-                                    ci_hi,
-                                    alpha=EI_ALPHA,
-                                )
-                            ),
-                            "covered": float(interval_contains((ci_lo, ci_hi), cfg.theta_true)),
-                            "fit_succeeded": True,
-                        }
-                    )
+    if workers == 1:
+        for completed, task in enumerate(tasks, start=1):
+            detail_rows.extend(_ei_shrinkage_scenario(task))
+            status("ei_report", f"completed {completed}/{len(tasks)} sensitivity scenarios")
+    else:
+        for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+            os.environ.setdefault(variable, "1")
+        with ProcessPoolExecutor(
+            max_workers=workers, mp_context=mp.get_context("spawn")
+        ) as executor:
+            for completed, rows in enumerate(
+                executor.map(_ei_shrinkage_scenario, tasks, chunksize=1), start=1
+            ):
+                detail_rows.extend(rows)
+                status("ei_report", f"completed {completed}/{len(tasks)} sensitivity scenarios")
     detail = pd.DataFrame(detail_rows)
     scenario_summary = (
         detail.groupby(
@@ -508,7 +542,7 @@ def plot_ei_shrinkage_sensitivity(
     title: str | None = None,
     save: bool = False,
 ) -> None:
-    """Plot appendix EI shrinkage sensitivity against the fixed delta grid."""
+    """Plot supplementary EI shrinkage sensitivity against the fixed delta grid."""
     subset = summary.loc[summary["benchmark_set"] == benchmark_set].copy()
     if subset.empty:
         raise ValueError(
@@ -885,7 +919,7 @@ def plot_ei_interval_sharpness_scatter(
 
 
 # ---------------------------------------------------------------------------
-# Manuscript artifact emission (absorbed from main_ei_benchmark_manuscript.py)
+# Report artifact emission (absorbed from main_ei_benchmark_report.py)
 # ---------------------------------------------------------------------------
 
 
@@ -944,7 +978,7 @@ def _transpose_ei_summary_table(
     return transposed.loc[:, ordered_columns], grouped_headers
 
 
-def write_ei_benchmark_manuscript_artifacts(
+def write_ei_benchmark_report_artifacts(
     benchmark_summary: pd.DataFrame,
     external_benchmark_summary: pd.DataFrame,
     *,
@@ -953,7 +987,7 @@ def write_ei_benchmark_manuscript_artifacts(
     table_dir: Path,
     web_dir: Path | None = None,
 ) -> None:
-    """Write EI benchmark manuscript tables and figures from cached CSV summaries."""
+    """Write EI benchmark report tables and figures from cached CSV summaries."""
     if web_dir is not None:
         web_dir.mkdir(parents=True, exist_ok=True)
         pd.concat([benchmark_summary, external_benchmark_summary], ignore_index=True).to_csv(
@@ -987,7 +1021,7 @@ def write_ei_benchmark_manuscript_artifacts(
         ei_story_table,
         method_order=ei_method_order,
     )
-    (table_dir / "benchmark_ei_summary_main.tex").write_text(
+    (table_dir / "benchmark_ei_summary.tex").write_text(
         render_grouped_latex_table(
             ei_summary_table,
             row_label="method",
@@ -1015,7 +1049,7 @@ def write_ei_benchmark_manuscript_artifacts(
                 "An FGLS attempt with degenerate bootstrap covariance is retained as noncoverage; "
                 "interval-score and point-error summaries are conditional on successful fits."
             ),
-            label="tab:benchmark-ei-summary-main",
+            label="tab:benchmark-ei-summary",
             environment="table",
             position="p",
             font_size=r"\tiny",
@@ -1046,7 +1080,7 @@ def write_ei_benchmark_manuscript_artifacts(
     interval_table["mean_interval_score"] = interval_table["mean_interval_score"].map(
         lambda x: f"{x:.3f}"
     )
-    (table_dir / "benchmark_ei_interval_main.tex").write_text(
+    (table_dir / "benchmark_ei_interval.tex").write_text(
         render_latex_table(
             interval_table,
             caption=(
@@ -1058,24 +1092,24 @@ def write_ei_benchmark_manuscript_artifacts(
                 "median coverage / mean interval score. Failed FGLS attempts count as "
                 "noncoverage, while width and score summaries use successful fits."
             ),
-            label="tab:benchmark-ei-interval-main",
+            label="tab:benchmark-ei-interval",
             caption_raw=True,
         )
     )
-    (table_dir / "benchmark_ei_overview_main.tex").write_text(
+    (table_dir / "benchmark_ei_overview.tex").write_text(
         render_latex_table(
             benchmark_summary.loc[
                 benchmark_summary["benchmark_set"] == UNIVERSAL_BENCHMARK_SET
             ].copy(),
             caption=(
-                f"Appendix full EI benchmark overview on the projected EI suite with \\(\\theta \\in "
+                f"Full EI benchmark overview on the projected EI suite with \\(\\theta \\in "
                 f"\\{{0.10, 0.15, 0.25, 0.40, 0.60, 0.80, 1.0\\}}\\), \\(\\xi \\in \\{{0.01, 0.50, 1.0, 5.0\\}}\\), "
                 f"and the Fréchet max-AR, moving-maxima q=99, and Pareto additive AR(1) families, "
                 f"with n\\_obs={n_obs}. The n\\_failed and failure\\_rate columns report "
                 "FGLS attempts with degenerate bootstrap covariance; those attempts count as "
                 "noncoverage and are not replaced by OLS estimates."
             ),
-            label="tab:benchmark-ei-overview-main",
+            label="tab:benchmark-ei-overview",
             caption_raw=True,
         )
     )
@@ -1109,21 +1143,21 @@ def write_ei_benchmark_manuscript_artifacts(
         plot_ei_shrinkage_sensitivity(
             shrinkage_sensitivity_summary,
             benchmark_set=UNIVERSAL_BENCHMARK_SET,
-            title="Appendix: EI shrinkage sensitivity for pooled sliding-FGLS workflows",
+            title="EI shrinkage sensitivity for pooled sliding-FGLS workflows",
             file_path=fig_dir / "benchmark_ei_shrinkage_sensitivity.pdf",
             save=True,
         )
 
 
-def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, Path]:
-    """Materialize EI benchmark manuscript figures and LaTeX tables."""
+def build_ei_benchmark_report_outputs(root: Path | str = ".") -> dict[str, Path]:
+    """Materialize EI benchmark report figures and LaTeX tables."""
     from config import resolve_repo_dirs
 
     from benchmark.ei_benchmark import load_or_materialize_ei_benchmark_outputs
 
     dirs = resolve_repo_dirs(root)
-    fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
-    table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
+    fig_dir = dirs["DIR_REPORT_FIGURE"]
+    table_dir = dirs["DIR_REPORT_TABLE"]
     out_dir = dirs["DIR_OUT_BENCHMARK"]
     web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "validation"
     fig_dir.mkdir(parents=True, exist_ok=True)
@@ -1137,8 +1171,8 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
     shrinkage_sensitivity_summary, shrinkage_sensitivity_path = (
         build_ei_shrinkage_sensitivity_summary(root, force=False)
     )
-    status("ei_report", "writing manuscript figures and LaTeX tables")
-    write_ei_benchmark_manuscript_artifacts(
+    status("ei_report", "writing report figures and LaTeX tables")
+    write_ei_benchmark_report_artifacts(
         benchmark_outputs.summary,
         benchmark_outputs.external_summary,
         shrinkage_sensitivity_summary=shrinkage_sensitivity_summary,
@@ -1150,9 +1184,9 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
         "benchmark_ei_summary": benchmark_outputs.summary_path,
         "benchmark_ei_external_summary": benchmark_outputs.external_summary_path,
         "benchmark_ei_shrinkage_sensitivity_data": shrinkage_sensitivity_path,
-        "benchmark_ei_summary_main": table_dir / "benchmark_ei_summary_main.tex",
-        "benchmark_ei_interval_main": table_dir / "benchmark_ei_interval_main.tex",
-        "benchmark_ei_overview_main": table_dir / "benchmark_ei_overview_main.tex",
+        "benchmark_ei_summary_tex": table_dir / "benchmark_ei_summary.tex",
+        "benchmark_ei_interval_tex": table_dir / "benchmark_ei_interval.tex",
+        "benchmark_ei_overview_tex": table_dir / "benchmark_ei_overview.tex",
         "benchmark_ei_summary_figure": fig_dir / "benchmark_ei_summary.pdf",
         "benchmark_ei_targets_figure": fig_dir / "benchmark_ei_targets.pdf",
         "benchmark_ei_interval_sharpness_figure": fig_dir / "benchmark_ei_interval_sharpness.pdf",
@@ -1170,13 +1204,13 @@ def build_ei_benchmark_manuscript_outputs(root: Path | str = ".") -> dict[str, P
 
 
 def main() -> None:
-    outputs = build_ei_benchmark_manuscript_outputs()
+    outputs = build_ei_benchmark_report_outputs()
     for name, path in outputs.items():
         status("ei_report", f"{name}: {path}")
 
 
 __all__ = [
-    "build_ei_benchmark_manuscript_outputs",
+    "build_ei_benchmark_report_outputs",
     "build_ei_shrinkage_sensitivity_summary",
     "ei_core_story_table",
     "ei_interval_story_table",
@@ -1187,7 +1221,7 @@ __all__ = [
     "plot_ei_overview_panels",
     "plot_ei_shrinkage_sensitivity",
     "plot_ei_targets_panels",
-    "write_ei_benchmark_manuscript_artifacts",
+    "write_ei_benchmark_report_artifacts",
 ]
 
 

@@ -12,7 +12,12 @@ def _design_block_sizes(
     years: float | np.ndarray,
     observations_per_year: float,
 ) -> np.ndarray:
-    """Return validated integer design-life block sizes."""
+    """Convert positive finite horizons to ceiling-rounded observation counts.
+
+    Return a float array, even for scalar ``years``; values are rounded up
+    by ``ceil(years * observations_per_year)``. Callers use scalar or 1D
+    horizons on the same observation clock as the fitted series.
+    """
     years_arr = np.atleast_1d(np.asarray(years, dtype=float))
     if not np.all(np.isfinite(years_arr)) or np.any(years_arr <= 0.0):
         raise ValueError("Design-life years must be positive and finite.")
@@ -23,7 +28,12 @@ def _design_block_sizes(
 
 
 def predict_block_quantile(fit: ScalingFit, block_size: float) -> float:
-    """Predict a block quantile from the fitted scaling law."""
+    """Evaluate ``exp(intercept + slope * log(block_size))`` for a quantile fit.
+
+    ``block_size`` must be positive and finite; it need not be an integer.
+    The probability is fixed by ``fit.quantile``. This extrapolates the
+    fitted power law when the requested size is outside the selected window.
+    """
     if fit.target != "quantile":
         raise ValueError(
             "predict_block_quantile requires a quantile-based ScalingFit. "
@@ -51,6 +61,10 @@ def estimate_design_life_level(
     it does not construct an application-style shared-slope companion curve.
     A median fit therefore gives a median design-life level, not a return level
     whose waiting time equals ``years``.
+
+    Accept a positive finite scalar or 1D ``years`` array. Return a float for
+    a scalar horizon and an aligned array otherwise. Predictions outside the
+    fitted block-size window assume the same power law continues to hold.
     """
     if fit.target != "quantile":
         raise ValueError(
@@ -88,6 +102,12 @@ def estimate_design_life_level_interval(
     so the log-scale variance follows from the fitted 2x2 coefficient covariance
     matrix ``cov_beta``. The returned interval is pointwise and does not include
     any post-selection or model-class uncertainty beyond that covariance matrix.
+
+    ``years`` is a positive finite scalar or 1D array and ``tau`` must match
+    the fitted quantile. Return ``(lower, upper)`` as floats for a scalar or
+    aligned arrays otherwise. The default ``z_crit=1.96`` gives nominal 95%
+    normal intervals on the log scale; these are intervals for the fitted
+    quantile, not prediction intervals for future observed maxima.
     """
     if fit.target != "quantile":
         raise ValueError(
@@ -116,6 +136,7 @@ def estimate_design_life_level_interval(
     log_block_sizes = np.log(block_sizes)
     design = np.column_stack([np.ones_like(log_block_sizes), log_block_sizes])
     log_mean = fit.intercept + fit.slope * log_block_sizes
+    # Evaluate each design row's quadratic form without an n-horizon covariance matrix.
     log_var = np.einsum("ij,jk,ik->i", design, cov_beta, design)
     log_se = np.sqrt(np.maximum(log_var, 0.0))
     lower = np.exp(log_mean - z_crit * log_se)

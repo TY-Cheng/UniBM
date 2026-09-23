@@ -1,24 +1,17 @@
-"""Internal regression orchestration for canonical EVI estimators."""
+"""Internal linear-model and covariance-alignment helpers for EVI estimators."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 
-from .._block_grid import generate_block_sizes
-from .._bootstrap_precision import matching_precision_metadata
 from .._validation import (
-    as_1d_float_array,
     matrix_condition_number,
     regularize_covariance,
     subset_covariance_by_labels,
-    validate_covariance_shrinkage,
 )
-from .blocks import block_summary_curve
-from .bootstrap import _adaptive_block_summary_bootstrap, circular_block_summary_bootstrap
-from .models import BlockSummaryCurve, PlateauWindow, ScalingFit
-from .selection import select_penultimate_window
+from .models import BlockSummaryCurve, PlateauWindow
 from .summaries import _validate_quantile
 
 
@@ -34,7 +27,11 @@ def _validate_curve_identity(
     quantile: float,
     sliding: bool,
 ) -> None:
-    """Require a reused curve to describe the estimator requested by the caller."""
+    """Check reused target, quantile, and block-scheme metadata.
+
+    Raise ValueError on a mismatch. This checks estimator identity, not
+    whether the curve came from the same observations as the current input.
+    """
     if curve.target != target:
         raise ValueError("curve target does not match the requested target.")
     if not isinstance(curve.sliding, (bool, np.bool_)) or bool(curve.sliding) != bool(sliding):
@@ -46,7 +43,11 @@ def _validate_curve_identity(
 
 
 def _validate_plateau_slice(curve: BlockSummaryCurve, plateau: PlateauWindow) -> None:
-    """Require a reused plateau to be the declared contiguous slice of its curve."""
+    """Check that a reused plateau matches its slice of the positive curve.
+
+    Validate inclusive start, exclusive stop, boolean mask, and matching
+    log coordinates; raise ValueError instead of silently realigning them.
+    """
     n_points = int(curve.log_block_sizes.size)
     if (
         isinstance(plateau.start, (bool, np.bool_))
@@ -87,7 +88,12 @@ def _validate_bootstrap_identity(
     bootstrap: dict[str, Any],
     curve: BlockSummaryCurve,
 ) -> None:
-    """Require bootstrap covariance metadata to identify the fitted curve estimator."""
+    """Check target and block-scheme metadata before covariance reuse.
+
+    Quantile targets also require an exactly matching quantile. Raise
+    ValueError for absent or inconsistent metadata; data identity remains
+    the caller's responsibility.
+    """
     for field in ("target", "sliding"):
         if field not in bootstrap:
             raise ValueError(f"bootstrap_result must include {field} metadata.")
@@ -116,7 +122,14 @@ def _fit_linear_model(
     covariance: np.ndarray | None = None,
     covariance_shrinkage: float = DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> dict[str, Any]:
-    """Fit the log-log scaling regression with optional covariance-aware weighting."""
+    """Regress paired log summaries on an intercept and log block size.
+
+    With an ``n x n`` response covariance, use regularized GLS and return
+    ``(X.T @ precision @ X)^+`` as coefficient covariance. Without it, use
+    OLS and the HC0 residual sandwich, which does not adjust for dependence
+    between scales. The result includes coefficients, a 2x2 covariance in
+    (intercept, slope) order, slope SE, fitted values, and diagnostics.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     X = np.column_stack([np.ones_like(x), x])
@@ -172,7 +185,12 @@ def _aligned_bootstrap_covariance(
     curve: BlockSummaryCurve,
     plateau: PlateauWindow,
 ) -> np.ndarray | None:
-    """Align a bootstrap covariance matrix to the selected positive plateau."""
+    """Extract covariance rows and columns for the selected positive block sizes.
+
+    Return None when no covariance exists. Otherwise require estimator
+    metadata and block-size labels, raising ValueError for inconsistent
+    input rather than assuming positional alignment.
+    """
     if bootstrap is None:
         return None
     _validate_bootstrap_identity(bootstrap, curve)
@@ -187,199 +205,4 @@ def _aligned_bootstrap_covariance(
         bootstrap["block_sizes"],
         selected_block_sizes,
         context="bootstrap covariance",
-    )
-
-
-def _fit_scaling_model(
-    vec: np.ndarray | list[float],
-    *,
-    target: str,
-    regression: Literal["OLS", "FGLS", "AUTO"],
-    quantile: float = 0.5,
-    sliding: bool = True,
-    block_sizes: np.ndarray | None = None,
-    num_step: int | None = None,
-    min_block_size: int | None = None,
-    max_block_size: int | None = None,
-    plateau_points: int = 5,
-    trim_fraction: float = 0.15,
-    curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
-    covariance_shrinkage: float = DEFAULT_COVARIANCE_SHRINKAGE,
-    bootstrap_reps: int | Literal["adaptive"] | None = None,
-    super_block_size: int | None = None,
-    random_state: int | None = 0,
-    curve: BlockSummaryCurve | None = None,
-    plateau: PlateauWindow | None = None,
-    bootstrap_result: dict[str, Any] | None = None,
-) -> ScalingFit:
-    """Internal scaling-model implementation shared by all EVI targets."""
-    if regression not in {"OLS", "FGLS", "AUTO"}:
-        raise ValueError("regression must be 'OLS', 'FGLS', or 'AUTO'.")
-    shrinkage_policy = validate_covariance_shrinkage(covariance_shrinkage)
-    if regression == "OLS":
-        if bootstrap_result is not None:
-            raise ValueError("OLS does not accept bootstrap_result.")
-        if bootstrap_reps is not None and (
-            isinstance(bootstrap_reps, bool)
-            or not isinstance(bootstrap_reps, (int, np.integer))
-            or bootstrap_reps != 0
-        ):
-            raise ValueError("OLS does not use bootstrap; bootstrap_reps must be 0 or None.")
-        resolved_bootstrap_reps = 0
-    elif bootstrap_result is not None:
-        if bootstrap_reps is not None:
-            raise ValueError("bootstrap_reps must be None when bootstrap_result is supplied.")
-        resolved_bootstrap_reps = 0
-    else:
-        if bootstrap_reps is None or bootstrap_reps == "adaptive":
-            resolved_bootstrap_reps = "adaptive"
-        elif (
-            isinstance(bootstrap_reps, bool)
-            or not isinstance(bootstrap_reps, (int, np.integer))
-            or bootstrap_reps < 2
-        ):
-            raise ValueError(
-                "bootstrap_reps must be an integer at least 2 or 'adaptive' for FGLS or AUTO."
-            )
-        else:
-            resolved_bootstrap_reps = int(bootstrap_reps)
-    arr = as_1d_float_array(vec)
-    finite_count = int(np.sum(np.isfinite(arr)))
-    if finite_count < 32:
-        raise ValueError("At least 32 finite observations are required for block-size selection.")
-    if curve is None and block_sizes is None:
-        block_sizes = generate_block_sizes(
-            n_obs=arr.size,
-            num_step=num_step,
-            min_block_size=min_block_size,
-            max_block_size=max_block_size,
-            geom=True,
-        )
-    if curve is None:
-        curve = block_summary_curve(
-            arr,
-            block_sizes,
-            sliding=sliding,
-            quantile=quantile,
-            target=target,
-        )
-    _validate_curve_identity(
-        curve,
-        target=target,
-        quantile=quantile,
-        sliding=sliding,
-    )
-    if curve.log_block_sizes.size < plateau_points:
-        raise ValueError("Not enough positive block summaries for regression.")
-    if plateau is None:
-        plateau = select_penultimate_window(
-            curve.log_block_sizes,
-            curve.log_values,
-            min_points=plateau_points,
-            trim_fraction=trim_fraction,
-            curvature_penalty=curvature_penalty,
-        )
-    _validate_plateau_slice(curve, plateau)
-    bootstrap = bootstrap_result
-    if bootstrap is None and resolved_bootstrap_reps == "adaptive":
-        levels = curve.positive_block_sizes[plateau.start : plateau.stop]
-
-        def evaluate(cov: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-            selected_cov = subset_covariance_by_labels(
-                cov, curve.positive_block_sizes, levels, context="bootstrap covariance"
-            )
-            fit = _fit_linear_model(plateau.x, plateau.y, selected_cov, shrinkage_policy)
-            xi, se = fit["slope"], fit["standard_error"]
-            return np.asarray([xi, xi - Z_CRIT_95 * se, xi + Z_CRIT_95 * se]), np.full(3, se)
-
-        bootstrap = _adaptive_block_summary_bootstrap(
-            arr,
-            curve.positive_block_sizes,
-            target=target,
-            quantile=quantile,
-            sliding=sliding,
-            super_block_size=super_block_size,
-            random_state=random_state,
-            evaluate=evaluate,
-        )
-        bootstrap.update(
-            bootstrap_mcse_targets=("xi", "xi_ci_lo", "xi_ci_hi"),
-            bootstrap_precision_levels=levels.copy(),
-            bootstrap_precision_shrinkage=shrinkage_policy,
-        )
-    elif bootstrap is None and resolved_bootstrap_reps > 1:
-        bootstrap = circular_block_summary_bootstrap(
-            vec=arr,
-            block_sizes=curve.positive_block_sizes,
-            target=target,
-            quantile=quantile,
-            sliding=sliding,
-            reps=resolved_bootstrap_reps,
-            super_block_size=super_block_size,
-            random_state=random_state,
-        )
-        bootstrap["bootstrap_reps_policy"] = "fixed"
-        bootstrap["bootstrap_reps_requested"] = resolved_bootstrap_reps
-        bootstrap["bootstrap_reps_used"] = int(np.asarray(bootstrap["samples"]).shape[0])
-    if bootstrap is not None and bootstrap_result is None:
-        bootstrap["bootstrap_block_length_policy"] = (
-            "default" if super_block_size is None else "fixed"
-        )
-    covariance = _aligned_bootstrap_covariance(bootstrap, curve, plateau)
-    realized_shrinkage: float | None = None
-    bootstrap_reps_used: int | None = None
-    if covariance is not None:
-        realized_shrinkage = float(shrinkage_policy)
-        if bootstrap is not None and "samples" in bootstrap:
-            samples = np.asarray(bootstrap["samples"])
-            if samples.ndim == 2:
-                bootstrap_reps_used = int(samples.shape[0])
-    if covariance is None:
-        if bootstrap_result is not None:
-            raise ValueError("supplied bootstrap_result must contain usable covariance.")
-        if regression == "FGLS":
-            raise ValueError("FGLS requires usable bootstrap covariance.")
-    model = _fit_linear_model(
-        plateau.x,
-        plateau.y,
-        covariance=covariance,
-        covariance_shrinkage=0.0 if realized_shrinkage is None else realized_shrinkage,
-    )
-    slope = model["slope"]
-    standard_error = model["standard_error"]
-    return ScalingFit(
-        target=target,
-        quantile=float(quantile),
-        sliding=bool(sliding),
-        regression_policy=regression,
-        regression="FGLS" if covariance is not None else "OLS",
-        ci_variant="bootstrap_cov" if covariance is not None else "hc0",
-        intercept=model["intercept"],
-        slope=slope,
-        standard_error=standard_error,
-        confidence_interval=(
-            float(slope - Z_CRIT_95 * standard_error),
-            float(slope + Z_CRIT_95 * standard_error),
-        ),
-        curve=curve,
-        plateau=plateau,
-        cov_beta=model["cov_beta"],
-        bootstrap=bootstrap,
-        covariance_shrinkage_policy=(None if covariance is None else "fixed"),
-        covariance_shrinkage=realized_shrinkage,
-        covariance_condition_number_raw=model["covariance_condition_number_raw"],
-        covariance_condition_number_regularized=model["covariance_condition_number_regularized"],
-        bootstrap_block_length_policy=(
-            None if bootstrap is None else bootstrap.get("bootstrap_block_length_policy")
-        ),
-        bootstrap_block_length=(None if bootstrap is None else bootstrap.get("super_block_size")),
-        bootstrap_reps_requested=(
-            None if bootstrap is None else bootstrap.get("bootstrap_reps_requested")
-        ),
-        bootstrap_reps_used=bootstrap_reps_used,
-        **matching_precision_metadata(
-            bootstrap,
-            curve.positive_block_sizes[plateau.start : plateau.stop],
-            shrinkage_policy,
-        ),
     )

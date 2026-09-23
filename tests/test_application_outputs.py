@@ -22,7 +22,7 @@ from application.outputs import (
     _application_observations_per_year,
     _application_design_life_level_rows,
     _gev_l_moment_return_level,
-    _render_application_summary_main_latex,
+    _render_application_summary_latex,
     _plot_daily_and_annual,
     _tau_scaling_views_for_fit,
     _draw_ei_ax,
@@ -330,7 +330,7 @@ class ApplicationOutputTests(unittest.TestCase):
 
         self.assertEqual(table.iloc[0]["10y_dll"], "1,010 [510, 2,010]")
         self.assertEqual(table.iloc[0]["50y_dll"], "12,400 [4,910, 31,400]")
-        rendered = _render_application_summary_main_latex(table)
+        rendered = _render_application_summary_latex(table)
         self.assertNotIn("e", table.iloc[0]["10y_dll"])
         self.assertIn(r"\(10^6\) 2025 U.S. dollars", rendered)
 

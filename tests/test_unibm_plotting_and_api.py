@@ -31,7 +31,6 @@ from unibm.evi import (
 )
 from unibm.evi.plotting import (
     _resolved_file_path,
-    _should_close_figure,
 )
 from unibm._runtime import (
     _env_path_is_writable,
@@ -181,9 +180,6 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertIn("XDG_CACHE_HOME", __import__("os").environ)
 
         self.assertIsNone(_resolved_file_path(None))
-        self.assertTrue(_should_close_figure(True))
-        with mock.patch.dict("sys.modules", {"ipykernel": object()}, clear=False):
-            self.assertFalse(_should_close_figure(None))
 
         np.testing.assert_allclose(
             sliding_window_extreme_valid([1.0, 2.0, 3.0], 1, reducer="max"),
@@ -208,6 +204,23 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertGreater(len(plt.get_fignums()), 0)
             plot_scaling_fit(fit, save=False, close=True)
             plt.close("all")
+
+    def test_public_plots_return_editable_figures_and_close_only_when_requested(self) -> None:
+        for plot, value in (
+            (plot_scaling_fit, _make_scaling_fit()),
+            (plot_ei_path, _make_ei_path()),
+            (plot_ei_fit, _make_ei_bm_fit()),
+        ):
+            with self.subTest(plot=plot.__name__):
+                fig, ax = plot(value)
+                self.assertIs(ax.figure, fig)
+                self.assertEqual(fig.dpi / fig.canvas.device_pixel_ratio, 150)
+                self.assertTrue(plt.fignum_exists(fig.number))
+                ax.set_title("Caller customization")
+                plt.close(fig)
+                closed_fig, closed_ax = plot(value, close=True)
+                self.assertIs(closed_ax.figure, closed_fig)
+                self.assertFalse(plt.fignum_exists(closed_fig.number))
 
     def test_plot_ei_path_and_fit_support_path_and_threshold_views(self) -> None:
         path = _make_ei_path()

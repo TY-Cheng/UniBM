@@ -19,6 +19,7 @@ class JustfileTests(unittest.TestCase):
         self.assertNotIn("\n_docs-build:", text)
         self.assertIn("uv run mkdocs build --strict", text)
         self.assertIn("\nbenchmark workers=", text)
+        self.assertIn("\nreports workers=", text)
         self.assertIn("\napplication workers=", text)
         self.assertIn("\ndata screening_bootstrap=", text)
         self.assertIn("\nrefresh-data:", text)
@@ -53,11 +54,12 @@ class JustfileTests(unittest.TestCase):
 
     def test_justfile_guards_match_recipe_side_effects(self) -> None:
         text = JUSTFILE.read_text()
-        self.assertIn("\n_require-workflow-env: _require-manuscript-dir", text)
-        self.assertIn("\n_require-manuscript-dir:", text)
+        self.assertIn("\n_require-workflow-env:", text)
+        self.assertIn("python scripts/config.py", text)
         self.assertIn('\ndata screening_bootstrap="20":', text)
         self.assertIn("\nformat:", text)
-        self.assertIn("\nclean-generated: _require-manuscript-dir", text)
+        self.assertIn("python scripts/clean_generated.py", text)
+        self.assertNotIn("rm -rf", text)
 
     def test_just_list_mentions_main_repo_targets_when_available(self) -> None:
         just_exe = shutil.which("just")

@@ -7,24 +7,16 @@ default:
 
 # Environment Guard
 [private]
-_require-manuscript-dir:
-    @manuscript_path="${DIR_MANUSCRIPT:-../UniBM_manuscript}"; \
-    manuscript_abs="${manuscript_path:A}"; \
-    if [[ ! -f "${manuscript_abs}/0_manuscript.tex" ]]; then \
-        echo "DIR_MANUSCRIPT does not point to a manuscript repo with 0_manuscript.tex: ${manuscript_abs}"; \
-        exit 1; \
-    fi
-
-[private]
-_require-workflow-env: _require-manuscript-dir
+_require-workflow-env:
+    @uv run --group dev python scripts/config.py
 
 # Main Entrypoints
 full workers="8" screening_bootstrap="20": _require-workflow-env
     just check-full
-    just clean-generated
+    uv run --group dev python scripts/clean_generated.py
     just benchmark "{{ workers }}"
     just application "{{ workers }}" "{{ screening_bootstrap }}"
-    uv run python scripts/manuscript/artifact_manifest.py
+    uv run python scripts/reports/artifact_manifest.py
     uv run mkdocs build --strict
 
 benchmark workers="8": _require-workflow-env
@@ -34,13 +26,13 @@ benchmark workers="8": _require-workflow-env
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
 
-manuscript workers="8" screening_bootstrap="20": _require-workflow-env
+reports workers="8" screening_bootstrap="20": _require-workflow-env
     uv sync --dev
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/evi_report.py
     UNIBM_BENCHMARK_WORKERS={{ workers }} uv run python scripts/benchmark/ei_report.py
     UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
     UNIBM_APPLICATION_WORKERS={{ workers }} uv run python scripts/application/build.py
-    uv run python scripts/manuscript/artifact_manifest.py
+    uv run python scripts/reports/artifact_manifest.py
 
 data screening_bootstrap="20":
     uv sync --dev
@@ -75,11 +67,3 @@ check-full:
 format:
     just --fmt
     uv run ruff format .
-
-# Utilities
-clean-generated: _require-manuscript-dir
-    mkdir -p out/benchmark/cache
-    find out -mindepth 1 -maxdepth 1 ! -name benchmark -exec rm -rf {} +
-    find out/benchmark -mindepth 1 -maxdepth 1 ! -name cache -exec rm -rf {} +
-    rm -rf "${DIR_MANUSCRIPT:-../UniBM_manuscript}/Figure" "${DIR_MANUSCRIPT:-../UniBM_manuscript}/Table"
-    rm -f "${DIR_MANUSCRIPT:-../UniBM_manuscript}/paper_subset_manifest.json"

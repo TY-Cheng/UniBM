@@ -50,7 +50,7 @@ from application.specs import (
     APPLICATION_DESIGN_LIFE_TAUS,
     APPLICATION_RANDOM_STATE,
     APPLICATIONS,
-    PAPER_APPLICATIONS,
+    REPORT_APPLICATIONS,
     DESIGN_LIFE_LEVEL_HORIZONS,
     ApplicationBundle,
 )
@@ -74,7 +74,7 @@ from unibm.evi.design import _design_block_sizes
 from data_prep._io import write_csv_gz_atomic
 
 
-_MANUSCRIPT_APPLICATION_KEYS = tuple(spec.key for spec in PAPER_APPLICATIONS)
+_REPORT_APPLICATION_KEYS = tuple(spec.key for spec in REPORT_APPLICATIONS)
 _USGS_SCREENING_DETAIL_COLUMNS = {
     "state_code",
     "site_no",
@@ -334,7 +334,7 @@ def _format_interval(center: float, lo: float, hi: float) -> str:
 
 
 def _format_compact_number(value: float) -> str:
-    """Format one value compactly for manuscript-facing DLL columns."""
+    """Format one value compactly for report-facing DLL columns."""
     if not np.isfinite(value):
         return "NA"
     magnitude = abs(float(value))
@@ -361,7 +361,7 @@ def _format_compact_interval(center: float, lo: float, hi: float) -> str:
 
 
 def _format_readable_scaled_number(value: float, *, scale: float) -> str:
-    """Format a rescaled manuscript-table number without scientific notation."""
+    """Format a rescaled report-table number without scientific notation."""
     if not np.isfinite(value):
         return "NA"
     scaled = float(value) / scale
@@ -378,7 +378,7 @@ def _format_readable_scaled_number(value: float, *, scale: float) -> str:
 
 
 def _format_scaled_interval(center: float, lo: float, hi: float, *, scale: float) -> str:
-    """Format one rescaled estimate and interval for manuscript display."""
+    """Format one rescaled estimate and interval for report display."""
     if not (np.isfinite(center) and np.isfinite(lo) and np.isfinite(hi)):
         return "NA"
     return (
@@ -426,7 +426,7 @@ def _application_summary_design_life_scale(bundle: ApplicationBundle) -> float:
 
 
 def _save_figure_pair(fig, file_path: Path) -> None:
-    """Save the publication figure to the requested path."""
+    """Save the report figure to the requested path."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     if file_path.suffix.lower() == ".png":
         fig.savefig(file_path, dpi=180, bbox_inches="tight")
@@ -527,10 +527,10 @@ def _application_design_life_level_rows(bundle: ApplicationBundle) -> list[dict[
     return rows
 
 
-def _manuscript_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBundle]:
-    """Return the curated four-case manuscript subset in a stable order."""
-    selected = [bundle for bundle in bundles if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS]
-    order = {key: idx for idx, key in enumerate(_MANUSCRIPT_APPLICATION_KEYS)}
+def _report_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBundle]:
+    """Return the curated four-case report subset in a stable order."""
+    selected = [bundle for bundle in bundles if bundle.spec.key in _REPORT_APPLICATION_KEYS]
+    order = {key: idx for idx, key in enumerate(_REPORT_APPLICATION_KEYS)}
     return sorted(selected, key=lambda bundle: order[bundle.spec.key])
 
 
@@ -748,9 +748,9 @@ def _fit_ei_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> lis
 
 
 def application_selection_sensitivity_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the manuscript appendix selection-sensitivity summary."""
+    """Build the report supplementary selection-sensitivity summary."""
     rows: list[dict[str, object]] = []
-    for bundle in _manuscript_bundles(bundles):
+    for bundle in _report_bundles(bundles):
         evi_fits = _fit_evi_window_variants(bundle, top_k=3)
         evi_xi = np.asarray([fit.slope for fit in evi_fits], dtype=float)
         ei_variants = _fit_ei_window_variants(bundle, top_k=3)
@@ -857,7 +857,7 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
 
 
 def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the manuscript-facing cross-application summary table."""
+    """Build the report-facing cross-application summary table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         dll_record = application_design_life_interval_record(bundle)
@@ -906,14 +906,14 @@ def application_summary_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
 
 
 def _format_extrapolation_ratio(value: float) -> str:
-    """Format a compact design-life-to-plateau ratio for the appendix table."""
+    """Format a compact design-life-to-plateau ratio for the supplementary table."""
     if not np.isfinite(value):
         return "NA"
     return f"{value:.1f}" if abs(value) < 100.0 else f"{value:.0f}"
 
 
 def application_extrapolation_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build the manuscript-facing design-life extrapolation-distance table."""
+    """Build the report-facing design-life extrapolation-distance table."""
     clock_labels = {
         "calendar_year": "calendar day",
         "claim_active_day": "active day",
@@ -940,8 +940,8 @@ def application_extrapolation_table(bundles: list[ApplicationBundle]) -> pd.Data
     return pd.DataFrame(rows)
 
 
-def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
-    """Render the appendix extrapolation-distance table with booktabs."""
+def _render_application_extrapolation_latex(table: pd.DataFrame) -> str:
+    """Render the supplementary extrapolation-distance table with booktabs."""
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
@@ -955,7 +955,7 @@ def _render_application_extrapolation_main_latex(table: pd.DataFrame) -> str:
             r"design lives on the application-specific observation clock. "
             r"The ratios compare each design-life block size with the largest fitted block size.}"
         ),
-        r"\label{tab:application-extrapolation-main}",
+        r"\label{tab:application-extrapolation}",
         r"\begin{tabular}{p{0.23\textwidth}p{0.17\textwidth}rrrrr}",
         r"\toprule",
         (
@@ -1010,7 +1010,7 @@ def application_streamflow_gev_check_table(bundles: list[ApplicationBundle]) -> 
     return pd.DataFrame(rows)
 
 
-def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
+def _render_application_summary_latex(table: pd.DataFrame) -> str:
     """Render the main application summary as a wrapped tabularx table."""
     lines = [
         r"\begin{table}[htbp]",
@@ -1034,7 +1034,7 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
             r"for both severity and persistence; NFIP uses the active-day clock "
             r"for severity and the calendar-day clock for persistence.}"
         ),
-        r"\label{tab:application-summary-main}",
+        r"\label{tab:application-summary}",
         (
             r"\begin{tabularx}{\textwidth}"
             r"{>{\raggedright\arraybackslash}p{0.22\textwidth}"
@@ -1060,7 +1060,7 @@ def _render_application_summary_main_latex(table: pd.DataFrame) -> str:
 
 
 def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build a compact manuscript-facing design-life-level comparison table."""
+    """Build a compact report-facing design-life-level comparison table."""
     basis_labels = {
         "calendar_year": "calendar-day",
         "claim_active_day": "active-day",
@@ -1097,7 +1097,7 @@ def application_design_life_level_table(bundles: list[ApplicationBundle]) -> pd.
 
 
 def application_ei_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
-    """Build a manuscript-facing EI comparison table."""
+    """Build a report-facing EI comparison table."""
     rows: list[dict[str, object]] = []
     for bundle in bundles:
         if not _bundle_has_formal_ei(bundle):
@@ -1895,7 +1895,7 @@ def plot_application_overview(
 
 
 def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
-    """Write manuscript-ready application figures for one bundle."""
+    """Write report-ready application figures for one bundle."""
     _plot_daily_and_annual(
         bundle.prepared.display,
         ylabel=bundle.spec.ylabel,
@@ -2001,7 +2001,7 @@ def application_usgs_screening_disclosure_table(
     metadata_dir: Path,
     screening_path: Path,
 ) -> pd.DataFrame:
-    """Render the manuscript-facing USGS candidate-pool disclosure table."""
+    """Render the report-facing USGS candidate-pool disclosure table."""
 
     def _strip_trailing_state_suffix(name: object) -> str:
         text = str(name).strip()
@@ -2091,8 +2091,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     metadata_app_dir = dirs["DIR_DATA_METADATA_APPLICATION"]
     derived_dir = dirs["DIR_DATA_DERIVED"]
     out_dir = dirs["DIR_OUT_APPLICATIONS"]
-    fig_dir = dirs["DIR_MANUSCRIPT_FIGURE"]
-    table_dir = dirs["DIR_MANUSCRIPT_TABLE"]
+    fig_dir = dirs["DIR_REPORT_FIGURE"]
+    table_dir = dirs["DIR_REPORT_TABLE"]
     web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "cases"
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
@@ -2118,7 +2118,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     inputs = build_application_inputs(dirs, raw_paths=raw_paths, specs=APPLICATIONS)
     status("application", "building application bundles")
     bundles = build_application_bundles_from_inputs(inputs, specs=APPLICATIONS)
-    manuscript_bundles = _manuscript_bundles(bundles)
+    report_bundles = _report_bundles(bundles)
     series_registry_rows: list[dict[str, object]] = []
     screening_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
@@ -2143,15 +2143,15 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             screening_rows.append(ei_review)
         summary_rows.append(application_summary_record(bundle))
         design_life_level_rows.extend(_application_design_life_level_rows(bundle))
-        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
+        if bundle.spec.key in _REPORT_APPLICATION_KEYS:
             design_life_interval_rows.append(application_design_life_interval_record(bundle))
         method_rows.extend(application_method_rows(bundle))
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
         status("application", f"writing web figure for {bundle.spec.label}")
         write_application_web_figure(bundle, web_dir)
-        if bundle.spec.key in _MANUSCRIPT_APPLICATION_KEYS:
-            status("application", f"writing manuscript figures for {bundle.spec.label}")
+        if bundle.spec.key in _REPORT_APPLICATION_KEYS:
+            status("application", f"writing report figures for {bundle.spec.label}")
             write_application_figures(bundle, fig_dir)
 
     status("application", "writing application tables and metadata")
@@ -2177,7 +2177,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         index=False,
     )
     pd.DataFrame(method_rows).sort_values(["application", "tau", "method"]).to_csv(
-        out_dir / "application_methods.csv",
+        out_dir / "application_evi_methods.csv",
         index=False,
     )
     pd.DataFrame(ei_method_rows).sort_values(["application", "method"]).to_csv(
@@ -2186,19 +2186,19 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     )
     status("application", "writing cross-application overview figure")
     _plot_application_overview(
-        manuscript_bundles,
+        report_bundles,
         file_path=fig_dir / "application_overview.pdf",
         save=True,
     )
     status("application", "writing application LaTeX summary table")
-    summary_table = application_summary_table(manuscript_bundles)
-    (table_dir / "application_summary_main.tex").write_text(
-        _render_application_summary_main_latex(summary_table)
+    summary_table = application_summary_table(report_bundles)
+    (table_dir / "application_summary.tex").write_text(
+        _render_application_summary_latex(summary_table)
     )
     status("application", "writing streamflow GEV scale-comparison table")
-    streamflow_gev_check = application_streamflow_gev_check_table(manuscript_bundles)
+    streamflow_gev_check = application_streamflow_gev_check_table(report_bundles)
     streamflow_gev_check.to_csv(out_dir / "application_streamflow_gev_check.csv", index=False)
-    (table_dir / "application_streamflow_gev_check_main.tex").write_text(
+    (table_dir / "application_streamflow_gev_check.tex").write_text(
         _render_wrapped_latex_table(
             streamflow_gev_check,
             caption=(
@@ -2215,7 +2215,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "formal test of agreement. All discharge entries are in "
                 "\\(10^3\\,\\mathrm{ft}^3\\,\\mathrm{s}^{-1}\\)."
             ),
-            label="tab:application-streamflow-gev-check-main",
+            label="tab:application-streamflow-gev-check",
             alignments=(
                 "p{0.16\\textwidth}p{0.10\\textwidth}p{0.15\\textwidth}"
                 "p{0.20\\textwidth}p{0.15\\textwidth}p{0.20\\textwidth}"
@@ -2233,9 +2233,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         )
     )
     status("application", "writing application LaTeX design-life-level table")
-    (table_dir / "application_design_life_levels_main.tex").write_text(
+    (table_dir / "application_design_life_levels.tex").write_text(
         render_latex_table(
-            application_design_life_level_table(manuscript_bundles),
+            application_design_life_level_table(report_bundles),
             caption=(
                 "Design-life levels for the four application cases. Rows show shared-slope quantile fits "
                 "with \\(\\tau \\in \\{0.50, 0.90, 0.95, 0.99\\}\\), obtained by evaluating "
@@ -2245,7 +2245,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "and slope with \\(\\tau\\)-specific intercept shifts. Streamflow rows are reported on the "
                 "calendar-day basis, whereas NFIP rows are reported on the active-day basis."
             ),
-            label="tab:application-design-life-levels-main",
+            label="tab:application-design-life-levels",
             header_latex={
                 "$\\tau$": r"$\tau$",
             },
@@ -2253,9 +2253,9 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         )
     )
     status("application", "writing application LaTeX EI comparison table")
-    (table_dir / "application_ei_main.tex").write_text(
+    (table_dir / "application_ei.tex").write_text(
         render_latex_table(
-            application_ei_table(manuscript_bundles),
+            application_ei_table(report_bundles),
             caption=(
                 "Application-side extremal-index summary for the formal EI applications only. "
                 "Cells report the BB-sliding-FGLS and Northrop-sliding-FGLS pooled-BM estimates "
@@ -2263,22 +2263,22 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "streamflow and NFIP claim-wave case studies. Stable windows are shown for the "
                 "two pooled-BM paths."
             ),
-            label="tab:application-ei-main",
+            label="tab:application-ei",
         )
     )
-    status("application", "writing application appendix selection-sensitivity table")
-    (table_dir / "application_selection_sensitivity_main.tex").write_text(
+    status("application", "writing application supplementary selection-sensitivity table")
+    (table_dir / "application_selection_sensitivity.tex").write_text(
         render_latex_table(
-            application_selection_sensitivity_table(manuscript_bundles),
+            application_selection_sensitivity_table(report_bundles),
             caption=(
                 "Window-selection sensitivity of EVI and EI estimates. "
                 "Each cell reports the selected estimate and the min--max range over the three "
                 "best-ranked admissible plateaus (EVI) or EI stable windows under the fixed "
                 "selection rules. EVI uses median-sliding-FGLS and EI uses BB-sliding-FGLS. "
                 "These ranges describe sensitivity to window choice and complement the conditional "
-                "intervals in \\Cref{tab:application-summary-main}."
+                "intervals in \\Cref{tab:application-summary}."
             ),
-            label="tab:application-selection-sensitivity-main",
+            label="tab:application-selection-sensitivity",
             header_latex={
                 "$\\xi$ [range]": r"$\xi$ [range]",
                 "$\\theta$ [range]": r"$\theta$ [range]",
@@ -2287,13 +2287,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         )
     )
     status("application", "writing application extrapolation-distance table")
-    (table_dir / "application_extrapolation_main.tex").write_text(
-        _render_application_extrapolation_main_latex(
-            application_extrapolation_table(manuscript_bundles)
-        )
+    (table_dir / "application_extrapolation.tex").write_text(
+        _render_application_extrapolation_latex(application_extrapolation_table(report_bundles))
     )
     status("application", "writing USGS screening disclosure table")
-    (table_dir / "application_usgs_screening_main.tex").write_text(
+    (table_dir / "application_usgs_screening.tex").write_text(
         _render_wrapped_latex_table(
             application_usgs_screening_disclosure_table(
                 metadata_dir=metadata_app_dir,
@@ -2307,7 +2305,7 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "Ranking then prioritizes Fréchet-domain support, number of plateau points, "
                 "record length, and lower confidence limit for \\(\\xi\\)."
             ),
-            label="tab:application-usgs-screening-main",
+            label="tab:application-usgs-screening",
             alignments=(
                 "p{0.12\\textwidth}p{0.23\\textwidth}p{0.08\\textwidth}p{0.15\\textwidth}"
                 "p{0.08\\textwidth}p{0.10\\textwidth}p{0.10\\textwidth}"
@@ -2328,22 +2326,21 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         "application_summary": out_dir / "application_summary.csv",
         "application_design_life_levels": out_dir / "application_design_life_levels.csv",
         "application_design_life_intervals": out_dir / "application_design_life_intervals.csv",
-        "application_methods": out_dir / "application_methods.csv",
+        "application_evi_methods": out_dir / "application_evi_methods.csv",
         "application_ei_methods": out_dir / "application_ei_methods.csv",
         "application_usgs_site_screening": out_dir / "application_usgs_site_screening.csv",
         "application_streamflow_gev_check": out_dir / "application_streamflow_gev_check.csv",
-        "application_summary_main": table_dir / "application_summary_main.tex",
-        "application_design_life_levels_main": table_dir
-        / "application_design_life_levels_main.tex",
-        "application_ei_main": table_dir / "application_ei_main.tex",
-        "application_streamflow_gev_check_main": (
-            table_dir / "application_streamflow_gev_check_main.tex"
+        "application_summary_tex": table_dir / "application_summary.tex",
+        "application_design_life_levels_tex": table_dir / "application_design_life_levels.tex",
+        "application_ei_tex": table_dir / "application_ei.tex",
+        "application_streamflow_gev_check_tex": (
+            table_dir / "application_streamflow_gev_check.tex"
         ),
-        "application_selection_sensitivity_main": (
-            table_dir / "application_selection_sensitivity_main.tex"
+        "application_selection_sensitivity_tex": (
+            table_dir / "application_selection_sensitivity.tex"
         ),
-        "application_extrapolation_main": table_dir / "application_extrapolation_main.tex",
-        "application_usgs_screening_main": table_dir / "application_usgs_screening_main.tex",
+        "application_extrapolation_tex": table_dir / "application_extrapolation.tex",
+        "application_usgs_screening_tex": table_dir / "application_usgs_screening.tex",
     }
     outputs.update(
         {

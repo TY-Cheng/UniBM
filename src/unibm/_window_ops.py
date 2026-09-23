@@ -11,7 +11,7 @@ Reducer = Literal["max", "min"]
 
 
 def _as_1d_float_array(vec: np.ndarray | list[float]) -> np.ndarray:
-    """Coerce one input vector to a 1D float array."""
+    """Convert to floats and flatten all dimensions without filtering values."""
     return np.asarray(vec, dtype=float).reshape(-1)
 
 
@@ -21,7 +21,12 @@ def _rolling_extreme_finite(
     *,
     reducer: Reducer,
 ) -> np.ndarray:
-    """Return trailing rolling extrema for one numeric array."""
+    """Reduce each complete, unpadded window to its maximum or minimum.
+
+    The result has length ``n - window + 1``. A window smaller than two or
+    longer than the flattened input returns an empty array. No values are
+    filtered here; callers handle non-finite observations separately.
+    """
     arr = np.asarray(arr, dtype=float).reshape(-1)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
@@ -32,7 +37,11 @@ def _rolling_extreme_finite(
 
 
 def _finite_window_mask(arr: np.ndarray, window: int) -> np.ndarray:
-    """Return which trailing windows contain only finite observations."""
+    """Mark complete windows containing no NaN or infinity in a 1D array.
+
+    Prefix counts avoid constructing a Boolean matrix of overlapping windows.
+    The caller supplies a window between one and the input length.
+    """
     nonfinite = (~np.isfinite(arr)).astype(np.int64, copy=False)
     prefix = np.empty(arr.size + 1, dtype=np.int64)
     prefix[0] = 0
@@ -41,7 +50,10 @@ def _finite_window_mask(arr: np.ndarray, window: int) -> np.ndarray:
 
 
 def _nan_window_mask(arr: np.ndarray, window: int) -> np.ndarray:
-    """Return which trailing windows contain at least one NaN."""
+    """Mark complete windows containing NaN; infinity is not marked.
+
+    The caller supplies a 1D array and a window between one and its length.
+    """
     nan_count = np.isnan(arr).astype(np.int64, copy=False)
     prefix = np.empty(arr.size + 1, dtype=np.int64)
     prefix[0] = 0
@@ -55,7 +67,13 @@ def sliding_window_extreme_valid(
     *,
     reducer: Reducer,
 ) -> np.ndarray:
-    """Return sliding-window extrema, dropping windows with non-finite inputs."""
+    """Return extrema only for complete windows whose observations are finite.
+
+    Invalid windows are omitted after forming windows on the original series,
+    so gaps never join observations that were originally separated. Input is
+    flattened; windows smaller than two or longer than the input return an
+    empty array. The surviving extrema retain their original window order.
+    """
     arr = _as_1d_float_array(vec)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
@@ -71,9 +89,11 @@ def circular_sliding_window_maximum(
 ) -> np.ndarray:
     """Return circular sliding maxima for one segment.
 
-    Windows that include a NaN propagate ``nan`` exactly as the old stride-based
-    baseline did. Infinite values remain comparable and can therefore survive
-    as the window maximum.
+    For a valid window, return one maximum per observation, with windows
+    starting near the end wrapping to the beginning of the flattened input.
+    Windows containing NaN return NaN. Infinite values remain comparable and
+    can therefore survive as the maximum. A window smaller than two or longer
+    than the input returns an empty array.
     """
     arr = _as_1d_float_array(vec)
     if window < 2 or arr.size < window:

@@ -18,7 +18,20 @@ def select_stable_path_window(
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> tuple[EiStableWindow, np.ndarray]:
-    """Choose the most stable contiguous block-size window on the transformed EI path."""
+    """Select a flat window of ``z = log(1 / theta)`` over increasing block sizes.
+
+    ``z_path`` must be 1D and aligned with ``block_sizes``. Drop non-finite z
+    entries, trim ``floor(trim_fraction * n_finite)`` levels from each end, and
+    examine windows of at least ``min_points`` levels. If trimming leaves too
+    few levels, search the full finite path instead.
+
+    Minimize variance plus weighted mean absolute first and second differences,
+    divided by the square root of the window length. Differences are across
+    adjacent retained levels, without adjusting for block-size spacing. Exact
+    ties keep the first window encountered. Return inclusive block-size bounds
+    and a boolean mask aligned with the *finite* path, not the original grid.
+    This is a tuning heuristic, not a test of stationarity or constant theta.
+    """
     levels = validate_block_sizes(block_sizes)
     z = np.asarray(z_path, dtype=float)
     if z.ndim != 1 or z.size != levels.size:
@@ -86,7 +99,11 @@ def select_stable_path_window(
 
 
 def extract_stable_path_window(path: EiPathBundle) -> tuple[np.ndarray, np.ndarray]:
-    """Return the selected stable block levels and transformed values for one path."""
+    """Return aligned finite block levels and z values inside the stored window.
+
+    Include both window endpoints; raise ``ValueError`` if no levels remain.
+    The returned arrays preserve the original path order.
+    """
     finite_mask = np.isfinite(path.z_path)
     finite_levels = path.block_sizes[finite_mask]
     finite_z = path.z_path[finite_mask]

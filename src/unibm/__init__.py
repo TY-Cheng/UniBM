@@ -20,7 +20,11 @@ __all__ = ["__version__", "ei", "evi", "estimate_design_life_level", "estimate_e
 
 
 def __getattr__(name: str):
-    """Lazily expose grouped subpackages and headline estimators."""
+    """Import a public namespace or estimator on first access and cache it.
+
+    Unknown names raise ``AttributeError``, as for an ordinary module attribute.
+    Deferring these imports keeps ``import unibm`` lightweight.
+    """
     import importlib
 
     if name in {"ei", "evi"}:

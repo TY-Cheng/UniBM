@@ -1,4 +1,4 @@
-"""Application screening helpers for manuscript-ready univariate series."""
+"""Application screening helpers for report-ready univariate series."""
 
 from __future__ import annotations
 

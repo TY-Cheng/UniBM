@@ -27,7 +27,7 @@ APPLICATION_EI_METHOD_IDS = (
 
 @dataclass(frozen=True)
 class ApplicationPreparedInputs:
-    """Role-specific prepared series used by one manuscript application."""
+    """Role-specific prepared series used by one report application."""
 
     display: PreparedSeries
     evi: PreparedSeries
@@ -200,7 +200,7 @@ APPLICATIONS = (
     ),
 )
 
-PAPER_APPLICATIONS = tuple(spec for spec in APPLICATIONS if spec.provider != "ghcn")
+REPORT_APPLICATIONS = tuple(spec for spec in APPLICATIONS if spec.provider != "ghcn")
 CLIMATE_APPLICATIONS = tuple(spec for spec in APPLICATIONS if spec.provider == "ghcn")
 
 
@@ -218,7 +218,7 @@ __all__ = [
     "APPLICATION_RANDOM_STATE",
     "APPLICATIONS",
     "CLIMATE_APPLICATIONS",
-    "PAPER_APPLICATIONS",
+    "REPORT_APPLICATIONS",
     "ApplicationBundle",
     "ApplicationPreparedInputs",
     "ApplicationSpec",

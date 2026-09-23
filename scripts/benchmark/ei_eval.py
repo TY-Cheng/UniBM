@@ -263,18 +263,21 @@ def _load_or_compute_ei_bootstrap_bundle(
     cache_key: str,
     reps: int | Literal["adaptive"],
     random_state: int,
+    path_keys: tuple[tuple[str, bool], ...] = EI_BM_PATH_KEYS,
 ) -> dict[tuple[str, bool], dict[str, Any]]:
     """Materialize pooled-BM EI covariance using the declared repetition policy.
 
-    Adaptive fits use the public path-specific stopping rule and bypass fixed-R
-    bootstrap caches. The fixed-R cache layer stores raw circular series shared across
+    Adaptive fits compute only the requested paths, use the public path-specific
+    stopping rule, and bypass fixed-R bootstrap caches. Fixed-R computation retains
+    the complete shared bundle in the cache, then returns the requested paths.
+    The fixed-R cache layer stores raw circular series shared across
     Northrop/BB and sliding/disjoint variants. The second cache layer stores
     the path-specific transformed `z = log(1/theta)` draws restricted to the
     original replicate's stable window.
     """
     if reps == "adaptive":
         results = {}
-        for base_path, sliding in EI_BM_PATH_KEYS:
+        for base_path, sliding in path_keys:
             try:
                 results[(base_path, sliding)] = bootstrap_bm_ei_path(
                     vec,
@@ -302,7 +305,7 @@ def _load_or_compute_ei_bootstrap_bundle(
         reps=reps,
     )
     if cached is not None:
-        return cached
+        return {key: cached[key] for key in path_keys}
     raw_bootstrap_samples = load_or_draw_raw_bootstrap_samples(
         vec,
         cache_dir=cache_dir,
@@ -334,7 +337,7 @@ def _load_or_compute_ei_bootstrap_bundle(
         reps=reps,
         bundles=results,
     )
-    return results
+    return {key: results[key] for key in path_keys}
 
 
 def _ei_result_row(

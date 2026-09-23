@@ -25,7 +25,12 @@ def _rolling_window_minima(
     *,
     sliding: bool,
 ) -> np.ndarray:
-    """Return sliding or disjoint window minima for one score series."""
+    """Return minima of finite windows of ``block_size`` scores.
+
+    Sliding windows advance one observation; disjoint windows discard an
+    incomplete trailing block. Windows containing non-finite scores are omitted.
+    Return an empty array for block sizes below two or above the series length.
+    """
     scores = np.asarray(scores, dtype=float).reshape(-1)
     if scores.size < block_size or block_size < 2:
         return np.asarray([], dtype=float)
@@ -45,7 +50,12 @@ def _path_point_from_statistics(
     *,
     block_size: int,
 ) -> tuple[float, float, float]:
-    """Convert one block-size statistics sample into theta/eir/z path coordinates."""
+    """Map a non-empty block-statistic sample to ``(theta, 1 / theta, log(1 / theta))``.
+
+    Northrop uses the reciprocal sample mean. BB subtracts ``1 / block_size``
+    from that reciprocal; both paths cap theta at 1, with BB also using
+    ``EI_TINY`` as a positive numerical floor.
+    """
     mean_stat = float(np.mean(statistics))
     if base_path == "northrop":
         eir = max(mean_stat, 1.0)
@@ -67,7 +77,12 @@ def _compute_path_arrays_from_scores(
     sliding: bool,
     collect_statistics: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[int, np.ndarray] | None]:
-    """Compute BM-EI path arrays with optional per-level statistics retention."""
+    """Compute aligned theta, reciprocal-theta, z, and window-count arrays.
+
+    For each block size, multiply score-window minima by that size. Levels with
+    no valid windows retain NaNs and a zero count. The fifth return value is a
+    block-size-to-statistics dictionary when requested, otherwise ``None``.
+    """
     theta_path = np.full(block_sizes.size, np.nan, dtype=float)
     eir_path = np.full(block_sizes.size, np.nan, dtype=float)
     z_path = np.full(block_sizes.size, np.nan, dtype=float)
@@ -99,7 +114,11 @@ def _build_path_from_scores(
     *,
     sliding: bool,
 ) -> EiPathBundle:
-    """Construct the full EI path for one BM base estimator."""
+    """Construct one BM path and select its stable window from finite z values.
+
+    Retain per-level statistics for native inference. ``selected_level`` is the
+    smallest block size inside the chosen window, used by the native estimator.
+    """
     theta_path, eir_path, z_path, sample_counts, sample_statistics = (
         _compute_path_arrays_from_scores(
             base_path,
@@ -131,7 +150,12 @@ def _build_bm_z_paths_from_values(
     *,
     path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
 ) -> dict[tuple[str, bool], np.ndarray]:
-    """Build only the transformed BM z-paths needed by bootstrap workflows."""
+    """Return requested z-path arrays keyed by ``(base_path, sliding)``.
+
+    Recompute scaled empirical ranks from this series, then use ``-log(F)``
+    scores for Northrop or ``1 - F`` for BB. Unlike full path preparation, this
+    does not select a stable window or retain window-level statistics.
+    """
     cdf_values = np.asarray(empirical_cdf(values)(values), dtype=float)
     cdf_values = np.clip(cdf_values, EI_TINY, 1.0 - EI_TINY)
     score_lookup = {
@@ -155,7 +179,13 @@ def _build_bm_paths_from_values(
     values: np.ndarray,
     block_sizes: np.ndarray,
 ) -> dict[tuple[str, bool], EiPathBundle]:
-    """Build the four BM EI paths reused across benchmark methods."""
+    """Build Northrop and BB paths with both sliding and disjoint blocks.
+
+    ``values`` and ``block_sizes`` have already been validated by preparation.
+    Scaled empirical ranks yield ``-log(F)`` and ``1 - F`` score series; minima
+    of these decreasing transforms correspond to maxima of the original data.
+    Return a dictionary keyed by ``(base_path, sliding)`` with selected windows.
+    """
     cdf_values = np.asarray(empirical_cdf(values)(values), dtype=float)
     cdf_values = np.clip(cdf_values, EI_TINY, 1.0 - EI_TINY)
     score_lookup = {

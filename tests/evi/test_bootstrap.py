@@ -10,12 +10,12 @@ from unibm._bootstrap_sampling import (
     draw_circular_block_bootstrap_sample,
     draw_circular_block_bootstrap_samples,
 )
+from unibm._window_ops import circular_sliding_window_maximum
 from unibm.evi.bootstrap import (
     BlockSummaryBootstrapBackbone,
     _disjoint_block_maxima,
     _evaluate_mode_bootstrap_column_batched,
     _segment_block_maxima,
-    _sliding_block_maxima,
     build_block_summary_bootstrap_backbone,
     circular_block_summary_bootstrap,
     circular_block_summary_bootstrap_multi_target,
@@ -72,12 +72,12 @@ class EviBootstrapTests(unittest.TestCase):
     def test_sliding_disjoint_and_segment_block_maxima(self) -> None:
         segment = np.array([1.0, 3.0, 2.0, 5.0], dtype=float)
         np.testing.assert_allclose(
-            _sliding_block_maxima(segment, 2), np.array([3.0, 3.0, 5.0, 5.0])
+            circular_sliding_window_maximum(segment, 2), np.array([3.0, 3.0, 5.0, 5.0])
         )
         np.testing.assert_allclose(_disjoint_block_maxima(segment, 2), np.array([3.0, 5.0]))
         np.testing.assert_allclose(
             _segment_block_maxima(segment, 2, sliding=True),
-            _sliding_block_maxima(segment, 2),
+            circular_sliding_window_maximum(segment, 2),
         )
 
     def test_draw_bootstrap_sample_bank_is_deterministic(self) -> None:

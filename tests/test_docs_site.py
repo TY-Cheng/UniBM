@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import chdir
+import tempfile
 import unittest
 import tomllib
 import re
@@ -26,9 +28,10 @@ class DocsSiteTests(unittest.TestCase):
             )
             self.assertTrue(blocks, page)
             namespace = {"__name__": "__docs_example__"}
-            for index, code in enumerate(blocks):
-                with self.subTest(page=page_name, block=index):
-                    exec(compile(code, str(page), "exec"), namespace)
+            with tempfile.TemporaryDirectory() as tmp, chdir(tmp):
+                for index, code in enumerate(blocks):
+                    with self.subTest(page=page_name, block=index):
+                        exec(compile(code, str(page), "exec"), namespace)
 
     def test_case_study_navigation_and_pages_are_complete(self) -> None:
         mkdocs = (ROOT / "mkdocs.yml").read_text()

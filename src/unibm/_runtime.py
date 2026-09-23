@@ -8,14 +8,19 @@ import tempfile
 
 
 def _runtime_cache_suffix() -> str:
-    """Return a user-scoped suffix for temporary runtime cache directories."""
+    """Use the OS user ID, or a username fallback, to separate cache directories."""
     if hasattr(os, "getuid"):
         return str(os.getuid())
     return os.environ.get("USERNAME") or os.environ.get("USER") or "default"
 
 
 def _env_path_is_writable(path_str: str | None) -> bool:
-    """Check whether an existing cache-path environment variable is writable."""
+    """Probe a cache directory by creating and removing a temporary file.
+
+    Create missing parent directories as needed. An unset path or a filesystem
+    error returns ``False``; this check can therefore create the directory it
+    tests, even though the probe file is removed.
+    """
     if not path_str:
         return False
     path = Path(path_str)
@@ -39,6 +44,8 @@ def prepare_matplotlib_env(cache_tag: str = "unibm") -> None:
     This helper may overwrite `MPLCONFIGDIR` and `XDG_CACHE_HOME` when the
     current values are missing or not writable, so plotting imports can succeed
     in restricted environments such as shared clusters or read-only home dirs.
+    Call it before importing pyplot. It creates user-scoped directories under
+    the system temporary directory but does not select a plotting backend.
     """
     root = Path(tempfile.gettempdir()) / f"{cache_tag}-runtime-cache-{_runtime_cache_suffix()}"
     mpl_dir = root / "matplotlib"

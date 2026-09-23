@@ -20,13 +20,15 @@ For repository development, include the development dependencies and run the
 lightweight checks:
 
 ```bash
-uv sync --locked --dev
 just check
 ```
 
-No `.env` is required. Copy `.env.example` only to override the sibling
-manuscript checkout or uv environment location. Top-level `just` tasks load it
-automatically when present and sync the development environment before they run.
+No `.env` or external report project is required. Reports default to `out/reports/`.
+Copy `.env.example` only to set `UNIBM_REPORT_DIR` or the uv environment location.
+Top-level `just` tasks load it automatically when present and sync the development
+environment before they run. For ad hoc commands with these overrides, use
+`just --command uv run ...` or `just --command uv sync --locked --dev`.
+Plain uv commands do not automatically load `.env` before selecting an environment.
 The repo-level workflow details stay in the repository `README.md` and
 `justfile`. Use this site when you want the `unibm` package API itself.
 
@@ -92,6 +94,25 @@ regression.
 For a quick guide to which returned fields matter most, see
 [Reading Returned Objects](reading-returned-objects.md).
 
+## Plotting
+
+The public plotting helpers return `(fig, ax)` and keep the figure open by default:
+
+```python
+import matplotlib.pyplot as plt
+from unibm.evi import plot_scaling_fit
+
+fig, ax = plot_scaling_fit(fit)
+ax.set_title("My scaling fit")
+fig.savefig("scaling.pdf")
+plt.close(fig)
+```
+
+`plot_ei_path` and `plot_ei_fit` follow the same convention. Use `save=True` with
+`file_path` for direct saving and `close=True` for batch jobs. The default figure
+DPI is 150; repository report scripts retain their explicit report settings.
+Plotting does not infer a repository or external report destination.
+
 ## Package boundaries
 
 - `unibm.evi` owns the severity-side workflow, design-life-level helpers, and
@@ -100,3 +121,7 @@ For a quick guide to which returned fields matter most, see
   threshold/BM EI estimators.
 - `unibm.cdf` contains the public empirical CDF helper used by EI path
   preparation.
+
+UniBM is developed and maintained by Tuoyuan Cheng under the project supervision
+of Kan Chen. Repository experiments and applications remain available on
+[GitHub](https://github.com/TY-Cheng/UniBM/); they are not installed with the package.

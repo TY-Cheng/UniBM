@@ -33,7 +33,11 @@ def _validate_ei_bootstrap_identity(
     bootstrap_result: dict[str, Any],
     path: EiPathBundle,
 ) -> None:
-    """Require bootstrap covariance to identify the fitted EI path."""
+    """Require matching base-estimator and boolean block-scheme metadata.
+
+    This checks path identity, not whether the bootstrap used the same source
+    observations; matching the data remains the caller's responsibility.
+    """
     if "base_path" not in bootstrap_result:
         raise ValueError("bootstrap_result must include base_path metadata.")
     if bootstrap_result["base_path"] != path.base_path:
@@ -50,7 +54,11 @@ def _regularize_ei_covariance(
     *,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> np.ndarray:
-    """Shrink and ridge-regularize an EI bootstrap covariance matrix."""
+    """Validate EI covariance, shrink toward its diagonal, and add a small ridge.
+
+    ``covariance_shrinkage`` must be in [0, 1]; the shared validator rejects
+    non-finite, asymmetric, materially indefinite, and zero-scale matrices.
+    """
     return regularize_covariance(
         covariance,
         covariance_shrinkage=covariance_shrinkage,
@@ -64,7 +72,16 @@ def _fit_pooled_z_model(
     covariance: np.ndarray | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> dict[str, float | bool | np.ndarray]:
-    """Fit the pooled intercept-only model on the z-scale."""
+    """Fit a non-negative intercept to a finite 1D vector of log-reciprocal EI values.
+
+    A matching square covariance selects regularized GLS and supplies coefficient
+    uncertainty. Without it, use OLS and estimate variance from residuals. Clip
+    the fitted intercept at zero, but retain the unconstrained estimate for
+    bootstrap diagnostics; reported SEs are not boundary-adjusted distributions.
+
+    Return the intercept, SE, residual objective, normal-matrix condition number,
+    fitted vector, coefficient covariance, and boundary status.
+    """
     z = np.asarray(z_values, dtype=float)
     X = np.ones((z.size, 1), dtype=float)
 
@@ -116,7 +133,11 @@ def _pooled_z_fit(
     covariance: np.ndarray | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> tuple[float, float, str]:
-    """Return the pooled estimate, its SE, and the fit variant."""
+    """Return the pooled z estimate, z-scale SE, and covariance/boundary variant.
+
+    Both the estimate and its SE are on ``z = log(1 / theta)``, not theta.
+    Covariance selects regularized GLS; its absence selects residual-based OLS.
+    """
     z = np.asarray(z_values, dtype=float)
     use_gls = covariance is not None
     model = _fit_pooled_z_model(
@@ -138,7 +159,13 @@ def _build_bm_estimate(
     bootstrap_result: dict[str, Any] | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
 ) -> ExtremalIndexEstimate:
-    """Pool one BM path either by OLS or by FGLS on the transformed scale."""
+    """Build a pooled EI result on the path's previously selected stable window.
+
+    Match and subset bootstrap covariance by block-size labels for FGLS;
+    missing covariance is an error. Back-transform the constrained z intercept
+    to theta and its Wald endpoints in reverse order. The theta-scale SE uses
+    the delta method; tuning-window uncertainty is not included.
+    """
     selected_levels, selected_z = extract_stable_path_window(path)
     shrinkage_policy = validate_covariance_shrinkage(covariance_shrinkage)
     covariance = None
@@ -225,7 +252,15 @@ def _northrop_profile_fit(
     *,
     adjusted: bool,
 ) -> tuple[float, tuple[float, float], float, str]:
-    """Fit Northrop with a profile interval and local-information ``theta`` SE."""
+    """Fit an exponential-rate pseudo-likelihood to positive Northrop statistics.
+
+    Omit invalid/non-positive statistics and require at least two remaining
+    values. Return theta capped at 1, a nominal 95% profile interval, theta-scale
+    SE, and an adjustment/fallback label. ``adjusted=True`` uses the sum of
+    squared individual scores for Chandler--Bate scaling; this does not estimate
+    cross-block score covariances. Adjustment failures warn and fall back to
+    the unadjusted profile interval and SE.
+    """
     stats = np.asarray(statistics, dtype=float)
     stats = stats[np.isfinite(stats) & (stats > 0)]
     if stats.size < 2:
@@ -233,6 +268,7 @@ def _northrop_profile_fit(
     theta_hat = float(np.clip(1.0 / np.mean(stats), EI_TINY, 1.0))
 
     def loglik(theta: float) -> float:
+        """Evaluate the exponential-rate log-likelihood on the legal theta range."""
         theta = float(theta)
         if not (EI_TINY <= theta <= 1.0):
             return -np.inf
@@ -290,7 +326,13 @@ def _northrop_profile_fit(
 def _bb_wald_fit(
     statistics: np.ndarray, block_size: int
 ) -> tuple[float, tuple[float, float], float]:
-    """Fit the BB fixed-b Wald approximation from the rolling-min statistic sample."""
+    """Return the BB point estimate, nominal 95% Wald interval, and theta-scale SE.
+
+    Use ``1 / mean(statistics) - 1 / block_size`` with theta clipped to its legal
+    range. The delta-method SE uses sample variance divided by sample count;
+    it does not estimate covariance between overlapping or dependent windows.
+    Invalid/non-positive statistics are omitted; at least two must remain.
+    """
     stats = np.asarray(statistics, dtype=float)
     stats = stats[np.isfinite(stats) & (stats > 0)]
     if stats.size < 2:
@@ -314,9 +356,18 @@ def estimate_native_bm_ei(
 ) -> ExtremalIndexEstimate:
     """Estimate ``theta`` with a native single-block-size BM estimator.
 
-    Northrop fits report an observed-information SE, or the matching sandwich
-    SE when Chandler--Bate adjustment is requested. BB fits report their native
-    delta-method SE. All are on the ``theta`` scale.
+    ``bundle`` comes from ``prepare_ei_bundle``. Choose ``base_path="northrop"``
+    or ``"bb"`` and a sliding/disjoint scheme. Fit at the smallest block size in
+    that path's selected stable window and retain the path for diagnostics.
+
+    Northrop uses a nominal 95% profile interval and observed-information SE,
+    or a score-based Chandler--Bate adjustment when ``use_adjusted_chandwich``
+    is true. That option has no effect on BB, which uses a bounded 95% Wald
+    interval and delta-method SE. All returned SEs are on the theta scale.
+
+    These intervals condition on the selected block size. Their variance
+    estimates do not include cross-block score/statistic covariances, so using
+    sliding blocks does not by itself provide dependence-adjusted coverage.
     """
     path = bundle.paths[(base_path, sliding)]
     selected_level = path.selected_level
@@ -360,6 +411,9 @@ def estimate_pooled_bm_ei(
 ) -> ExtremalIndexEstimate:
     """Estimate ``theta`` by pooling an observed BM path over a stable window.
 
+    ``bundle`` comes from ``prepare_ei_bundle``; ``base_path`` is ``"northrop"``
+    or ``"bb"`` and ``sliding`` chooses the prepared block scheme. Each finite
+    path level in the inclusive stable window contributes to the pooled fit.
     The fitted intercept is constrained to ``z = log(1 / theta) >= 0``.
     ``standard_error`` is delta-transformed to the ``theta`` scale, while
     ``z_standard_error`` retains the regression-scale uncertainty.
@@ -367,7 +421,10 @@ def estimate_pooled_bm_ei(
     ``regression`` must be OLS or FGLS. OLS rejects a bootstrap result; FGLS
     requires covariance from the matching base path and sliding/disjoint scheme
     and never falls back to OLS. Full-grid covariance is subset by block-size
-    labels. The default diagonal shrinkage is fixed at 0.37.
+    labels. The default diagonal shrinkage is fixed at 0.37. OLS estimates its
+    variance from between-level residuals and does not model their dependence.
+    Return an ``ExtremalIndexEstimate`` with a nominal 95% interval and retained
+    path, covariance, and bootstrap diagnostics.
 
     Adaptive precision metadata is retained only when the bootstrap's checked
     window and shrinkage match this fit. The log-scale interval is clipped to

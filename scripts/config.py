@@ -1,8 +1,7 @@
 """Repository path resolution shared by domain scripts.
 
-The code repo and manuscript repo may live either as siblings or with the
-manuscript nested inside the code repo. Code and data roots are derived from
-this file; `DIR_MANUSCRIPT` can optionally point to the manuscript repo.
+Code and data roots are derived from this file. UNIBM_REPORT_DIR selects the
+final report destination; unset or blank values use the local out/reports tree.
 """
 
 from __future__ import annotations
@@ -32,25 +31,36 @@ def _resolve_code_root(path: Path) -> Path:
     return path
 
 
-def _resolve_manuscript_root(*, requested_root: Path | None, code_root: Path) -> Path:
-    """Resolve the manuscript repo root from explicit, sibling, or nested layouts."""
-    explicit = os.environ.get("DIR_MANUSCRIPT")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-
-    candidates: list[Path] = []
-    if requested_root is not None:
-        candidates.append(requested_root / "UniBM_manuscript")
-    candidates.extend(
-        [
-            code_root.parent / "UniBM_manuscript",
-            code_root / "UniBM_manuscript",
-        ]
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate.resolve()
-    return candidates[0].resolve()
+def _resolve_report_root(code_root: Path) -> Path:
+    """Resolve and validate the one report destination without creating it."""
+    explicit = os.environ.get("UNIBM_REPORT_DIR", "").strip()
+    requested = Path(explicit).expanduser() if explicit else Path("out/reports")
+    candidate = code_root / requested
+    if candidate.is_symlink():
+        raise ValueError(f"UNIBM_REPORT_DIR output directory must not be a symlink: {candidate}")
+    report = candidate.resolve()
+    if not explicit and report != candidate:
+        raise ValueError(f"Default report directory must not follow a symlink: {candidate}")
+    if report == Path(report.anchor):
+        raise ValueError("UNIBM_REPORT_DIR must not be the filesystem root.")
+    for directory in (report, report / "Figure", report / "Table"):
+        if directory.is_symlink():
+            raise ValueError(
+                f"UNIBM_REPORT_DIR output directory must not be a symlink: {directory}"
+            )
+        ancestor = directory
+        while not ancestor.exists() and not ancestor.is_symlink():
+            ancestor = ancestor.parent
+        if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+            raise ValueError(f"UNIBM_REPORT_DIR is not a writable directory: {ancestor}")
+        if directory != report and directory.exists():
+            for child in directory.iterdir():
+                if child.is_symlink():
+                    raise ValueError(f"UNIBM_REPORT_DIR output must not be a symlink: {child}")
+    manifest = report / "report_subset_manifest.json"
+    if manifest.is_symlink() or (manifest.exists() and not manifest.is_file()):
+        raise ValueError(f"UNIBM_REPORT_DIR manifest must be a regular file: {manifest}")
+    return report
 
 
 def _resolve_data_root(*, code_root: Path) -> Path:
@@ -67,9 +77,9 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
     """Return the canonical repository directories."""
     requested_root = Path(dir_work).expanduser().resolve() if dir_work else _DEFAULT_REPO_ROOT
     work = _resolve_code_root(requested_root)
-    manuscript = _resolve_manuscript_root(requested_root=requested_root, code_root=work)
+    report = _resolve_report_root(work)
     data_root = _resolve_data_root(code_root=work)
-    workspace = _common_root(work, manuscript)
+    workspace = _common_root(work, report)
     dirs = {
         "DIR_WORK": work,
         "DIR_WORKSPACE": workspace,
@@ -87,8 +97,12 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
         "DIR_OUT_BENCHMARK": work / "out" / "benchmark",
         "DIR_OUT_BENCHMARK_CACHE": work / "out" / "benchmark" / "cache",
         "DIR_OUT_APPLICATIONS": work / "out" / "applications",
-        "DIR_MANUSCRIPT": manuscript,
-        "DIR_MANUSCRIPT_FIGURE": manuscript / "Figure",
-        "DIR_MANUSCRIPT_TABLE": manuscript / "Table",
+        "DIR_REPORT": report,
+        "DIR_REPORT_FIGURE": report / "Figure",
+        "DIR_REPORT_TABLE": report / "Table",
     }
     return dirs
+
+
+if __name__ == "__main__":
+    print(f"Report destination: {resolve_repo_dirs()['DIR_REPORT']}")

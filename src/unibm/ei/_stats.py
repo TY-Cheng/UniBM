@@ -17,7 +17,12 @@ def _central_wald_interval(
     *,
     bounded_unit_interval: bool = False,
 ) -> tuple[float, float]:
-    """Return a central 95% Wald interval."""
+    """Return ``center +/- 1.96 * standard_error``, optionally bounded by 0 and 1.
+
+    Non-finite inputs or a negative SE produce two NaNs. Unit-interval bounding
+    assumes the caller supplied a center in [0, 1]; it does not recalibrate
+    coverage near the parameter boundary.
+    """
     if not np.isfinite(center) or not np.isfinite(standard_error) or standard_error < 0:
         return (float("nan"), float("nan"))
     lo = float(center - Z_CRIT_95 * standard_error)
@@ -31,7 +36,12 @@ def _log_scale_theta_interval(
     z_hat: float,
     standard_error: float,
 ) -> tuple[float, float]:
-    """Back-transform a central 95% Wald interval from `z = log(1/theta)`."""
+    """Back-transform a 95% Wald interval from ``z = log(1 / theta)``.
+
+    For the caller's non-negative ``z_hat``, truncate the lower z endpoint at
+    zero, then reverse endpoints under ``theta = exp(-z)``. Invalid estimates
+    or SEs return two NaNs; ``standard_error`` must be on the z scale.
+    """
     if not np.isfinite(z_hat) or not np.isfinite(standard_error) or standard_error < 0:
         return (float("nan"), float("nan"))
     z_lo = max(0.0, float(z_hat - Z_CRIT_95 * standard_error))
@@ -43,7 +53,7 @@ def _intervals_overlap(
     left: tuple[float, float],
     right: tuple[float, float],
 ) -> bool:
-    """Return whether two finite intervals overlap."""
+    """Return whether finite, ordered intervals overlap, including a shared endpoint."""
     if not np.all(np.isfinite(left)) or not np.all(np.isfinite(right)):
         return False
     return bool(max(left[0], right[0]) <= min(left[1], right[1]))

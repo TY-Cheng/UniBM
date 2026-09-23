@@ -16,7 +16,7 @@ from benchmark.ei_report import (
     EI_SHRINKAGE_GRID,
     EI_SHRINKAGE_METHODS,
     build_ei_shrinkage_sensitivity_summary,
-    write_ei_benchmark_manuscript_artifacts,
+    write_ei_benchmark_report_artifacts,
 )
 from unibm.ei import ExtremalIndexEstimate, extract_stable_path_window
 
@@ -43,6 +43,40 @@ def _bootstrap_bundle_with_zero_northrop_sliding(
 
 
 class EiBenchmarkReportTests(unittest.TestCase):
+    def test_selected_bootstrap_paths_match_full_bundle(self) -> None:
+        values = np.random.default_rng(71).pareto(2.3, 365) + 1.0
+        bundle = ei_eval.prepare_ei_bundle(values, allow_zeros=False)
+        selected = (("northrop", True), ("bb", True))
+        for reps in ("adaptive", 16):
+            with self.subTest(reps=reps):
+                kwargs = dict(
+                    bundle=bundle,
+                    cache_dir=None,
+                    cache_key="test",
+                    reps=reps,
+                    random_state=0,
+                )
+                full = ei_eval._load_or_compute_ei_bootstrap_bundle(values, **kwargs)
+                with mock.patch.object(
+                    ei_eval, "bootstrap_bm_ei_path", wraps=ei_eval.bootstrap_bm_ei_path
+                ) as bootstrap:
+                    subset = ei_eval._load_or_compute_ei_bootstrap_bundle(
+                        values, **kwargs, path_keys=selected
+                    )
+                self.assertEqual(tuple(subset), selected)
+                if reps == "adaptive":
+                    self.assertEqual(
+                        [
+                            (call.kwargs["base_path"], call.kwargs["sliding"])
+                            for call in bootstrap.call_args_list
+                        ],
+                        list(selected),
+                    )
+                for key in selected:
+                    self.assertEqual(subset[key].keys(), full[key].keys())
+                    for field in full[key]:
+                        np.testing.assert_equal(subset[key][field], full[key][field])
+
     def test_adaptive_bypasses_fixed_cache_and_retains_degenerate_failure(self) -> None:
         values = np.random.default_rng(71).pareto(2.3, 365) + 1.0
         bundle = ei_eval.prepare_ei_bundle(values, allow_zeros=False)
@@ -182,7 +216,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
             mock.patch(
                 "benchmark.ei_report._load_or_compute_ei_bootstrap_bundle",
                 side_effect=_bootstrap_bundle_with_zero_northrop_sliding,
-            ),
+            ) as bootstrap,
         ):
             summary, _ = build_ei_shrinkage_sensitivity_summary(
                 root=tmpdir,
@@ -191,6 +225,8 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 methods=("northrop_sliding_fgls",),
                 force=True,
             )
+
+        self.assertEqual(bootstrap.call_args.kwargs["path_keys"], (("northrop", True),))
 
         row = summary.iloc[0]
         self.assertEqual(row["n_rep"], 1)
@@ -233,7 +269,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
             self.assertIn("median_coverage", persisted.columns)
             self.assertIn("mean_interval_score", persisted.columns)
 
-    def test_write_ei_benchmark_manuscript_artifacts_materializes_expected_tables(self) -> None:
+    def test_write_ei_benchmark_report_artifacts_materializes_expected_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             configs = default_ei_simulation_configs(
                 xi_values=(0.50,),
@@ -263,7 +299,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
                     "benchmark.ei_report.plot_ei_shrinkage_sensitivity"
                 ) as shrinkage_panels,
             ):
-                write_ei_benchmark_manuscript_artifacts(
+                write_ei_benchmark_report_artifacts(
                     internal_summary,
                     external_summary,
                     shrinkage_sensitivity_summary=None,
@@ -272,9 +308,9 @@ class EiBenchmarkReportTests(unittest.TestCase):
                     web_dir=web_dir,
                 )
 
-            summary_path = table_dir / "benchmark_ei_summary_main.tex"
-            interval_path = table_dir / "benchmark_ei_interval_main.tex"
-            overview_path = table_dir / "benchmark_ei_overview_main.tex"
+            summary_path = table_dir / "benchmark_ei_summary.tex"
+            interval_path = table_dir / "benchmark_ei_interval.tex"
+            overview_path = table_dir / "benchmark_ei_overview.tex"
             self.assertTrue(summary_path.exists())
             self.assertTrue(interval_path.exists())
             self.assertTrue(overview_path.exists())
@@ -288,7 +324,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
             self.assertIn("interval_score_mcse", web_summary)
 
             summary_tex = summary_path.read_text()
-            self.assertIn(r"\label{tab:benchmark-ei-summary-main}", summary_tex)
+            self.assertIn(r"\label{tab:benchmark-ei-summary}", summary_tex)
             self.assertIn(r"\multicolumn{1}{c}{Fréchet max-AR}", summary_tex)
             self.assertIn(r"true $\xi$", summary_tex)
             self.assertIn(r"\shortstack[l]{Northrop-", summary_tex)
@@ -296,13 +332,13 @@ class EiBenchmarkReportTests(unittest.TestCase):
             self.assertIn("unrounded minimum of each metric", summary_tex)
 
             interval_tex = interval_path.read_text()
-            self.assertIn(r"\label{tab:benchmark-ei-interval-main}", interval_tex)
+            self.assertIn(r"\label{tab:benchmark-ei-interval}", interval_tex)
             self.assertIn("EI interval sharpness-versus-calibration summary", interval_tex)
             self.assertIn(r"mean\_interval\_score", interval_tex)
 
             overview_tex = overview_path.read_text()
-            self.assertIn(r"\label{tab:benchmark-ei-overview-main}", overview_tex)
-            self.assertIn("Appendix full EI benchmark overview", overview_tex)
+            self.assertIn(r"\label{tab:benchmark-ei-overview}", overview_tex)
+            self.assertIn("Full EI benchmark overview", overview_tex)
 
             core_panels.assert_called_once_with(
                 internal_summary,

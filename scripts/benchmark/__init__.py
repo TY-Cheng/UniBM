@@ -1,1 +1,1 @@
-"""Synthetic EVI/EI benchmark workflows and manuscript outputs."""
+"""Synthetic EVI/EI benchmark workflows and report outputs."""

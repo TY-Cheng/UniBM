@@ -208,7 +208,7 @@ def application_design_life_interval_record(bundle: ApplicationBundle) -> dict[s
 
 def application_design_life_interval_table(bundles: list[ApplicationBundle]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
-    for bundle in manuscript_bundles(bundles):
+    for bundle in report_bundles(bundles):
         record = application_design_life_interval_record(bundle)
         basis = str(record["design_life_level_basis"]).replace("_", "-")
         rows.append(
@@ -238,7 +238,7 @@ def application_design_life_interval_table(bundles: list[ApplicationBundle]) -> 
     return pd.DataFrame(rows)
 
 
-def manuscript_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBundle]:
+def report_bundles(bundles: list[ApplicationBundle]) -> list[ApplicationBundle]:
     keys = (
         "tx_streamflow",
         "fl_streamflow",
@@ -364,5 +364,5 @@ __all__ = [
     "application_observations_per_year",
     "fit_ei_window_variants",
     "fit_evi_window_variants",
-    "manuscript_bundles",
+    "report_bundles",
 ]

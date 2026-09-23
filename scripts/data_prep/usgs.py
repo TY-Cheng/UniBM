@@ -1,4 +1,4 @@
-"""USGS daily-discharge preparation for manuscript applications."""
+"""USGS daily-discharge preparation for report applications."""
 
 from __future__ import annotations
 

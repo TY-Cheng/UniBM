@@ -9,7 +9,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class EiStableWindow:
-    """Selected stable window on an integer tuning axis."""
+    """Inclusive lower and upper tuning levels, rather than array positions."""
 
     lo: int
     hi: int
@@ -103,10 +103,12 @@ class ThresholdCandidate:
 class EiPreparedBundle:
     """Reusable EI preparation outputs derived from one observed series.
 
-    The bundle stores the cleaned observed values, the candidate block-size
+    The bundle stores the validated observed values without filtering, the block-size
     grid, all BM path variants, and threshold-side exceedance candidates so the
     native BM, pooled BM, and threshold estimators can all reuse the same
-    preparation step.
+    preparation step. ``paths`` uses ``(base_path, sliding)`` keys, while
+    ``threshold_candidates`` maps quantiles to strict-exceedance index arrays.
+    Frozen fields do not make the contained arrays and dictionaries immutable.
     """
 
     values: np.ndarray
