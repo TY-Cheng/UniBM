@@ -66,7 +66,7 @@ from benchmark.evi_external import (
     EXTERNAL_ESTIMATORS,
     run_external_benchmark,
 )
-from shared.runtime import status
+from shared.runtime import initialize_numerical_worker, status
 
 
 BENCHMARK_ALPHA = 0.05
@@ -260,7 +260,9 @@ def run_evi_benchmark(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
         try:
             context = mp.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
+            with ProcessPoolExecutor(
+                max_workers=workers, mp_context=context, initializer=initialize_numerical_worker
+            ) as executor:
                 frames = []
                 for completed, frame in enumerate(
                     executor.map(_evaluate_config_worker, tasks, chunksize=1), start=1

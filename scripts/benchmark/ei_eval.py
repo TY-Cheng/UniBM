@@ -45,7 +45,7 @@ from benchmark.common import (
     interval_width,
     quantile_agg,
 )
-from shared.runtime import status
+from shared.runtime import bootstrap_thread_cap, initialize_numerical_worker, status
 
 EI_INTERNAL_METHODS = [
     "northrop_disjoint_ols",
@@ -287,6 +287,7 @@ def _load_or_compute_ei_bootstrap_bundle(
                     block_sizes=bundle.block_sizes,
                     reps="adaptive",
                     random_state=random_state,
+                    n_threads=bootstrap_thread_cap(),
                 )
             except ValueError as exc:
                 if str(exc) != "EI bootstrap covariance must have positive scale.":
@@ -317,6 +318,7 @@ def _load_or_compute_ei_bootstrap_bundle(
         raw_bootstrap_samples,
         block_sizes=bundle.block_sizes,
         allow_zeros=False,
+        n_threads=bootstrap_thread_cap(),
     )
     results: dict[tuple[str, bool], dict[str, Any]] = {}
     for key in EI_BM_PATH_KEYS:
@@ -660,7 +662,9 @@ def run_ei_benchmark(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
         try:
             context = mp.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
+            with ProcessPoolExecutor(
+                max_workers=workers, mp_context=context, initializer=initialize_numerical_worker
+            ) as executor:
                 frames = []
                 for completed, frame in enumerate(
                     executor.map(_evaluate_ei_config_worker, tasks, chunksize=1), start=1

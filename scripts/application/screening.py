@@ -11,7 +11,7 @@ import pandas as pd
 from unibm.ei import estimate_k_gaps, estimate_pooled_bm_ei, prepare_ei_bundle
 from unibm.evi import block_maxima, estimate_evi_quantile
 from application.specs import APPLICATION_EI_THRESHOLD_QUANTILES
-from shared.runtime import resolve_int_env
+from shared.runtime import bootstrap_thread_cap, resolve_int_env
 
 
 DEFAULT_SCREENING_BOOTSTRAP_REPS = 40
@@ -109,6 +109,7 @@ def screen_extreme_series(
         quantile=quantile,
         sliding=True,
         bootstrap_reps=int(bootstrap_reps),
+        n_threads=bootstrap_thread_cap(),
     )
     if fit.regression_policy != regression or fit.regression != regression:
         raise RuntimeError(f"Screening EVI fit requires strict {regression}.")

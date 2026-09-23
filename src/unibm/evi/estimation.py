@@ -7,6 +7,7 @@ from typing import Literal
 import numpy as np
 
 from .._block_grid import generate_block_sizes
+from .._parallel import validate_n_threads
 from .._bootstrap_precision import matching_precision_metadata
 from .._validation import (
     as_1d_float_array,
@@ -41,6 +42,7 @@ def estimate_evi_quantile(
     bootstrap_reps: int | Literal["adaptive"] | None = None,
     super_block_size: int | None = None,
     random_state: int | None = 0,
+    n_threads: int | None = None,
     plateau_points: int = 5,
     trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
@@ -69,6 +71,10 @@ def estimate_evi_quantile(
     Adaptive precision monitors xi and its CI endpoints, not design-life levels.
     A cap warning retains the fit with ``bootstrap_precision_met=False``.
     Default covariance shrinkage is fixed at 0.37, not automatically tuned.
+    ``n_threads=None`` chooses a CPU/workload-aware bootstrap pool (at most 8);
+    a positive integer caps it, and 1 stays serial. This does not change BLAS
+    settings. Callers with an outer process pool should allocate the inner cap.
+    Random draws and adaptive stopping are independent of the thread count.
 
     Supplied covariance must match the target, quantile, and block scheme;
     block-size labels permit full-grid covariance to serve a selected subset.
@@ -94,6 +100,7 @@ def estimate_evi_quantile(
         bootstrap_reps=bootstrap_reps,
         super_block_size=super_block_size,
         random_state=random_state,
+        n_threads=n_threads,
         curve=curve,
         plateau=plateau,
         bootstrap_result=bootstrap_result,
@@ -114,6 +121,7 @@ def estimate_target_scaling(
     bootstrap_reps: int | Literal["adaptive"] | None = None,
     super_block_size: int | None = None,
     random_state: int | None = 0,
+    n_threads: int | None = None,
     plateau_points: int = 5,
     trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
@@ -130,7 +138,9 @@ def estimate_target_scaling(
     Means use all finite maxima; the KDE mode surrogate uses only positive
     maxima. Interpreting the fitted slope as xi requires the selected summary
     to obey the assumed power law, which is a separate modeling assumption.
+    ``n_threads`` has the same per-call bootstrap budget as ``estimate_evi_quantile``.
     """
+    validate_n_threads(n_threads)
     if regression not in {"OLS", "FGLS", "AUTO"}:
         raise ValueError("regression must be 'OLS', 'FGLS', or 'AUTO'.")
     shrinkage_policy = validate_covariance_shrinkage(covariance_shrinkage)
@@ -219,6 +229,7 @@ def estimate_target_scaling(
             sliding=sliding,
             super_block_size=super_block_size,
             random_state=random_state,
+            n_threads=n_threads,
             evaluate=evaluate,
         )
         bootstrap.update(
@@ -236,6 +247,7 @@ def estimate_target_scaling(
             reps=resolved_bootstrap_reps,
             super_block_size=super_block_size,
             random_state=random_state,
+            n_threads=n_threads,
         )
         bootstrap["bootstrap_reps_policy"] = "fixed"
         bootstrap["bootstrap_reps_requested"] = resolved_bootstrap_reps

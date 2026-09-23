@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 import warnings
 
@@ -13,6 +14,17 @@ from .._block_grid import validate_block_sizes
 from .._bootstrap_precision import ADAPTIVE_REPS, adaptive_covariance
 from .._validation import as_1d_float_array, warn_on_negative_values
 from .._window_ops import circular_sliding_window_maximum
+from .._parallel import (
+    BOOTSTRAP_WORKING_BYTES,
+    bootstrap_executor,
+    resolve_n_threads,
+    validate_n_threads,
+)
+from ._quantile_bootstrap import (
+    prepare_quantile_counts,
+    quantile_from_counts,
+    segment_multiplicities,
+)
 from .summaries import _validate_quantile
 
 
@@ -61,6 +73,110 @@ class BlockSummaryBootstrapBackbone:
     maxima_by_block: dict[int, np.ndarray]
 
 
+@contextmanager
+def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None):
+    """Own one call's count tables and pool; map deterministic segment draws.
+
+    Only NumPy/SciPy work runs in threads. The caller generates every draw
+    before dispatch, so results and adaptive stopping do not depend on task
+    scheduling. Tables share a bounded budget; other temporaries are batched
+    per worker. One complete maxima row is the irreducible working set.
+    """
+    banks = [
+        np.asarray(backbone.maxima_by_block[int(b)], dtype=float) for b in backbone.block_sizes
+    ]
+    n_obs = backbone.segment_draws.shape[1] * backbone.super_block_size
+    threads = resolve_n_threads(n_threads, n_tasks=len(banks), n_obs=n_obs)
+    tables = []
+    remaining = BOOTSTRAP_WORKING_BYTES
+    for bank in banks:
+        # NumPy's rank arithmetic retains lower-precision q dtypes; keep that
+        # established behavior in the fallback instead of promoting those q's.
+        table = (
+            prepare_quantile_counts(bank, max_bytes=remaining)
+            if target == "quantile" and np.asarray(quantile).dtype == np.dtype(float)
+            else None
+        )
+        tables.append(table)
+        if table is not None:
+            remaining -= table[0].nbytes + table[1].nbytes
+    with bootstrap_executor(threads) as pool:
+
+        def evaluate(draws):
+            """Return one summary per draw/level without computing covariance."""
+            weights = segment_multiplicities(draws) if any(t is not None for t in tables) else None
+
+            def column(index):
+                """Limit expanded maxima and mode temporaries independently of R."""
+                bank, table = banks[index], tables[index]
+                if table is not None:
+                    return quantile_from_counts(
+                        table,
+                        weights,
+                        size=bank.size,
+                        quantile=quantile,
+                        max_bytes=BOOTSTRAP_WORKING_BYTES,
+                    )
+                # Quantile may copy its input; mode retains several work arrays.
+                rows = max(1, BOOTSTRAP_WORKING_BYTES // max(1, bank.size * 8 * 8))
+                pieces = []
+                group_rows = (mode_batch or max(1, len(draws))) if target == "mode" else rows
+                for group_start in range(0, len(draws), group_rows):
+                    group = draws[group_start : group_start + group_rows]
+                    if target == "mode":
+                        # Preserve the old KDE sum grouping even when selections
+                        # are split into smaller batches. Singletons do not enter KDE.
+                        counts = np.sum(np.isfinite(bank) & (bank > 0), axis=1)
+                        active = np.sum(counts[group], axis=1) > 1
+                        total_active = int(np.sum(active))
+                    for offset in range(0, len(group), rows):
+                        selected = bank[group[offset : offset + rows]].reshape(-1, bank.size)
+                        if target == "quantile":
+                            values = np.quantile(
+                                selected,
+                                quantile,
+                                axis=1,
+                                method="median_unbiased",
+                                overwrite_input=True,
+                            )
+                        elif target == "mean":
+                            values = np.mean(selected, axis=1)
+                        else:
+                            values = _evaluate_mode_bootstrap_column_batched(
+                                selected,
+                                reduction_rows=total_active,
+                                reduction_offset=int(np.sum(active[:offset])),
+                            )
+                        pieces.append(values)
+                return np.concatenate(pieces) if pieces else np.empty(0)
+
+            columns = (
+                pool.map(column, range(len(banks))) if pool else map(column, range(len(banks)))
+            )
+            return np.column_stack(list(columns))
+
+        yield evaluate
+
+
+def _log_bootstrap_summaries(summaries, *, warning_batch=None):
+    """Log positive finite summaries and omit incomplete rows, retaining warnings."""
+    valid = np.isfinite(summaries) & (summaries > 0)
+    samples = np.full(summaries.shape, np.nan)
+    np.log(summaries, out=samples, where=valid)
+    step = max(1, len(samples)) if warning_batch is None else warning_batch
+    for offset in range(0, len(samples), step):
+        invalid_count = int(np.sum(~valid[offset : offset + step]))
+        if invalid_count:
+            warnings.warn(
+                "evaluate_block_summary_bootstrap_backbone excluded "
+                f"{invalid_count} non-positive bootstrap block summaries. "
+                "This step requires strictly positive inputs.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+    return samples[np.all(valid, axis=1)]
+
+
 def _adaptive_block_summary_bootstrap(
     vec: np.ndarray,
     block_sizes: np.ndarray,
@@ -71,6 +187,7 @@ def _adaptive_block_summary_bootstrap(
     super_block_size: int | None,
     random_state: int | None,
     evaluate: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
+    n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Grow log-summary bootstrap samples until MC precision or the cap is reached.
 
@@ -94,63 +211,23 @@ def _adaptive_block_summary_bootstrap(
     if backbone is None:
         return {**identity, "covariance": None, "samples": np.empty((0, len(block_sizes)))}
 
-    def draw(reps: int, rng: np.random.Generator) -> np.ndarray:
-        """Generate up to ``reps`` valid log-summary rows using the supplied RNG.
+    with _summary_evaluator(
+        backbone, target=target, quantile=quantile, n_threads=n_threads, mode_batch=32
+    ) as summaries:
 
-        Evaluation drops a draw if any requested summary cannot be logged,
-        so the returned row count can be smaller than the requested count.
-        """
-        n_super = backbone.segment_draws.shape[1]
-        rows = []
-        for offset in range(0, reps, 32):
-            draws = rng.integers(0, n_super, (min(32, reps - offset), n_super))
-            result = evaluate_block_summary_bootstrap_backbone(
-                replace(backbone, segment_draws=draws), target=target, quantile=quantile
+        def draw(reps: int, rng: np.random.Generator) -> np.ndarray:
+            """Keep the original 32-row RNG requests and invalid-row policy."""
+            n_super = backbone.segment_draws.shape[1]
+            draws = np.concatenate(
+                [
+                    rng.integers(0, n_super, (min(32, reps - offset), n_super))
+                    for offset in range(0, reps, 32)
+                ]
             )
-            rows.append(result["samples"])
-        return np.concatenate(rows)
+            return _log_bootstrap_summaries(summaries(draws), warning_batch=32)
 
-    return {
-        **identity,
-        **adaptive_covariance(draw, evaluate, random_state=random_state),
-        "super_block_size": backbone.super_block_size,
-    }
-
-
-def _selected_bootstrap_maxima(
-    backbone: BlockSummaryBootstrapBackbone,
-    *,
-    block_size: int,
-) -> np.ndarray:
-    """Gather a block-size maxima bank into a (replicates, pooled_maxima) array.
-
-    Repeated segment indices repeat their entire maxima vectors, preserving
-    within-segment structure while resampling segments with replacement.
-    """
-    maxima_bank = np.asarray(backbone.maxima_by_block[int(block_size)], dtype=float)
-    selected = maxima_bank[backbone.segment_draws]
-    return selected.reshape(backbone.segment_draws.shape[0], -1)
-
-
-def _evaluate_quantile_bootstrap_column(
-    backbone: BlockSummaryBootstrapBackbone,
-    *,
-    block_size: int,
-    quantile: float,
-) -> np.ndarray:
-    """Return one median-unbiased block-maxima quantile per bootstrap replicate."""
-    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
-    return np.quantile(selected, quantile, axis=1, method="median_unbiased")
-
-
-def _evaluate_mean_bootstrap_column(
-    backbone: BlockSummaryBootstrapBackbone,
-    *,
-    block_size: int,
-) -> np.ndarray:
-    """Return the arithmetic mean of pooled maxima in each bootstrap replicate."""
-    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
-    return np.mean(selected, axis=1)
+        result = adaptive_covariance(draw, evaluate, random_state=random_state)
+    return {**identity, **result, "super_block_size": backbone.super_block_size}
 
 
 def _rowwise_linear_quantile(
@@ -186,13 +263,17 @@ def _evaluate_mode_bootstrap_column_batched(
     selected: np.ndarray,
     *,
     max_kernel_bytes: int = _MODE_BOOTSTRAP_MAX_WORKING_BYTES,
+    reduction_rows: int | None = None,
+    reduction_offset: int = 0,
 ) -> np.ndarray:
     """Compute a positive-maxima KDE mode surrogate separately for each matrix row.
 
     Use the same log1p transform, bandwidth rule, 256-point grid, and
     original-scale Jacobian as ``estimate_sample_mode``. Empty positive rows
     return NaN; singleton rows return their observation. ``max_kernel_bytes``
-    bounds each KDE kernel temporary, not total process memory.
+    bounds each KDE kernel temporary, not total process memory. Internal
+    ``reduction_rows`` / ``reduction_offset`` preserve the original column-sum
+    grouping when the caller splits a larger selection into row batches.
     """
     selected = np.asarray(selected, dtype=float)
     if selected.ndim != 2:
@@ -247,15 +328,17 @@ def _evaluate_mode_bootstrap_column_batched(
 
     density = np.zeros_like(grid)
     bytes_per_row_column = grid.shape[1] * np.dtype(float).itemsize
-    row_chunk_size = max(1, min(grid.shape[0], max_kernel_bytes // bytes_per_row_column))
-    for row_start in range(0, grid.shape[0], row_chunk_size):
-        row_stop = min(row_start + row_chunk_size, grid.shape[0])
+    original_rows = grid.shape[0] if reduction_rows is None else reduction_rows
+    original_chunk = max(1, min(original_rows, max_kernel_bytes // bytes_per_row_column))
+    row_start = 0
+    while row_start < grid.shape[0]:
+        position = reduction_offset + row_start
+        group_start = position // original_chunk * original_chunk
+        group_rows = min(original_chunk, original_rows - group_start)
+        row_stop = min(row_start + group_start + group_rows - position, grid.shape[0])
         row_slice = slice(row_start, row_stop)
-        bytes_per_column = (row_stop - row_start) * bytes_per_row_column
-        column_chunk_size = max(
-            1,
-            min(log_values.shape[1], max_kernel_bytes // bytes_per_column),
-        )
+        bytes_per_column = group_rows * bytes_per_row_column
+        column_chunk_size = max(1, min(log_values.shape[1], max_kernel_bytes // bytes_per_column))
         for start in range(0, log_values.shape[1], column_chunk_size):
             stop = start + column_chunk_size
             chunk_values = log_values[row_slice, start:stop]
@@ -269,6 +352,7 @@ def _evaluate_mode_bootstrap_column_batched(
             np.exp(kernel, out=kernel)
             kernel *= chunk_valid[:, None, :]
             density[row_slice] += kernel.sum(axis=2)
+        row_start = row_stop
     density /= active_counts_f[:, None]
     # Convert transformed KDE density back to the original response scale.
     density_on_original_scale = density * np.exp(-grid)
@@ -277,26 +361,12 @@ def _evaluate_mode_bootstrap_column_batched(
     return summaries
 
 
-def _evaluate_mode_bootstrap_column(
-    backbone: BlockSummaryBootstrapBackbone,
-    *,
-    block_size: int,
-    quantile: float,
-) -> np.ndarray:
-    """Return the batched KDE mode surrogate for each resampled maxima row.
-
-    ``quantile`` is ignored; it is present for a common summary-call interface.
-    """
-    del quantile
-    selected = _selected_bootstrap_maxima(backbone, block_size=block_size)
-    return _evaluate_mode_bootstrap_column_batched(selected)
-
-
 def evaluate_block_summary_bootstrap_backbone(
     backbone: BlockSummaryBootstrapBackbone | None,
     *,
     target: str = "quantile",
     quantile: float = 0.5,
+    n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Return log-summary samples and covariance from cached segment draws.
 
@@ -305,7 +375,10 @@ def evaluate_block_summary_bootstrap_backbone(
     nonfinite or nonpositive. ``samples`` is (valid_replicates, block_sizes);
     ``covariance`` is its sample covariance, or None with fewer than two
     valid rows. A None backbone returns empty arrays and no covariance.
+    ``n_threads=None`` selects up to eight threads from CPUs and workload;
+    a positive integer caps the pool, and 1 is serial. BLAS is not reconfigured.
     """
+    validate_n_threads(n_threads)
     if target not in {"quantile", "mean", "mode"}:
         raise ValueError(f"Unsupported target: {target}")
     resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
@@ -320,44 +393,10 @@ def evaluate_block_summary_bootstrap_backbone(
         }
     reps = backbone.segment_draws.shape[0]
     block_sizes = np.asarray(backbone.block_sizes, dtype=int)
-    samples = np.full((reps, block_sizes.size), np.nan, dtype=float)
-    invalid_summary_count = 0
-    for idx, block_size in enumerate(block_sizes):
-        if target == "quantile":
-            summaries = _evaluate_quantile_bootstrap_column(
-                backbone,
-                block_size=int(block_size),
-                quantile=quantile,
-            )
-        elif target == "mean":
-            summaries = _evaluate_mean_bootstrap_column(
-                backbone,
-                block_size=int(block_size),
-            )
-        elif target == "mode":
-            summaries = _evaluate_mode_bootstrap_column(
-                backbone,
-                block_size=int(block_size),
-                quantile=quantile,
-            )
-        else:
-            raise ValueError(f"Unsupported target: {target}")
-        valid_mask = np.isfinite(summaries) & (summaries > 0)
-        samples[valid_mask, idx] = np.log(summaries[valid_mask])
-        invalid_summary_count += int(np.size(summaries) - np.sum(valid_mask))
-    if invalid_summary_count:
-        warnings.warn(
-            (
-                "evaluate_block_summary_bootstrap_backbone excluded "
-                f"{invalid_summary_count} non-positive bootstrap block summaries. "
-                "This step requires strictly positive inputs."
-            ),
-            RuntimeWarning,
-            stacklevel=3,
-        )
-    # Use the same replicate set for every covariance entry, not pairwise deletion.
-    valid_rows = np.all(np.isfinite(samples), axis=1)
-    valid_samples = samples[valid_rows]
+    with _summary_evaluator(
+        backbone, target=target, quantile=quantile, n_threads=n_threads
+    ) as summaries:
+        valid_samples = _log_bootstrap_summaries(summaries(backbone.segment_draws))
     covariance = None
     if valid_samples.shape[0] >= 2:
         covariance = np.atleast_2d(np.cov(valid_samples, rowvar=False))
@@ -369,7 +408,7 @@ def evaluate_block_summary_bootstrap_backbone(
         "sliding": backbone.sliding,
         "target": target,
         "quantile": resolved_quantile,
-        "invalid_replicates": int(np.sum(~valid_rows)),
+        "invalid_replicates": int(reps - len(valid_samples)),
     }
 
 
@@ -438,6 +477,7 @@ def circular_block_summary_bootstrap_multi_target(
     reps: int = 200,
     super_block_size: int | None = None,
     random_state: int | None = 0,
+    n_threads: int | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Bootstrap targets using identical segment draws and cached maxima.
 
@@ -445,7 +485,9 @@ def circular_block_summary_bootstrap_multi_target(
     value following ``evaluate_block_summary_bootstrap_backbone``. Targets
     may retain different replicate counts because invalid log summaries
     are removed separately for each target.
+    ``n_threads`` follows the backbone evaluator's per-call thread budget.
     """
+    validate_n_threads(n_threads)
     backbone = build_block_summary_bootstrap_backbone(
         vec=vec,
         block_sizes=block_sizes,
@@ -459,6 +501,7 @@ def circular_block_summary_bootstrap_multi_target(
             backbone,
             target=target,
             quantile=quantile,
+            n_threads=n_threads,
         )
         for target in targets
     }
@@ -474,6 +517,7 @@ def circular_block_summary_bootstrap(
     reps: int = 200,
     super_block_size: int | None = None,
     random_state: int | None = 0,
+    n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Estimate log-summary covariance by resampling time-series super-blocks.
 
@@ -483,7 +527,9 @@ def circular_block_summary_bootstrap(
     across scales. Fewer than two requested draws or usable segments gives
     empty samples and no covariance. See the backbone builder for how the
     super-block length is adjusted.
+    ``n_threads`` follows the backbone evaluator's per-call thread budget.
     """
+    validate_n_threads(n_threads)
     arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
     if target not in {"quantile", "mean", "mode"}:
@@ -519,6 +565,7 @@ def circular_block_summary_bootstrap(
         backbone,
         target=target,
         quantile=quantile,
+        n_threads=n_threads,
     )
 
 

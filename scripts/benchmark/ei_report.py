@@ -90,7 +90,7 @@ from benchmark.common import (
     render_grouped_latex_table,
     render_latex_table,
 )
-from shared.runtime import status
+from shared.runtime import initialize_numerical_worker, status
 
 EI_SHRINKAGE_GRID = (0.00, 0.15, 0.37, 0.55, 0.75, 1.00)
 EI_SHRINKAGE_METHODS = ("northrop_sliding_fgls", "bb_sliding_fgls")
@@ -474,7 +474,9 @@ def build_ei_shrinkage_sensitivity_summary(
         for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
             os.environ.setdefault(variable, "1")
         with ProcessPoolExecutor(
-            max_workers=workers, mp_context=mp.get_context("spawn")
+            max_workers=workers,
+            mp_context=mp.get_context("spawn"),
+            initializer=initialize_numerical_worker,
         ) as executor:
             for completed, rows in enumerate(
                 executor.map(_ei_shrinkage_scenario, tasks, chunksize=1), start=1

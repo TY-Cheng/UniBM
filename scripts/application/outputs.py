@@ -54,7 +54,7 @@ from application.specs import (
     DESIGN_LIFE_LEVEL_HORIZONS,
     ApplicationBundle,
 )
-from shared.runtime import status
+from shared.runtime import bootstrap_thread_cap, status
 from benchmark.common import render_latex_table
 from benchmark.common import latex_escape
 from benchmark.design import METHOD_LABELS, METHOD_LOOKUP, fit_methods_for_series
@@ -652,6 +652,7 @@ def _fit_evi_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> li
                 curve=bundle.evi_fit.curve,
                 plateau=plateau,
                 bootstrap_result=bundle.evi_fit.bootstrap,
+                n_threads=bootstrap_thread_cap(),
             )
         )
     return fits
@@ -725,6 +726,7 @@ def _fit_ei_window_variants(bundle: ApplicationBundle, *, top_k: int = 3) -> lis
         reps=APPLICATION_EI_BOOTSTRAP_REPS,
         random_state=APPLICATION_RANDOM_STATE,
         allow_zeros=bundle.spec.ei_allow_zeros,
+        n_threads=bootstrap_thread_cap(),
     )
     variants = []
     for window, selected_levels, score in _top_ei_windows(path, top_k=top_k):

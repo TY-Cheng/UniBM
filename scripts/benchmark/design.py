@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
+from shared.runtime import bootstrap_thread_cap
 from unibm._bootstrap_sampling import draw_circular_block_bootstrap_samples
 from unibm.evi import (
     BlockSummaryCurve,
@@ -925,6 +926,7 @@ def _scheme_bootstrap_results(
         sliding=sliding,
         reps=reps,
         random_state=random_state,
+        n_threads=bootstrap_thread_cap(),
     )
     if cache_dir is not None and cache_key is not None:
         existing_bundle = {}
@@ -1047,6 +1049,7 @@ def fit_methods_for_series(
                     random_state=random_state,
                     curve=shared_curve,
                     plateau=shared_plateau,
+                    n_threads=bootstrap_thread_cap(),
                 )
             if fgls_id in selected_method_ids and fgls_id not in fits:
                 bootstrap_result = fgls_bootstrap_overrides.get(fgls_id)
@@ -1067,6 +1070,7 @@ def fit_methods_for_series(
                     plateau=shared_plateau,
                     bootstrap_result=bootstrap_result,
                     bootstrap_reps=(bootstrap_reps if bootstrap_result is None else None),
+                    n_threads=bootstrap_thread_cap(),
                 )
     selected_fits: dict[str, ScalingFit] = {}
     for spec in selected_specs:

@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any, Literal
 
 import numpy as np
+from scipy.ndimage import minimum_filter1d
+from scipy.stats import rankdata
 
 from .._block_grid import validate_block_sizes
 from .._bootstrap_sampling import (
     default_circular_bootstrap_block_size,
-    draw_circular_block_bootstrap_sample,
-    draw_circular_block_bootstrap_samples,
 )
 from .._bootstrap_precision import adaptive_covariance
+from .._parallel import (
+    BOOTSTRAP_WORKING_BYTES,
+    bootstrap_executor,
+    resolve_n_threads,
+    validate_n_threads,
+)
 from .._validation import subset_covariance_by_labels, validate_covariance_shrinkage
-from ._stats import Z_CRIT_95, _log_scale_theta_interval
+from ._stats import EI_TINY, Z_CRIT_95, _log_scale_theta_interval
 from ._validation import _validate_ei_series
 from .bm import EI_DEFAULT_COVARIANCE_SHRINKAGE, _fit_pooled_z_model
 from .paths import BM_PATH_KEYS, _build_bm_z_paths_from_values
@@ -81,12 +88,86 @@ def _summarize_bm_ei_path_draws(
     }
 
 
+def _paths_from_cdf(cdf, block_sizes, path_keys):
+    """Batch the same window statistics, retaining NumPy's row reduction order."""
+    cdf = np.clip(cdf, EI_TINY, 1.0 - EI_TINY)
+    scores = {
+        base: -np.log(cdf) if base == "northrop" else 1.0 - cdf
+        for base in dict.fromkeys(base for base, _ in path_keys)
+    }
+    n = cdf.shape[1]
+    draws = {}
+    for base, sliding in path_keys:
+        score = scores[base]
+        path = np.empty((len(cdf), len(block_sizes)))
+        for j, block_size in enumerate(block_sizes):
+            b = int(block_size)
+            if sliding:
+                start = b // 2
+                minima = minimum_filter1d(score, size=b, axis=1)[:, start : start + n - b + 1]
+            else:
+                minima = score[:, : n // b * b].reshape(len(score), -1, b).min(axis=2)
+            # Multiplying before the mean reproduces the original rounding.
+            mean = np.mean(float(b) * minima, axis=1)
+            if base == "northrop":
+                eir = np.maximum(mean, 1.0)
+            else:
+                theta = np.maximum(1.0 / np.maximum(mean, EI_TINY) - 1.0 / float(b), EI_TINY)
+                eir = 1.0 / np.minimum(theta, 1.0)
+            path[:, j] = np.log(eir)
+        draws[base, sliding] = path
+    return draws
+
+
+@contextmanager
+def _ei_path_sampler(values, block_sizes, *, base_path, sliding, length, n_threads):
+    """Prepare observation codes once and own the pool across adaptive checkpoints.
+
+    Integer multiplicities recover each resample's right-inclusive empirical
+    ranks without sorting it again. Bootstrap RNG calls stay in the caller
+    thread and retain the original per-replicate request size and order.
+    """
+    unique, inverse = np.unique(values, return_inverse=True)
+    n, size = len(values), len(unique)
+    threads = resolve_n_threads(n_threads, n_tasks=256, n_obs=n)
+    blocks = (n + length - 1) // length
+    offsets = np.arange(length)
+    # Includes indices/codes, histogram, CDF, scores and window work arrays.
+    batch_rows = max(1, BOOTSTRAP_WORKING_BYTES // (80 * n + 16 * size))
+    path_key = (base_path, sliding)
+    with bootstrap_executor(threads) as pool:
+
+        def transform(codes):
+            """Count ties before scoring; reductions stay aligned by resample."""
+            row = np.arange(len(codes))[:, None]
+            counts = np.bincount((codes + row * size).ravel(), minlength=len(codes) * size)
+            counts = counts.reshape(-1, size).cumsum(axis=1)
+            cdf = counts[row, codes].astype(float) / float(n + 1)
+            return _paths_from_cdf(cdf, block_sizes, (path_key,))[path_key]
+
+        def draw(count, rng):
+            """Dispatch bounded row groups without ever drawing future checkpoints."""
+            pieces = []
+            for offset in range(0, count, batch_rows * threads):
+                take = min(batch_rows * threads, count - offset)
+                starts = np.stack([rng.integers(0, n, size=blocks) for _ in range(take)])
+                indices = ((starts[:, :, None] + offsets) % n).reshape(take, -1)[:, :n]
+                codes = inverse[indices]
+                groups = np.array_split(codes, min(threads, take))
+                results = pool.map(transform, groups) if pool else map(transform, groups)
+                pieces.extend(results)
+            return np.concatenate(pieces)
+
+        yield draw
+
+
 def bootstrap_bm_ei_path_draws(
     bootstrap_samples: np.ndarray,
     *,
     block_sizes: np.ndarray,
     allow_zeros: bool,
     path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
+    n_threads: int | None = None,
 ) -> dict[tuple[str, bool], np.ndarray]:
     """Transform supplied resamples into BM-EI paths without generating new draws.
 
@@ -99,24 +180,38 @@ def bootstrap_bm_ei_path_draws(
     ``base_path`` is ``"northrop"`` or ``"bb"``. Each value is an array of shape
     ``(n_draws, n_block_sizes)`` containing ``z = log(1 / theta)``. All four paths
     are returned by default. The caller controls the resampling design and clock.
+    ``n_threads=None`` selects up to eight threads from CPUs and workload;
+    a positive integer caps the pool, and 1 is serial. BLAS is not reconfigured.
     """
+    validate_n_threads(n_threads)
     samples = np.asarray(bootstrap_samples, dtype=float)
     if samples.ndim != 2:
         raise ValueError("bootstrap_samples must be a two-dimensional matrix.")
     block_sizes = validate_block_sizes(block_sizes, n_obs=samples.shape[1])
-    draws = {
-        key: np.full((samples.shape[0], block_sizes.size), np.nan, dtype=float)
-        for key in path_keys
-    }
-    for rep, sample in enumerate(samples):
-        sample_values = _validate_ei_series(sample, allow_zeros=allow_zeros)
-        sample_paths = _build_bm_z_paths_from_values(
-            sample_values,
-            block_sizes,
-            path_keys=path_keys,
-        )
-        for key, z_path in sample_paths.items():
-            draws[key][rep] = z_path
+    for sample in samples:
+        _validate_ei_series(sample, allow_zeros=allow_zeros)
+    for base, _ in path_keys:
+        if base not in {"northrop", "bb"}:
+            raise KeyError(base)
+    draws = {key: np.empty((len(samples), len(block_sizes))) for key in path_keys}
+    threads = resolve_n_threads(n_threads, n_tasks=len(samples), n_obs=samples.shape[1])
+    batch_rows = max(1, BOOTSTRAP_WORKING_BYTES // (samples.shape[1] * 96))
+
+    def transform(rows):
+        """Supplied banks may contain arbitrary values; rank each row with ties."""
+        cdf = rankdata(rows, method="max", axis=1) / float(rows.shape[1] + 1)
+        return _paths_from_cdf(cdf, block_sizes, path_keys)
+
+    with bootstrap_executor(threads) as pool:
+        for offset in range(0, len(samples), batch_rows * threads):
+            batch = samples[offset : offset + batch_rows * threads]
+            groups = np.array_split(batch, min(threads, len(batch)))
+            results = pool.map(transform, groups) if pool else map(transform, groups)
+            start = offset
+            for group, result in zip(groups, results):
+                for key in path_keys:
+                    draws[key][start : start + len(group)] = result[key]
+                start += len(group)
     return draws
 
 
@@ -131,6 +226,7 @@ def bootstrap_bm_ei_path(
     random_state: int | None = 0,
     bootstrap_block_length: int | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Bootstrap BM-EI covariance; default adaptive precision targets pooled theta and z.
 
@@ -139,6 +235,10 @@ def bootstrap_bm_ei_path(
     set with ``bootstrap_block_length``; it is separate from the increasing
     ``block_sizes`` grid used to evaluate the EI path. ``random_state`` seeds
     NumPy's generator (default 0); ``None`` requests non-reproducible seeding.
+    ``n_threads=None`` chooses at most 8 threads from CPU/workload size;
+    a positive integer caps this pool and 1 stays serial. It does not modify
+    BLAS settings. Outer parallel callers should allocate the inner cap.
+    Batch/thread choices preserve draws, path order and adaptive stopping.
 
     An explicit integer of at least two retains fixed-R sampling. Adaptive precision is conditional
     on the original stable window and the declared covariance shrinkage.
@@ -155,6 +255,7 @@ def bootstrap_bm_ei_path(
     ``allow_zeros`` declares whether observed zeros are legal; non-finite inputs
     are always rejected rather than removed from the observation clock.
     """
+    validate_n_threads(n_threads)
     values = _validate_ei_series(vec, allow_zeros=allow_zeros)
     block_sizes = validate_block_sizes(block_sizes, n_obs=values.size)
     block_length_policy, resolved_block_length = _resolve_ei_bootstrap_block_length(
@@ -162,9 +263,9 @@ def bootstrap_bm_ei_path(
         base_path=base_path,
         bootstrap_block_length=bootstrap_block_length,
     )
+    length = resolved_block_length or default_circular_bootstrap_block_size(values.size)
     if reps == "adaptive":
         shrinkage = validate_covariance_shrinkage(covariance_shrinkage)
-        length = resolved_block_length or default_circular_bootstrap_block_size(values.size)
         path_key = (base_path, sliding)
         observed_z = _build_bm_z_paths_from_values(values, block_sizes, path_keys=(path_key,))[
             path_key
@@ -172,19 +273,6 @@ def bootstrap_bm_ei_path(
         window, _ = select_stable_path_window(block_sizes, observed_z)
         mask = (block_sizes >= window.lo) & (block_sizes <= window.hi)
         levels, z_values = block_sizes[mask], observed_z[mask]
-
-        def draw(count: int, rng: np.random.Generator) -> np.ndarray:
-            """Draw a batch of full-grid z paths using the shared bootstrap RNG."""
-            # Process each raw series immediately; do not retain an R x n_obs bank.
-            rows = []
-            for _ in range(count):
-                raw = draw_circular_block_bootstrap_sample(values, block_size=length, rng=rng)
-                rows.append(
-                    _build_bm_z_paths_from_values(raw, block_sizes, path_keys=(path_key,))[
-                        path_key
-                    ]
-                )
-            return np.asarray(rows)
 
         def evaluate(covariance: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Return theta/z targets and their SE scales for covariance-precision checks."""
@@ -208,8 +296,17 @@ def bootstrap_bm_ei_path(
             )
             return targets, np.asarray([theta * se] * 3 + [se] * 3)
 
+        with _ei_path_sampler(
+            values,
+            block_sizes,
+            base_path=base_path,
+            sliding=sliding,
+            length=length,
+            n_threads=n_threads,
+        ) as draw:
+            result = adaptive_covariance(draw, evaluate, random_state=random_state)
         return {
-            **adaptive_covariance(draw, evaluate, random_state=random_state),
+            **result,
             "block_sizes": block_sizes,
             "base_path": base_path,
             "sliding": bool(sliding),
@@ -228,25 +325,21 @@ def bootstrap_bm_ei_path(
         }
     if isinstance(reps, (bool, np.bool_)) or not isinstance(reps, (int, np.integer)) or reps < 2:
         raise ValueError("reps must be an integer at least 2 or 'adaptive'.")
-    bank = draw_circular_block_bootstrap_samples(
+    with _ei_path_sampler(
         values,
-        reps=reps,
-        block_size=resolved_block_length,
-        random_state=random_state,
-    )
-    samples = bank.samples
-    z_draws = bootstrap_bm_ei_path_draws(
-        samples,
-        block_sizes=block_sizes,
-        path_keys=((base_path, sliding),),
-        allow_zeros=allow_zeros,
-    )[(base_path, sliding)]
+        block_sizes,
+        base_path=base_path,
+        sliding=sliding,
+        length=length,
+        n_threads=n_threads,
+    ) as draw:
+        z_draws = draw(int(reps), np.random.default_rng(random_state))
     return _summarize_bm_ei_path_draws(
         z_draws,
         block_sizes=block_sizes,
         base_path=base_path,
         sliding=sliding,
         bootstrap_block_length_policy=block_length_policy,
-        bootstrap_block_length=bank.block_size,
+        bootstrap_block_length=length,
         reps=reps,
     )

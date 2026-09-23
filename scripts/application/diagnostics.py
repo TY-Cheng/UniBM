@@ -12,6 +12,7 @@ from application.specs import (
     APPLICATION_RANDOM_STATE,
     ApplicationBundle,
 )
+from shared.runtime import bootstrap_thread_cap
 from unibm.ei import EiStableWindow, bootstrap_bm_ei_path, estimate_pooled_bm_ei
 from unibm.evi import (
     DEFAULT_CURVATURE_PENALTY,
@@ -133,6 +134,7 @@ def fit_evi_window_variants(
                 curve=bundle.evi_fit.curve,
                 plateau=plateau,
                 bootstrap_result=bundle.evi_fit.bootstrap,
+                n_threads=bootstrap_thread_cap(),
             )
         )
     return fits
@@ -335,6 +337,7 @@ def fit_ei_window_variants(
         reps=APPLICATION_EI_BOOTSTRAP_REPS,
         random_state=APPLICATION_RANDOM_STATE,
         allow_zeros=bundle.spec.ei_allow_zeros,
+        n_threads=bootstrap_thread_cap(),
     )
     variants: list[tuple[object, float]] = []
     for window, selected_levels, score in _top_ei_windows(path, top_k=top_k):

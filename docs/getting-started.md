@@ -105,6 +105,36 @@ regression.
 For a quick guide to which returned fields matter most, see
 [Reading Returned Objects](reading-returned-objects.md).
 
+## Bootstrap threads (source checkout)
+
+The current source adds `n_threads` to EVI estimation and EVI/EI bootstrap
+functions. This option is not part of the published 0.1.0 release.
+
+- `None` (default) selects a small pool from the workload and available CPUs;
+  small samples stay serial. Automatic selection uses at most eight threads.
+- A positive integer sets an upper limit; `1` runs the bootstrap serially.
+  Fewer threads may be used when there are fewer independent tasks or CPUs.
+- This controls UniBM's bootstrap pool. NumPy/SciPy BLAS settings remain under
+  the caller's control. For an outer process pool or concurrent fits, explicitly
+  allocate the inner budget, usually `n_threads=1`.
+
+```python
+fit = estimate_evi_quantile(
+    sample, regression="FGLS", quantile=0.95, random_state=7, n_threads=1,
+)
+```
+
+For EI, pass the same option to `bootstrap_bm_ei_path`, then reuse that result
+in `estimate_pooled_bm_ei`. Design-life point estimates and intervals reuse
+the EVI fit and require no additional bootstrap.
+
+The repository's benchmark, sensitivity, and application process pools assign
+one internal bootstrap thread to each worker. Standalone calls retain automatic
+selection. A fixed seed retains the same draws and adaptive stopping regardless
+of thread count. Working arrays are processed in batches; retained inputs,
+count tables, output samples, and concurrent workers still contribute to memory
+use, so the batch budget is not a total process memory limit.
+
 ## Plotting
 
 The public plotting helpers return `(fig, ax)` and keep the figure open by default:

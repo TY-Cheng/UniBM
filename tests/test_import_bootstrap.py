@@ -23,3 +23,25 @@ class ImportBootstrapTests(unittest.TestCase):
             self.assertEqual(sys.path[1], str(SCRIPTS_DIR.resolve()))
         finally:
             sys.path[:] = original_path
+
+
+def test_benchmark_entries_bootstrap_paths_in_fresh_interpreters():
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    for name in ["evi_benchmark", "evi_report", "ei_report"]:
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy,sys; runpy.run_path(sys.argv[1], run_name='import_probe')",
+                str(SCRIPTS_DIR / "benchmark" / f"{name}.py"),
+            ],
+            cwd=SCRIPTS_DIR / "benchmark",
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )

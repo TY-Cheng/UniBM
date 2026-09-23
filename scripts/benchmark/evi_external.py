@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
+from shared.runtime import initialize_numerical_worker
 from unibm._runtime import prepare_matplotlib_env
 
 prepare_matplotlib_env("unibm-benchmark")
@@ -1130,7 +1131,9 @@ def run_external_benchmark(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
         try:
             context = mp.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
+            with ProcessPoolExecutor(
+                max_workers=workers, mp_context=context, initializer=initialize_numerical_worker
+            ) as executor:
                 frames = list(executor.map(_evaluate_external_config_worker, tasks, chunksize=1))
         except (OSError, PermissionError):
             frames = [_evaluate_external_config_worker(task) for task in tasks]

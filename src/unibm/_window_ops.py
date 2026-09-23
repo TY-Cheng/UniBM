@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
+from scipy.ndimage import maximum_filter1d, minimum_filter1d
 
 
 Reducer = Literal["max", "min"]
@@ -30,10 +31,10 @@ def _rolling_extreme_finite(
     arr = np.asarray(arr, dtype=float).reshape(-1)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
-    windows = np.lib.stride_tricks.sliding_window_view(arr, window)
-    if reducer == "max":
-        return windows.max(axis=1)
-    return windows.min(axis=1)
+    operation = maximum_filter1d if reducer == "max" else minimum_filter1d
+    # SciPy centers its filter; this slice retains only complete original windows.
+    start = window // 2
+    return operation(arr, size=window)[start : start + arr.size - window + 1]
 
 
 def _finite_window_mask(arr: np.ndarray, window: int) -> np.ndarray:

@@ -37,4 +37,29 @@ def resolve_bool_env(name: str, default: bool = False) -> bool:
     return bool(default)
 
 
-__all__ = ["resolve_bool_env", "resolve_int_env", "status"]
+_WORKER_BOOTSTRAP_THREADS: int | None = None
+
+
+def initialize_numerical_worker() -> None:
+    """Give each repository-owned process one UniBM compute thread.
+
+    This initializer is only installed on our process pools. Standalone calls
+    retain automatic inner threading; external pool owners pass their own cap.
+    BLAS/OpenMP keep the existing workflow environment configuration.
+    """
+    global _WORKER_BOOTSTRAP_THREADS
+    _WORKER_BOOTSTRAP_THREADS = 1
+
+
+def bootstrap_thread_cap() -> int | None:
+    """Return the explicit inner budget assigned by this workflow's parent."""
+    return _WORKER_BOOTSTRAP_THREADS
+
+
+__all__ = [
+    "resolve_bool_env",
+    "resolve_int_env",
+    "status",
+    "bootstrap_thread_cap",
+    "initialize_numerical_worker",
+]

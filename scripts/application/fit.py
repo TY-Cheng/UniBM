@@ -27,7 +27,12 @@ from application.specs import (
     ApplicationPreparedInputs,
     ApplicationSpec,
 )
-from shared.runtime import resolve_int_env, status
+from shared.runtime import (
+    bootstrap_thread_cap,
+    initialize_numerical_worker,
+    resolve_int_env,
+    status,
+)
 
 
 def _application_worker_count(n_tasks: int) -> int:
@@ -78,6 +83,7 @@ def fit_application_ei_estimates(
             reps=APPLICATION_EI_BOOTSTRAP_REPS,
             random_state=APPLICATION_RANDOM_STATE,
             allow_zeros=allow_zeros,
+            n_threads=bootstrap_thread_cap(),
         )
         for base_path in ("bb", "northrop")
     }
@@ -126,6 +132,7 @@ def build_application_bundle(
         sliding=True,
         bootstrap_reps="adaptive",
         random_state=APPLICATION_RANDOM_STATE,
+        n_threads=bootstrap_thread_cap(),
     )
     if evi_fit.regression_policy != "FGLS" or evi_fit.regression != "FGLS":
         raise RuntimeError("Application EVI fits require strict FGLS.")
@@ -170,7 +177,9 @@ def build_application_bundles_from_inputs(
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
-    with ProcessPoolExecutor(max_workers=workers) as executor:
+    with ProcessPoolExecutor(
+        max_workers=workers, initializer=initialize_numerical_worker
+    ) as executor:
         return list(executor.map(_build_application_bundle_worker, tasks, chunksize=1))
 
 

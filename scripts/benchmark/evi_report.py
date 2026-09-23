@@ -75,7 +75,7 @@ from benchmark.design import (
     sort_by_family_order,
     sort_by_method_order,
 )
-from shared.runtime import status
+from shared.runtime import bootstrap_thread_cap, initialize_numerical_worker, status
 
 # ---------------------------------------------------------------------------
 # Aggregation helpers
@@ -357,6 +357,7 @@ def _evi_shrinkage_scenario(args: tuple) -> list[dict[str, float | int | str]]:
                     plateau=headline_fit.plateau,
                     bootstrap_result=headline_fit.bootstrap,
                     covariance_shrinkage=delta,
+                    n_threads=bootstrap_thread_cap(),
                 )
             ci_lo, ci_hi = fit.confidence_interval
             detail_rows.append(
@@ -440,7 +441,9 @@ def build_evi_shrinkage_sensitivity_summary(
         for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
             os.environ.setdefault(variable, "1")
         with ProcessPoolExecutor(
-            max_workers=workers, mp_context=mp.get_context("spawn")
+            max_workers=workers,
+            mp_context=mp.get_context("spawn"),
+            initializer=initialize_numerical_worker,
         ) as executor:
             for completed, rows in enumerate(
                 executor.map(_evi_shrinkage_scenario, tasks, chunksize=1), start=1
