@@ -124,8 +124,8 @@ just --command uv run python -c "from unibm.evi._accelerator import kernels; ass
 ## Local release preparation
 
 [Version 0.1.0 is published on PyPI](https://pypi.org/project/unibm/0.1.0/).
-The optimizations in the source checkout are unreleased. Set a new version in
-`src/unibm/__about__.py` before preparing the next release; preserve old artifacts.
+The source checkout is prepared as **0.2.0** and remains unpublished. Confirm the
+version in `src/unibm/__about__.py` before building; preserve old artifacts.
 
 ```sh
 just --command uv run pytest -q tests/test_distribution_artifacts.py

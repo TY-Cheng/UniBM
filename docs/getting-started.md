@@ -16,6 +16,9 @@ python -m pip install unibm==0.1.0
 
 ## Source checkout and development
 
+The source checkout is being prepared as **0.2.0**; this version is not yet
+published on PyPI.
+
 To work from a local source checkout:
 
 ```bash

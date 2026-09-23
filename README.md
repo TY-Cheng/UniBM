@@ -30,6 +30,9 @@ The four additional root imports are not in PyPI 0.1.0: use `unibm.ei` for
 `unibm.evi` for `estimate_design_life_level_interval` on that release.
 All existing subpackage import paths remain supported.
 
+The source checkout is being prepared as **0.2.0**, which is not yet published.
+The installation command below continues to select the published 0.1.0 release.
+
 ## Quick start
 
 Install the [PyPI release](https://pypi.org/project/unibm/0.1.0/) with Python 3.11 or later:
