@@ -1,6 +1,6 @@
 # Worked Examples
 
-These examples use the current source checkout's core imports. With PyPI
+These examples use UniBM 0.2.0's core imports. With version
 0.1.0, import the EI functions from `unibm.ei` and
 `estimate_design_life_level_interval` from `unibm.evi` instead; see the
 [version note](api/public-api.md#top-level-convenience-imports).

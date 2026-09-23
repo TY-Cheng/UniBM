@@ -1,7 +1,7 @@
 # API Overview
 
 Choose an entrypoint by the quantity you want to estimate. EVI and EI estimators
-are public through `unibm.evi` and `unibm.ei`. The current source also exposes
+are public through `unibm.evi` and `unibm.ei`. Version 0.2.0 also exposes
 six core workflow functions directly from `unibm`. These convenience imports
 refer to the same function objects; their placement does not select a default
 estimator for every task. See the [version note](#top-level-convenience-imports)
@@ -94,14 +94,14 @@ extrapolated design-life levels**. See
 
 ## Top-level convenience imports
 
-The current source also accepts `n_threads` on EVI estimation and EVI/EI
+Version 0.2.0 also accepts `n_threads` on EVI estimation and EVI/EI
 bootstrap calls. Optional native kernels preserve the same public API. See
-[thread budgets](../getting-started.md#bootstrap-threads-source-checkout) and
-[native acceleration](../getting-started.md#optional-native-acceleration-source-checkout)
+[thread budgets](../getting-started.md#bootstrap-threads) and
+[native acceleration](../getting-started.md#optional-native-acceleration)
 for defaults, nested parallelism, and the NumPy fallback. These additions are
 not in PyPI 0.1.0.
 
-The current source supports:
+Version 0.2.0 supports:
 
 ```python
 from unibm import (
@@ -120,10 +120,10 @@ calls. All six imports load lazily and resolve to the original subpackage
 functions. Comparator estimators and other helpers remain in the grouped
 namespaces above.
 
-**Version note:** the four additional root imports are unreleased. PyPI 0.1.0
+**Version note:** the four additional root imports were added in 0.2.0. Version 0.1.0
 exports only `estimate_evi_quantile` and `estimate_design_life_level` at the
 root. On that release, import the other four functions as follows; these paths
-also remain supported in the current source:
+also remain supported in 0.2.0:
 
 ```python
 from unibm.ei import prepare_ei_bundle, bootstrap_bm_ei_path, estimate_pooled_bm_ei

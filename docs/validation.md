@@ -163,7 +163,7 @@ them. They are not runtime benchmarks. To compare execution speed, record the
 source commit, native/NumPy backend, Python and dependency versions, hardware,
 thread/process budgets, sample and bootstrap settings, and cache state; verify
 numerical agreement separately. See
-[execution settings](getting-started.md#bootstrap-threads-source-checkout).
+[execution settings](getting-started.md#bootstrap-threads).
 
 After source installation with development dependencies, force the two main
 grids from the repository root:

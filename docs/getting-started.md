@@ -7,17 +7,14 @@ the package layer, not on the full repo orchestration under
 
 ## Installation
 
-Install [UniBM 0.1.0 from PyPI](https://pypi.org/project/unibm/0.1.0/) with Python
+Install [UniBM 0.2.0 from PyPI](https://pypi.org/project/unibm/0.2.0/) with Python
 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.1.0
+python -m pip install unibm==0.2.0
 ```
 
 ## Source checkout and development
-
-The source checkout is being prepared as **0.2.0**; this version is not yet
-published on PyPI.
 
 To work from a local source checkout:
 
@@ -49,8 +46,8 @@ The repo-level workflow details stay in the repository `README.md` and
 
 ## Package usage
 
-These examples work with PyPI 0.1.0 and the current source. Source checkouts
-also expose all six core workflow functions directly from `unibm`; see
+These examples work with UniBM 0.1.0 and 0.2.0. Version 0.2.0
+also exposes all six core workflow functions directly from `unibm`; see
 [Top-level convenience imports](api/public-api.md#top-level-convenience-imports).
 
 ```python
@@ -112,9 +109,9 @@ regression.
 For a quick guide to which returned fields matter most, see
 [Reading Returned Objects](reading-returned-objects.md).
 
-## Bootstrap threads (source checkout)
+## Bootstrap threads
 
-The current source adds `n_threads` to EVI estimation and EVI/EI bootstrap
+Version 0.2.0 adds `n_threads` to EVI estimation and EVI/EI bootstrap
 functions. This option is not part of the published 0.1.0 release.
 
 - `None` (default) selects a small pool from the workload and available CPUs;
@@ -143,9 +140,9 @@ of thread count. Working arrays are processed in batches; retained inputs,
 count tables, output samples, and concurrent workers still contribute to memory
 use, so the batch budget is not a total process memory limit.
 
-## Optional native acceleration (source checkout)
+## Optional native acceleration
 
-The unreleased source checkout accelerates EVI mode KDE and bootstrap quantile
+Version 0.2.0 accelerates EVI mode KDE and bootstrap quantile
 rank searches with optional Cython kernels. The same APIs and `n_threads` setting
 work with or without the extension. Mode uses repeated-maxima multiplicities;
 tail estimators, FGLS regression and EI profile intervals also reuse computations

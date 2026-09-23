@@ -24,21 +24,18 @@ The public package is organized around four entrypoints:
 - `unibm.ei` for the persistence-side workflow
 - `unibm.cdf` for the public empirical CDF helper
 
-The current source exposes six core functions directly from `unibm`.
+UniBM 0.2.0 exposes six core functions directly from `unibm`.
 The four additional root imports are not in PyPI 0.1.0: use `unibm.ei` for
 `prepare_ei_bundle`, `bootstrap_bm_ei_path`, and `estimate_pooled_bm_ei`, and
 `unibm.evi` for `estimate_design_life_level_interval` on that release.
 All existing subpackage import paths remain supported.
 
-The source checkout is being prepared as **0.2.0**, which is not yet published.
-The installation command below continues to select the published 0.1.0 release.
-
 ## Quick start
 
-Install the [PyPI release](https://pypi.org/project/unibm/0.1.0/) with Python 3.11 or later:
+Install the [PyPI release](https://pypi.org/project/unibm/0.2.0/) with Python 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.1.0
+python -m pip install unibm==0.2.0
 ```
 
 This installs `unibm`, including its estimators, interval helpers, design-life
@@ -66,9 +63,9 @@ For ad hoc uv commands that should use `.env`, use `just --command`, for example
 `uv run` does not automatically load `.env` before choosing its project environment;
 without an exported override it uses `.venv/`.
 
-## Acceleration in the source checkout
+## Acceleration
 
-The current source includes NumPy/SciPy optimizations and optional Cython kernels
+UniBM 0.2.0 includes NumPy/SciPy optimizations and optional Cython kernels
 for EVI mode KDE and bootstrap quantile rank searches. Source builds attempt to
 compile these kernels; without a C compiler, the same APIs use NumPy. Set
 `UNIBM_NO_EXTENSIONS=1` before building for a pure Python distribution, or before
@@ -81,7 +78,7 @@ NumPy/SciPy BLAS thread settings remain separate. Design-life point estimates
 and intervals reuse the EVI fit without another bootstrap.
 
 These changes are **not included in PyPI 0.1.0**. See
-[Getting Started](https://ty-cheng.github.io/UniBM/getting-started/#bootstrap-threads-source-checkout)
+[Getting Started](https://ty-cheng.github.io/UniBM/getting-started/#bootstrap-threads)
 for thread and memory behavior, and
 [Native acceleration](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration)
 for build instructions.
