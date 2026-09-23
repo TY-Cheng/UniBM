@@ -92,12 +92,12 @@ def _weighted_slope_with_se(
     if not np.isfinite(w_sum) or w_sum <= 0:
         return float("nan"), float("nan")
     X = np.column_stack([np.ones_like(x), x])
-    W = np.diag(w)
-    bread = np.linalg.pinv(X.T @ W @ X)
-    beta = bread @ (X.T @ W @ y)
+    weighted_design = X.T * w
+    bread = np.linalg.pinv(weighted_design @ X)
+    beta = bread @ (weighted_design @ y)
     fitted = X @ beta
     resid = y - fitted
-    meat = X.T @ W @ np.diag(resid**2) @ W @ X
+    meat = (weighted_design * (resid**2) * w) @ X
     cov_beta = bread @ meat @ bread
     if x.size > X.shape[1]:
         cov_beta *= x.size / (x.size - X.shape[1])

@@ -247,19 +247,16 @@ def _pickands_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
     Return NaN when a required rank is unavailable or ties produce a
     nonpositive spacing. Output positions match ``k_values``.
     """
-    n_obs = ordered.size
-    estimates = []
-    for k in k_values:
-        if 4 * k > n_obs:
-            estimates.append(np.nan)
-            continue
-        a = ordered[k - 1] - ordered[2 * k - 1]
-        b = ordered[2 * k - 1] - ordered[4 * k - 1]
-        if a <= 0 or b <= 0:
-            estimates.append(np.nan)
-            continue
-        estimates.append(float(np.log(a / b) / np.log(2.0)))
-    return np.asarray(estimates, dtype=float)
+    estimates = np.full(len(k_values), np.nan)
+    available = 4 * k_values <= ordered.size
+    k = k_values[available]
+    a = ordered[k - 1] - ordered[2 * k - 1]
+    b = ordered[2 * k - 1] - ordered[4 * k - 1]
+    positive = (a > 0) & (b > 0)
+    estimates[np.flatnonzero(available)[positive]] = np.log(a[positive] / b[positive]) / np.log(
+        2.0
+    )
+    return estimates
 
 
 def _dedh_moment_path(ordered: np.ndarray, k_values: np.ndarray) -> np.ndarray:
@@ -338,20 +335,11 @@ def select_stable_integer_window(
         window = SelectionWindow(int(levels[0]), int(levels[-1]))
         return center, window, path_xi
 
-    scores: list[float] = []
-    windows: list[slice] = []
-    for start in range(0, levels.size - min_window + 1):
-        stop = start + min_window
-        window_values = path_xi[start:stop]
-        local_var = float(np.mean((window_values - window_values.mean()) ** 2))
-        if window_values.size >= 3:
-            curvature = float(np.mean(np.abs(np.diff(window_values, n=2))))
-        else:
-            curvature = 0.0
-        scores.append(local_var + 0.5 * curvature)
-        windows.append(slice(start, stop))
-
-    best = windows[int(np.argmin(scores))]
+    windows = np.lib.stride_tricks.sliding_window_view(path_xi, min_window)
+    local_var = np.mean((windows - windows.mean(axis=1, keepdims=True)) ** 2, axis=1)
+    curvature = np.mean(np.abs(np.diff(windows, n=2, axis=1)), axis=1) if min_window >= 3 else 0.0
+    start = int(np.argmin(local_var + 0.5 * curvature))
+    best = slice(start, start + min_window)
     best_k = levels[best]
     best_xi = path_xi[best]
     chosen_k = int(best_k[(best_k.size - 1) // 2])

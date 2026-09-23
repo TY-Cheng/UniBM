@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 
 from .._validation import as_1d_float_array
+from ._mode import weighted_density
 
 
 def _validate_quantile(quantile: float) -> float:
@@ -58,12 +59,8 @@ def estimate_sample_mode(sample: np.ndarray | list[float], *, warn: bool = True)
         sigma = max(np.std(log_sample, ddof=1), 1e-3)
     bandwidth = max(float(1.059 * sigma * log_sample.size ** (-0.2)), 1e-3)
     grid = np.linspace(log_sample.min(), log_sample.max(), 256)
-    density = np.zeros(grid.size, dtype=float)
-    chunk_size = 8192
-    for start in range(0, log_sample.size, chunk_size):
-        chunk = log_sample[start : start + chunk_size]
-        kernel = np.exp(-0.5 * ((grid[:, None] - chunk[None, :]) / bandwidth) ** 2)
-        density += kernel.sum(axis=1)
+    values, counts = np.unique(log_sample, return_counts=True)
+    density = weighted_density(values, counts[None, :], grid[None, :], np.array([bandwidth]))[0]
     density /= log_sample.size
     # For z = log(1 + x), dz/dx = exp(-z); maximize density in x, not in z.
     density_on_original_scale = density * np.exp(-grid)

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=77", "Cython>=3.1,<4"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "unibm"
@@ -56,17 +56,31 @@ dev = [
     "ruff",
 ]
 
-[tool.hatch.build]
-exclude = ["/**/__pycache__", "/**/.DS_Store"]
+[tool.setuptools]
+include-package-data = false
 
-[tool.hatch.version]
-path = "src/unibm/__about__.py"
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["unibm", "unibm.*"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/unibm"]
+[tool.setuptools.dynamic]
+version = { attr = "unibm.__about__.__version__" }
 
-[tool.hatch.build.targets.sdist]
-include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src/unibm"]
+[tool.setuptools.package-data]
+unibm = ["py.typed"]
+
+[tool.cibuildwheel]
+build = "cp3{11,12,13,14}-*"
+skip = "*-musllinux_*"
+test-requires = ["pytest"]
+test-command = [
+    'python -c "from unibm.evi import _kernels"',
+    'python "{project}/tests/test_unibm_package_smoke.py"',
+    'python -m pytest -q -o pythonpath= "{project}/tests/test_acceleration.py"',
+]
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
 [[tool.uv.index]]
 name = "testpypi"

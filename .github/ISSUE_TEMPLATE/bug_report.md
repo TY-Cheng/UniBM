@@ -20,7 +20,10 @@ settings; for time-series data, explain what one observation represents.
 
 - UniBM commit or version:
 - Python version and operating system:
+- CPU architecture and installation route (wheel, source, or editable checkout):
 - Relevant dependency versions:
+- For performance or numerical differences: native extension enabled/disabled,
+  `UNIBM_NO_EXTENSIONS`, `n_threads`, outer worker count, and BLAS thread settings:
 
 ## Additional context
 

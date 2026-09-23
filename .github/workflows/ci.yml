@@ -37,6 +37,19 @@ jobs:
       - name: Run unit tests with coverage
         run: uv run pytest -n auto --cov=src/unibm --cov-report=term-missing --cov-fail-under=89
 
+      - name: Verify native acceleration was built
+        run: uv run python -c "from unibm.evi._accelerator import kernels; assert kernels is not None"
+
+      - name: Verify native acceleration is disabled for fallback checks
+        env:
+          UNIBM_NO_EXTENSIONS: "1"
+        run: uv run --no-sync python -c "from unibm.evi._accelerator import kernels; assert kernels is None"
+
+      - name: Run the pure Python fallback suite
+        env:
+          UNIBM_NO_EXTENSIONS: "1"
+        run: uv run --no-sync pytest -n auto --ignore=tests/test_distribution_artifacts.py
+
       - name: Check formatting
         run: uv run ruff format --check .
 

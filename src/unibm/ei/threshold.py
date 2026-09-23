@@ -209,6 +209,7 @@ def _kgaps_profile_fit(
     positive = scaled_gaps[~zero_mask]
     n_zero = int(np.sum(zero_mask))
     n_pos = int(positive.size)
+    sum_positive = float(np.sum(positive))
 
     def loglik(theta: float) -> float:
         """Evaluate the K-gap log-likelihood inside the numerically bounded theta domain."""
@@ -217,7 +218,7 @@ def _kgaps_profile_fit(
             return -np.inf
         value = n_zero * np.log(max(1.0 - theta, EI_TINY))
         if n_pos:
-            value += n_pos * (2.0 * np.log(theta)) - theta * float(np.sum(positive))
+            value += n_pos * (2.0 * np.log(theta)) - theta * sum_positive
         return float(value)
 
     def objective(theta: float) -> float:

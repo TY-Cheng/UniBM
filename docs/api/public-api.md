@@ -94,6 +94,13 @@ extrapolated design-life levels**. See
 
 ## Top-level convenience imports
 
+The current source also accepts `n_threads` on EVI estimation and EVI/EI
+bootstrap calls. Optional native kernels preserve the same public API. See
+[thread budgets](../getting-started.md#bootstrap-threads-source-checkout) and
+[native acceleration](../getting-started.md#optional-native-acceleration-source-checkout)
+for defaults, nested parallelism, and the NumPy fallback. These additions are
+not in PyPI 0.1.0.
+
 The current source supports:
 
 ```python

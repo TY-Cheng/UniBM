@@ -26,6 +26,7 @@ from ._quantile_bootstrap import (
     segment_multiplicities,
 )
 from .summaries import _validate_quantile
+from ._mode import prepare_mode_counts, mode_from_counts
 
 
 _MODE_BOOTSTRAP_GRID_POINTS = 256
@@ -77,9 +78,9 @@ class BlockSummaryBootstrapBackbone:
 def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None):
     """Own one call's count tables and pool; map deterministic segment draws.
 
-    Only NumPy/SciPy work runs in threads. The caller generates every draw
-    before dispatch, so results and adaptive stopping do not depend on task
-    scheduling. Tables share a bounded budget; other temporaries are batched
+    NumPy/SciPy work and optional GIL-free kernels run in threads. The caller
+    generates every draw before dispatch, so results and adaptive stopping
+    do not depend on scheduling. Tables share a bounded budget; temporaries are batched
     per worker. One complete maxima row is the irreducible working set.
     """
     banks = [
@@ -97,6 +98,8 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
             if target == "quantile" and np.asarray(quantile).dtype == np.dtype(float)
             else None
         )
+        if target == "mode":
+            table = prepare_mode_counts(bank, max_bytes=remaining)
         tables.append(table)
         if table is not None:
             remaining -= table[0].nbytes + table[1].nbytes
@@ -109,6 +112,21 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
             def column(index):
                 """Limit expanded maxima and mode temporaries independently of R."""
                 bank, table = banks[index], tables[index]
+                if table is not None and target == "mode":
+                    values, segment_counts = table
+                    rows = max(1, BOOTSTRAP_WORKING_BYTES // max(1, len(values) * 8 * 8))
+                    return (
+                        np.concatenate(
+                            [
+                                mode_from_counts(
+                                    values, weights[start : start + rows] @ segment_counts
+                                )
+                                for start in range(0, len(draws), rows)
+                            ]
+                        )
+                        if len(draws)
+                        else np.empty(0)
+                    )
                 if table is not None:
                     return quantile_from_counts(
                         table,

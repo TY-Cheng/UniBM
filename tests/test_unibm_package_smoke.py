@@ -61,6 +61,23 @@ class UniBmPackageSmokeTests(unittest.TestCase):
             unibm.ei.plot_ei_fit(fit, file_path=output, save=True, close=True)
             self.assertTrue(output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_accelerated_targets_work_in_an_installed_distribution(self) -> None:
+        """Exercise bootstrap kernels, CI and threads without repository imports."""
+        sample = self._sample(size=256)
+        for target in ("mode", "quantile"):
+            fit = unibm.evi.estimate_target_scaling(
+                sample,
+                target=target,
+                quantile=0.95,
+                regression="FGLS",
+                bootstrap_reps=37,
+                random_state=7,
+                n_threads=2,
+            )
+            self.assertTrue(np.isfinite(fit.slope))
+            self.assertTrue(np.all(np.isfinite(fit.confidence_interval)))
+            self.assertEqual(fit.bootstrap_reps_used, 37)
+
     def test_top_level_package_keeps_new_grouped_subpackages_available(self) -> None:
         self.assertIs(unibm.evi.estimate_evi_quantile, unibm.estimate_evi_quantile)
         self.assertIs(unibm.ei.prepare_ei_bundle, prepare_ei_bundle)

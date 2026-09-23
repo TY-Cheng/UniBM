@@ -32,11 +32,15 @@ just check
 ```
 
 No `.env` or external report project is required. Reports default to `out/reports/`.
-Copy `.env.example` only to set `UNIBM_REPORT_DIR` or the uv environment location.
+Use `.env.example` to set `UNIBM_REPORT_DIR`, the uv environment location, or
+the optional native-extension switch described below.
 Top-level `just` tasks load it automatically when present and sync the development
 environment before they run. For ad hoc commands with these overrides, use
 `just --command uv run ...` or `just --command uv sync --locked --dev`.
 Plain uv commands do not automatically load `.env` before selecting an environment.
+The `just` recipes require zsh; on Windows without zsh, use `uv sync --locked --dev`
+and direct uv commands with environment overrides exported in your shell. See
+[Development setup](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#development-setup).
 The repo-level workflow details stay in the repository `README.md` and
 `justfile`. Use this site when you want the `unibm` package API itself.
 
@@ -111,7 +115,8 @@ The current source adds `n_threads` to EVI estimation and EVI/EI bootstrap
 functions. This option is not part of the published 0.1.0 release.
 
 - `None` (default) selects a small pool from the workload and available CPUs;
-  small samples stay serial. Automatic selection uses at most eight threads.
+  fewer than 2,048 observations stay serial. Automatic selection uses at most
+  eight threads. This is a size heuristic, not a runtime speed measurement.
 - A positive integer sets an upper limit; `1` runs the bootstrap serially.
   Fewer threads may be used when there are fewer independent tasks or CPUs.
 - This controls UniBM's bootstrap pool. NumPy/SciPy BLAS settings remain under
@@ -134,6 +139,25 @@ selection. A fixed seed retains the same draws and adaptive stopping regardless
 of thread count. Working arrays are processed in batches; retained inputs,
 count tables, output samples, and concurrent workers still contribute to memory
 use, so the batch budget is not a total process memory limit.
+
+## Optional native acceleration (source checkout)
+
+The unreleased source checkout accelerates EVI mode KDE and bootstrap quantile
+rank searches with optional Cython kernels. The same APIs and `n_threads` setting
+work with or without the extension. Mode uses repeated-maxima multiplicities;
+tail estimators, FGLS regression and EI profile intervals also reuse computations
+within NumPy/SciPy. Mean bootstrap retains its original reduction order.
+
+Source installation attempts to build the extension and retains NumPy execution
+if a C compiler is unavailable. Set `UNIBM_NO_EXTENSIONS=1` before building for a
+pure Python distribution, or before starting Python to disable native execution.
+The switch is read once at import; restart Python after changing it. It disables
+UniBM's extension only, not NumPy/SciPy's own compiled code or BLAS threads.
+This does not reduce bootstrap replicates or relax adaptive precision tolerances.
+Native wheels are specific to their Python/platform tags; a pure Python wheel
+provides the fallback wherever the runtime dependencies are supported. See the
+[build and platform notes](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration).
+These changes are not part of PyPI version 0.1.0.
 
 ## Plotting
 

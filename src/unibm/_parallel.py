@@ -1,4 +1,4 @@
-"""Small, per-call thread budgets for NumPy/SciPy bootstrap work."""
+"""Small, per-call thread budgets for independent bootstrap work."""
 
 from __future__ import annotations
 

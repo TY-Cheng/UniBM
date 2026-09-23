@@ -92,8 +92,8 @@ def _fit_pooled_z_model(
         )
         inv_cov = np.linalg.pinv(regularized)
         normal_matrix = X.T @ inv_cov @ X
-        beta = np.linalg.pinv(normal_matrix) @ (X.T @ inv_cov @ z)
         cov_beta = np.linalg.pinv(normal_matrix)
+        beta = cov_beta @ (X.T @ inv_cov @ z)
     else:
         normal_matrix = X.T @ X
         beta, *_ = np.linalg.lstsq(X, z, rcond=None)
@@ -266,13 +266,14 @@ def _northrop_profile_fit(
     if stats.size < 2:
         raise ValueError("Northrop likelihood requires at least two finite positive statistics.")
     theta_hat = float(np.clip(1.0 / np.mean(stats), EI_TINY, 1.0))
+    sum_stats = np.sum(stats)  # Sufficient statistic shared by all profile evaluations.
 
     def loglik(theta: float) -> float:
         """Evaluate the exponential-rate log-likelihood on the legal theta range."""
         theta = float(theta)
         if not (EI_TINY <= theta <= 1.0):
             return -np.inf
-        return float(stats.size * np.log(theta) - theta * np.sum(stats))
+        return float(stats.size * np.log(theta) - theta * sum_stats)
 
     interval = (float("nan"), float("nan"))
     ci_variant = "profile"

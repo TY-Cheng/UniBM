@@ -24,6 +24,18 @@ Use Python 3.11 or later, [uv](https://docs.astral.sh/uv/), and
 just --command uv sync --locked --dev
 ```
 
+The `just` recipes require zsh. On Windows without zsh, use uv directly:
+
+```sh
+uv sync --locked --dev
+uv run pytest -n auto --cov=src/unibm --cov-report=term-missing --cov-fail-under=89
+uv run ruff format --check .
+uv run ruff check .
+```
+
+Export any environment overrides in your shell first; these direct commands do
+not load `.env`. CI likewise runs uv directly on each operating system.
+
 Library development, tests, and documentation builds do not require provider credentials,
 a report checkout, or a custom `.env` file.
 
@@ -43,8 +55,12 @@ For documentation changes, run:
 just --command uv run mkdocs build --strict
 ```
 
-CI tests Python 3.11 and 3.14 on Linux, macOS, and Windows, and builds the documentation.
-In the pull request, state the
+CI is configured to test native and NumPy fallback execution on Python 3.11 and
+3.14 across Linux, macOS, and Windows, and to build the documentation. A separate
+wheel workflow targets CPython 3.11–3.14 on Linux glibc x86_64/aarch64, macOS
+Intel/ARM64, and Windows AMD64. Confirm the jobs passed for the exact commit;
+the matrix is not evidence that a particular build succeeded. Those wheels are
+CI artifacts; the workflow does not publish. In the pull request, state the
 checks you actually ran and any relevant checks you did not run.
 
 ## Research results and data
@@ -72,50 +88,85 @@ when behavior changes. Contributors are responsible for reviewing and understand
 submitted code, including tool-assisted changes. Code contributions are made under the
 project's [MIT License](LICENSE).
 
+## Native acceleration
+
+The source checkout optionally compiles two EVI kernels: repeated-value KDE and
+integer quantile rank search. Statistical APIs, fitting and CI construction stay
+in Python/NumPy/SciPy. Cython and setuptools are build dependencies only; the
+extension uses Python buffers without the NumPy C API, OpenMP, fast-math or
+machine-specific CPU flags. Existing per-call thread pools run the GIL-free work.
+
+Source builds use the host C compiler (Xcode Command Line Tools on macOS, a C
+compiler and Python development headers on Linux, or Visual Studio C++ Build Tools
+on Windows). If compilation is unavailable, installation retains the NumPy
+implementation. Set `UNIBM_NO_EXTENSIONS=1` before building to explicitly build a
+pure Python wheel, or before starting Python to disable an installed extension.
+The setting is read once at import; changing it inside a running process has no
+effect. All public methods remain available in both modes.
+
+For a local fallback check without rebuilding the installed extension (zsh/bash):
+
+```sh
+UNIBM_NO_EXTENSIONS=1 just --command uv run --no-sync pytest -q tests/test_acceleration.py tests/test_bootstrap_parallel.py
+```
+
+In PowerShell, set `$env:UNIBM_NO_EXTENSIONS = "1"` before the equivalent direct
+`uv run --no-sync pytest ...` command, then remove it with
+`Remove-Item Env:UNIBM_NO_EXTENSIONS` when finished.
+
+After editing `.pyx` sources, rebuild the editable install:
+
+```sh
+just --command uv sync --locked --dev --reinstall-package unibm
+just --command uv run python -c "from unibm.evi._accelerator import kernels; assert kernels is not None"
+```
+
 ## Local release preparation
 
 [Version 0.1.0 is published on PyPI](https://pypi.org/project/unibm/0.1.0/).
-The commands below illustrate that release's workflow. For a new release, update
-`src/unibm/__about__.py` and use matching new versioned paths throughout; preserve
-the existing release artifacts. Build and inspect both distributions locally:
+The optimizations in the source checkout are unreleased. Set a new version in
+`src/unibm/__about__.py` before preparing the next release; preserve old artifacts.
 
 ```sh
 just --command uv run pytest -q tests/test_distribution_artifacts.py
-just --command uv build --out-dir dist/release-0.1.0
-just --command uvx twine check --strict dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
+just --command uv build --out-dir dist/release-next
+just --command uvx twine check --strict dist/release-next/*
 ```
 
-The artifact test checks archive contents and installs both the wheel and source
-distribution into isolated environments outside the checkout. It runs EVI/EI
-estimation, design-life intervals, and PNG export using only declared runtime
-dependencies. `uv build` also builds its wheel from the source distribution by
-default. CI runs the artifact test on each supported Python version.
+Build the portable fallback separately (zsh/bash):
+
+```sh
+UNIBM_NO_EXTENSIONS=1 just --command uv build --out-dir dist/release-next-pure
+just --command uvx twine check --strict dist/release-next-pure/*
+```
+
+On PowerShell, use the environment setting above with the direct uv commands.
+Take the `py3-none-any.whl` from the pure build and one source distribution from
+the reviewed build; do not upload two copies of the same-version sdist.
+
+The artifact test builds a native-capable wheel, a source distribution and an
+explicit pure Python wheel. It installs each outside the checkout and exercises
+EVI/EI estimation, mode and quantile bootstrap, design-life intervals, and PNG
+export using declared runtime dependencies. `uv build` builds its wheel from the
+source distribution by default. A local native wheel covers only its tagged
+Python/platform combination; use the wheel CI artifacts for other targets.
+The current wheel matrix excludes musl Linux, Windows ARM64, PyPy, and
+free-threaded CPython. The pure wheel provides the NumPy implementation where
+compatible runtime dependencies are available; it does not establish support
+for every interpreter or platform.
 
 Run `just check-full` and the strict documentation build before release. Review
-the exact two files being uploaded; do not publish a wildcard covering old builds.
-The wheel contains only `unibm` and distribution metadata; the source distribution
-adds the build configuration, README, and license. Neither contains research
-scripts, datasets, local configuration, or generated reports.
+the exact files and SHA256 hashes to upload, including the tested platform wheels
+and a pure Python wheel for platforms without a native build. The wheel contains
+only `unibm` and distribution metadata. The source distribution also contains
+build configuration, the `.pyx` source, README, license and package metadata;
+research scripts, datasets, local configuration and generated reports are excluded.
 
-Building does not publish anything. When the maintainer is ready to upload, the
-existing `testpypi` index can be used for a rehearsal:
-
-```sh
-just --command uv publish --index testpypi dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
-```
-
-For local uploads, supply the appropriate index's API token through the process
-environment variable `UV_PUBLISH_TOKEN`; do not put token values in repository
-files or command history. Trusted publishing instead requires a configured CI
-publisher. After verifying the TestPyPI installation, use PyPI credentials to
-upload the same reviewed files to PyPI as a separate action:
-
-```sh
-just --command uv publish dist/release-0.1.0/unibm-0.1.0-py3-none-any.whl dist/release-0.1.0/unibm-0.1.0.tar.gz
-```
-
-Confirm the uploaded version installs outside the checkout before updating the
-installation instructions in the README and getting-started guide.
-Creating Git tags, GitHub releases, and publishing the documentation are separate
-maintainer actions. See the [uv publishing guide](https://docs.astral.sh/uv/guides/package/)
-for authentication and installation details.
+Building does not publish. Upload the reviewed files first with `uv publish
+--index testpypi` for rehearsal, then with `uv publish` for PyPI as a separate
+maintainer action. Supply file paths explicitly rather than a wildcard of old
+builds. Supply local tokens via `UV_PUBLISH_TOKEN`, never repository files or
+command history; trusted publishing requires a separately configured publisher.
+Verify installation outside the checkout before updating release installation
+instructions. Git tags, GitHub releases and documentation publication remain
+separate maintainer actions. See the [uv publishing guide](https://docs.astral.sh/uv/guides/package/).

@@ -44,6 +44,17 @@ class DistributionArtifactTests(unittest.TestCase):
         )
         cls._wheel = next(build_dir.glob(f"unibm-{PACKAGE_VERSION}-*.whl"))
         cls._sdist = next(build_dir.glob(f"unibm-{PACKAGE_VERSION}.tar.gz"))
+        subprocess.run(
+            ["uv", "build", "--out-dir", str(build_dir / "pure")],
+            cwd=ROOT,
+            env={**os.environ, "UNIBM_NO_EXTENSIONS": "1"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cls._pure_wheel = next(
+            (build_dir / "pure").glob(f"unibm-{PACKAGE_VERSION}-py3-none-any.whl")
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -54,7 +65,10 @@ class DistributionArtifactTests(unittest.TestCase):
         with zipfile.ZipFile(self._wheel) as wheel:
             names = wheel.namelist()
             package_files = {name for name in names if name.startswith("unibm/")}
-            self.assertEqual(package_files, EXPECTED_PACKAGE_FILES)
+            native = {name for name in package_files if name.endswith((".so", ".pyd"))}
+            self.assertTrue(all(name.startswith("unibm/evi/_kernels.") for name in native))
+            self.assertLessEqual(len(native), 1)
+            self.assertEqual(package_files - native, EXPECTED_PACKAGE_FILES)
             self.assertTrue(
                 all(
                     name.startswith(("unibm/", f"unibm-{PACKAGE_VERSION}.dist-info/"))
@@ -79,7 +93,7 @@ class DistributionArtifactTests(unittest.TestCase):
 
     def test_distributions_install_and_run_without_the_checkout(self) -> None:
         """Exercise both install routes using only declared runtime dependencies."""
-        for artifact in (self._wheel, self._sdist):
+        for artifact in (self._wheel, self._sdist, self._pure_wheel):
             with self.subTest(artifact=artifact.name):
                 result = subprocess.run(
                     [
@@ -105,7 +119,7 @@ class DistributionArtifactTests(unittest.TestCase):
 
     def test_sdist_contains_library_sources_but_not_repo_workflow_directories(self) -> None:
         with tarfile.open(self._sdist, "r:gz") as sdist:
-            names = sdist.getnames()
+            names = [member.name for member in sdist.getmembers() if member.isfile()]
 
         prefix = f"unibm-{PACKAGE_VERSION}/"
         package_prefix = f"{prefix}src/"
@@ -114,11 +128,70 @@ class DistributionArtifactTests(unittest.TestCase):
             for name in names
             if name.startswith(f"{package_prefix}unibm/")
         }
-        self.assertEqual(package_files, EXPECTED_PACKAGE_FILES)
+        self.assertEqual(package_files, EXPECTED_PACKAGE_FILES | {"unibm/evi/_kernels.pyx"})
         self.assertIn(f"{prefix}README.md", names)
-        # Hatchling preserves .gitignore as part of the source build configuration.
-        build_files = {".gitignore", "LICENSE", "README.md", "pyproject.toml", "PKG-INFO"}
+        self.assertTrue(
+            all(
+                name.startswith((f"{package_prefix}unibm/", f"{package_prefix}unibm.egg-info/"))
+                for name in names
+                if name.startswith(package_prefix)
+            )
+        )
+        build_files = {
+            "LICENSE",
+            "README.md",
+            "pyproject.toml",
+            "PKG-INFO",
+            "MANIFEST.in",
+            "setup.py",
+            "setup.cfg",
+        }
         self.assertEqual(
             {name.removeprefix(prefix) for name in names if not name.startswith(package_prefix)},
             build_files,
         )
+
+    def test_pure_wheel_contains_no_binary_or_build_sources(self) -> None:
+        with zipfile.ZipFile(self._pure_wheel) as wheel:
+            files = {name for name in wheel.namelist() if name.startswith("unibm/")}
+        self.assertEqual(files, EXPECTED_PACKAGE_FILES)
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--isolated",
+                "--no-project",
+                "--python",
+                sys.executable,
+                "--with",
+                str(self._pure_wheel),
+                "python",
+                "-I",
+                "-c",
+                "from unibm.evi._accelerator import kernels; assert kernels is None",
+            ],
+            cwd=self._tmpdir.name,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipIf(sys.platform == "win32", "MSVC does not use the CC environment variable")
+    def test_missing_compiler_still_builds_an_installable_wheel(self) -> None:
+        output = Path(self._tmpdir.name) / "no-compiler"
+        result = subprocess.run(
+            ["uv", "build", str(self._sdist), "--wheel", "--out-dir", str(output)],
+            cwd=self._tmpdir.name,
+            env={**os.environ, "UNIBM_NO_EXTENSIONS": "0", "CC": "/unibm-test/no-compiler"},
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        wheel_path = next(output.glob("*.whl"))
+        with zipfile.ZipFile(wheel_path) as wheel:
+            files = {name for name in wheel.namelist() if name.startswith("unibm/")}
+        self.assertEqual(files, EXPECTED_PACKAGE_FILES)

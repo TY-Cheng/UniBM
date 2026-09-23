@@ -50,15 +50,38 @@ cd UniBM
 just check
 ```
 
+The `just` recipes use zsh. On Windows without zsh, use the direct uv commands
+in [Development setup](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#development-setup).
+
 No `.env` or external project is required. Defaults are `data/`, `out/reports/`,
-and uv's normal project environment. Copy `.env.example` only to override the
-report destination or environment location. Top-level `just` tasks load `.env`
+and uv's normal project environment. `.env.example` documents optional report,
+environment, and native-extension settings. Top-level `just` tasks load `.env`
 and sync the development environment automatically.
 
 For ad hoc uv commands that should use `.env`, use `just --command`, for example
 `just --command uv run pytest -q tests/test_unibm_cdf.py`. A plain `uv sync` or
 `uv run` does not automatically load `.env` before choosing its project environment;
 without an exported override it uses `.venv/`.
+
+## Acceleration in the source checkout
+
+The current source includes NumPy/SciPy optimizations and optional Cython kernels
+for EVI mode KDE and bootstrap quantile rank searches. Source builds attempt to
+compile these kernels; without a C compiler, the same APIs use NumPy. Set
+`UNIBM_NO_EXTENSIONS=1` before building for a pure Python distribution, or before
+starting Python to disable an installed extension.
+
+EVI estimation and EVI/EI bootstrap accept `n_threads=None` for automatic thread
+selection, or a positive integer cap. Use `n_threads=1` inside an outer process
+pool; repository workflows already assign this inner budget to their workers.
+NumPy/SciPy BLAS thread settings remain separate. Design-life point estimates
+and intervals reuse the EVI fit without another bootstrap.
+
+These changes are **not included in PyPI 0.1.0**. See
+[Getting Started](https://ty-cheng.github.io/UniBM/getting-started/#bootstrap-threads-source-checkout)
+for thread and memory behavior, and
+[Native acceleration](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration)
+for build instructions.
 
 ## Results and reports
 

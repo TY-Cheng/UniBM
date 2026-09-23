@@ -1,0 +1,41 @@
+name: wheels
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+          - os: macos-15-intel
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: AMD64
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Build and test CPython 3.11–3.14 wheels
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+        run: uvx cibuildwheel==4.2.1 --output-dir wheelhouse
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error

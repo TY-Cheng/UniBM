@@ -143,8 +143,8 @@ def _fit_linear_model(
         )
         inv_cov = np.linalg.pinv(regularized)
         normal_matrix = X.T @ inv_cov @ X
-        beta = np.linalg.pinv(normal_matrix) @ (X.T @ inv_cov @ y)
         cov_beta = np.linalg.pinv(normal_matrix)
+        beta = cov_beta @ (X.T @ inv_cov @ y)
         fitted = X @ beta
         resid = y - fitted
         objective = float(resid @ inv_cov @ resid)
@@ -156,7 +156,7 @@ def _fit_linear_model(
         fitted = X @ beta
         resid = y - fitted
         xtx_inv = np.linalg.pinv(normal_matrix)
-        meat = X.T @ np.diag(resid**2) @ X
+        meat = (X.T * (resid**2)) @ X
         cov_beta = xtx_inv @ meat @ xtx_inv
         objective = float(resid @ resid)
         covariance_condition_number_raw = None

@@ -1,0 +1,5 @@
+include LICENSE README.md pyproject.toml setup.py
+recursive-include src/unibm *.py *.pyx py.typed
+prune tests
+prune build
+global-exclude __pycache__ *.pyc *.so *.pyd .DS_Store

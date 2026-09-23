@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import _accelerator
+
 
 CountTable = tuple[np.ndarray, np.ndarray]
 
@@ -58,8 +60,9 @@ def quantile_from_counts(
 ) -> np.ndarray:
     """Evaluate NumPy's median-unbiased order ranks and interpolation exactly.
 
-    Small banks use dense integer products (not BLAS); large ones use a
-    vectorized binary search to avoid an R-by-distinct-values temporary.
+    Native kernels search integer count tables without holding the GIL.
+    Without them, small banks use dense integer products (not BLAS); large
+    ones use a vectorized search to avoid an R-by-distinct-values temporary.
     Interpolation retains NumPy's two-sided arithmetic and boundary clipping.
     """
     values, prefix = table
@@ -68,7 +71,11 @@ def quantile_from_counts(
     floor = int(np.floor(index))
     gamma = float(index - floor)
     lower, upper = max(0, min(floor, size - 1)), max(0, min(floor + 1, size - 1))
-    if size <= 4096 and len(weights) * len(values) * 8 <= max_bytes:
+    if _accelerator.kernels is not None:
+        ranks = np.empty((len(weights), 2), dtype=np.int64)
+        _accelerator.kernels.rank_indices(prefix, weights, lower, upper, ranks)
+        first, second = ranks[:, 0], ranks[:, 1]
+    elif size <= 4096 and len(weights) * len(values) * 8 <= max_bytes:
         cumulative = weights @ prefix.T
         first = np.sum(cumulative <= lower, axis=1)
         second = np.sum(cumulative <= upper, axis=1)

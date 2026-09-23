@@ -47,12 +47,14 @@ __pycache__/
 *.py[codz]
 *$py.class
 *.so
+*.pyd
 
 # Packaging / build
 .Python
 MANIFEST
 build/
 dist/
+/wheelhouse/
 *.egg
 *.egg-info/
 

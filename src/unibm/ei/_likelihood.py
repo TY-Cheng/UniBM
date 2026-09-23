@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 import warnings
 
 import numpy as np
@@ -39,6 +40,12 @@ def scale_1d_pseudo_likelihood(
     return adjusted_loglik
 
 
+@lru_cache(maxsize=32)
+def _profile_cutoff(alpha: float) -> float:
+    """Reuse the scalar chi-square quantile across fits at the same CI level."""
+    return float(chi2.ppf(1.0 - alpha, df=1))
+
+
 def find_1d_profile_likelihood_intervals(
     loglik_func: Callable[[float], float],
     mle: float,
@@ -56,7 +63,7 @@ def find_1d_profile_likelihood_intervals(
     provide an exact boundary correction or an equal-tailed interval.
     """
     max_loglik = float(loglik_func(mle))
-    threshold_value = max_loglik - 0.5 * float(chi2.ppf(1.0 - alpha, df=1))
+    threshold_value = max_loglik - 0.5 * _profile_cutoff(alpha)
 
     def root_func(theta: float) -> float:
         """Measure log-likelihood above the cutoff; treat evaluation errors as outside."""
