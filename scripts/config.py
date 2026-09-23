@@ -69,8 +69,13 @@ def _resolve_data_root(*, code_root: Path) -> Path:
 
 
 def _common_root(*paths: Path) -> Path:
-    """Return the common parent covering all provided paths."""
-    return Path(os.path.commonpath([str(path.resolve()) for path in paths]))
+    """Use the common parent, or the code root when Windows drives differ."""
+    resolved = [path.resolve() for path in paths]
+    try:
+        return Path(os.path.commonpath([str(path) for path in resolved]))
+    except ValueError:
+        # Absolute paths on different Windows drives have no common ancestor.
+        return resolved[0]
 
 
 def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:

@@ -25,8 +25,12 @@ from shared.runtime import status
 
 
 def _relative(path: Path, *, root: Path) -> str:
-    """Return a stable repo-relative path for manifest serialization."""
-    return str(path.resolve().relative_to(root.resolve()))
+    """Serialize a workspace-relative path, or an absolute path outside it."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(root.resolve()))
+    except ValueError:
+        return str(resolved)
 
 
 def _git_output(repo_root: Path, *args: str) -> str:

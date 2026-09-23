@@ -43,7 +43,8 @@ For documentation changes, run:
 just --command uv run mkdocs build --strict
 ```
 
-CI tests Python 3.11–3.14 and builds the documentation. In the pull request, state the
+CI tests Python 3.11 and 3.14 on Linux, macOS, and Windows, and builds the documentation.
+In the pull request, state the
 checks you actually ran and any relevant checks you did not run.
 
 ## Research results and data

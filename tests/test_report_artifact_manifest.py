@@ -1,17 +1,31 @@
 from __future__ import annotations
 
 import json
+import ntpath
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from reports.artifact_manifest import build_report_subset_manifest
+from config import _common_root
+from reports.artifact_manifest import _relative, build_report_subset_manifest
 
 
 class ReportArtifactManifestTests(unittest.TestCase):
+    def test_cross_drive_report_paths_remain_absolute(self) -> None:
+        # Use Windows path rules on every OS; no Windows drives are needed.
+        code = Mock(spec=Path)
+        code.resolve.return_value = PureWindowsPath("D:/UniBM")
+        report = Mock(spec=Path)
+        report.resolve.return_value = PureWindowsPath("C:/reports")
+        with patch("config.os.path.commonpath", ntpath.commonpath):
+            workspace = _common_root(code, report)
+        self.assertEqual(workspace, code.resolve())
+        self.assertEqual(_relative(code, root=code), ".")
+        self.assertEqual(_relative(report, root=code), str(report.resolve()))
+
     def test_index_records_its_creation_state_without_generating_artifacts(self) -> None:
         code_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
