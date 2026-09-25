@@ -11,7 +11,7 @@ from .._parallel import validate_n_threads
 from .._bootstrap_precision import matching_precision_metadata
 from .._validation import (
     as_1d_float_array,
-    subset_covariance_by_labels,
+    _validated_covariance_matrix,
     validate_covariance_shrinkage,
 )
 from ._regression import (
@@ -227,13 +227,23 @@ def estimate_target_scaling(
     bootstrap = bootstrap_result
     if bootstrap is None and resolved_bootstrap_reps == "adaptive":
         levels = curve.positive_block_sizes[plateau.start : plateau.stop]
+        selected = slice(plateau.start, plateau.stop)
+        design_x = np.asarray(plateau.x, dtype=float)
+        design = np.column_stack([np.ones_like(design_x), design_x])
 
         def evaluate(cov: np.ndarray, _rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Return xi and its Wald endpoints plus SE scales for MC precision checks."""
-            selected_cov = subset_covariance_by_labels(
-                cov, curve.positive_block_sizes, levels, context="bootstrap covariance"
+            # The internally generated covariance has the curve's fixed order.
+            # Still validate the full matrix before taking the fixed window.
+            validated, _ = _validated_covariance_matrix(cov, context="bootstrap covariance")
+            fit = _fit_linear_model(
+                plateau.x,
+                plateau.y,
+                validated[selected, selected],
+                shrinkage_policy,
+                design=design,
+                diagnostics=False,
             )
-            fit = _fit_linear_model(plateau.x, plateau.y, selected_cov, shrinkage_policy)
             xi, se = fit["slope"], fit["standard_error"]
             return np.asarray([xi, xi - Z_CRIT_95 * se, xi + Z_CRIT_95 * se]), np.full(3, se)
 

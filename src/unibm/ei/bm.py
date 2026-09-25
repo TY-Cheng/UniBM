@@ -71,7 +71,9 @@ def _fit_pooled_z_model(
     *,
     covariance: np.ndarray | None = None,
     covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
-) -> dict[str, float | bool | np.ndarray]:
+    design: np.ndarray | None = None,
+    diagnostics: bool = True,
+) -> dict[str, float | bool | np.ndarray | None]:
     """Fit a non-negative intercept to a finite 1D vector of log-reciprocal EI values.
 
     A matching square covariance selects regularized GLS and supplies coefficient
@@ -80,10 +82,12 @@ def _fit_pooled_z_model(
     bootstrap diagnostics; reported SEs are not boundary-adjusted distributions.
 
     Return the intercept, SE, residual objective, normal-matrix condition number,
-    fitted vector, coefficient covariance, and boundary status.
+    fitted vector, coefficient covariance, and boundary status. Adaptive
+    monitoring may reuse its fixed design and skip the unused condition number;
+    validation, coefficient calculations, and final-fit diagnostics are unchanged.
     """
     z = np.asarray(z_values, dtype=float)
-    X = np.ones((z.size, 1), dtype=float)
+    X = np.ones((z.size, 1), dtype=float) if design is None else design
 
     if covariance is not None:
         regularized = _regularize_ei_covariance(
@@ -110,10 +114,7 @@ def _fit_pooled_z_model(
         dof = max(z.size - X.shape[1], 1)
         sigma2 = objective / float(dof) if z.size > X.shape[1] else 0.0
         cov_beta = sigma2 * np.linalg.pinv(normal_matrix)
-    try:
-        condition_number = float(np.linalg.cond(normal_matrix))
-    except np.linalg.LinAlgError:
-        condition_number = float("inf")
+    condition_number = matrix_condition_number(normal_matrix) if diagnostics else None
 
     return {
         "intercept": float(beta[0]),

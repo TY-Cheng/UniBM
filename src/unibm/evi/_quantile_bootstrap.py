@@ -11,22 +11,25 @@ CountTable = tuple[np.ndarray, np.ndarray]
 
 
 def prepare_quantile_counts(bank: np.ndarray, *, max_bytes: int) -> CountTable | None:
-    """Cache per-segment cumulative counts when a finite positive bank fits.
+    """Cache per-segment cumulative counts when a finite nonnegative bank fits.
 
     Each column is one segment; row k counts its observations at or below
-    distinct value k. Nonfinite/nonpositive banks retain ordinary NumPy
-    quantiles, preserving their invalid-summary and warning behavior.
-    The bound is conservative and avoids constructing a huge count table.
+    distinct value k. Zeros remain observations. Nonfinite or negative banks
+    retain ordinary NumPy quantiles. Check a sorting-workspace allowance first,
+    then budget the dense table using the actual number of distinct values;
+    repeated sliding maxima need not pay for a worst-case unique-value table.
     """
     segments, width = bank.shape
     if (
         bank.size == 0
-        or bank.size * (segments + 1) * np.dtype(np.int64).itemsize > max_bytes
+        or bank.size * 2 * np.dtype(np.int64).itemsize > max_bytes
         or not np.all(np.isfinite(bank))
-        or np.any(bank <= 0)
+        or np.any(bank < 0)
     ):
         return None
     values, inverse = np.unique(bank, return_inverse=True)
+    if len(values) * (segments + 1) * np.dtype(np.int64).itemsize > max_bytes:
+        return None
     segment = np.repeat(np.arange(segments), width)
     counts = np.bincount(
         inverse.ravel() * segments + segment, minlength=len(values) * segments

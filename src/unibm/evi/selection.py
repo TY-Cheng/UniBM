@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .._numeric import prefix_sum
+from .._numeric import candidate_window_batches, prefix_sum
 from .models import PlateauWindow
 
 
@@ -55,40 +55,50 @@ def select_penultimate_window(
     local_slopes = np.diff(y) / np.diff(x)
     slope_curvature_prefix = prefix_sum(np.abs(np.diff(local_slopes)))
     best: tuple[float, int, int] | None = None
-    for start in range(n - min_points + 1):
-        for stop in range(start + min_points, n + 1):
-            window_len = stop - start
-            sum_x = prefix_x[stop] - prefix_x[start]
-            sum_y = prefix_y[stop] - prefix_y[start]
-            sum_x2 = prefix_x2[stop] - prefix_x2[start]
-            sum_xy = prefix_xy[stop] - prefix_xy[start]
-            sum_y2 = prefix_y2[stop] - prefix_y2[start]
-            denominator = window_len * sum_x2 - sum_x * sum_x
-            if denominator <= 0:
-                X = np.column_stack([np.ones(window_len, dtype=float), x[start:stop]])
-                beta, *_ = np.linalg.lstsq(X, y[start:stop], rcond=None)
-                resid = y[start:stop] - (X @ beta)
-                mse = float(np.mean(resid**2))
-            else:
-                slope = (window_len * sum_xy - sum_x * sum_y) / denominator
-                intercept = (sum_y - slope * sum_x) / window_len
-                sse = (
-                    sum_y2
-                    - 2.0 * intercept * sum_y
-                    - 2.0 * slope * sum_xy
-                    + window_len * intercept * intercept
-                    + 2.0 * intercept * slope * sum_x
-                    + slope * slope * sum_x2
-                )
-                mse = max(float(sse) / window_len, 0.0)
-            if window_len > 2:
-                curvature_total = slope_curvature_prefix[stop - 2] - slope_curvature_prefix[start]
-                curvature = float(curvature_total / (window_len - 2))
-            else:
-                curvature = 0.0
-            score = (mse + float(curvature_penalty) * curvature) / np.sqrt(window_len)
-            if best is None or score < best[0]:
-                best = (score, start, stop)
+    for start, stop in candidate_window_batches(n, min_points):
+        window_len = stop - start
+        sum_x = prefix_x[stop] - prefix_x[start]
+        sum_y = prefix_y[stop] - prefix_y[start]
+        sum_x2 = prefix_x2[stop] - prefix_x2[start]
+        sum_xy = prefix_xy[stop] - prefix_xy[start]
+        sum_y2 = prefix_y2[stop] - prefix_y2[start]
+        denominator = window_len * sum_x2 - sum_x * sum_x
+        degenerate = denominator <= 0
+        slope = np.divide(
+            window_len * sum_xy - sum_x * sum_y,
+            denominator,
+            out=np.zeros(len(start)),
+            where=~degenerate,
+        )
+        intercept = (sum_y - slope * sum_x) / window_len
+        sse = (
+            sum_y2
+            - 2.0 * intercept * sum_y
+            - 2.0 * slope * sum_xy
+            + window_len * intercept * intercept
+            + 2.0 * intercept * slope * sum_x
+            + slope * slope * sum_x2
+        )
+        mse = np.maximum(sse / window_len, 0.0)
+        # Prefix subtraction can cancel for nearly identical large x values.
+        # Keep the original least-squares fallback for those windows only.
+        for i in np.flatnonzero(degenerate):
+            a, b = start[i], stop[i]
+            X = np.column_stack([np.ones(b - a, dtype=float), x[a:b]])
+            beta, *_ = np.linalg.lstsq(X, y[a:b], rcond=None)
+            mse[i] = np.mean((y[a:b] - X @ beta) ** 2)
+        curvature = np.zeros(len(start))
+        curved = window_len > 2
+        curvature[curved] = (
+            slope_curvature_prefix[stop[curved] - 2] - slope_curvature_prefix[start[curved]]
+        ) / (window_len[curved] - 2)
+        score = (mse + curvature_penalty * curvature) / np.sqrt(window_len)
+        i = int(np.argmin(np.where(np.isnan(score), np.inf, score)))
+        # Preserve strict-< selection even if finite inputs overflow a score.
+        if best is None and np.isnan(score[0]):
+            i = 0
+        if best is None or score[i] < best[0]:
+            best = (float(score[i]), int(start[i]), int(stop[i]))
     assert best is not None
     _, start, stop = best
     mask = np.zeros(n, dtype=bool)

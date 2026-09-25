@@ -10,21 +10,23 @@ from . import _accelerator
 def prepare_mode_counts(
     bank: np.ndarray, *, max_bytes: int
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Cache finite positive maxima counts per segment within the table budget.
+    """Count mode's positive finite maxima without changing segment membership.
 
-    Other supports keep the expanded evaluator's filtering and warnings. The
-    conservative bound is checked before allocating the dense count matrix.
+    Invalid maxima retain their positions in the bank but contribute no KDE
+    weight, as in the expanded evaluator. Check a sorting-workspace allowance
+    first, then size the dense table from the actual distinct positive values.
+    Empty positive support yields a zero-column table.
     """
     segments, width = bank.shape
-    if (
-        bank.size == 0
-        or bank.size * (segments + 1) * 8 > max_bytes
-        or not np.all(np.isfinite(bank))
-        or np.any(bank <= 0)
-    ):
+    if bank.size == 0 or bank.size * 2 * np.dtype(np.int64).itemsize > max_bytes:
         return None
-    values, inverse = np.unique(bank, return_inverse=True)
-    codes = np.repeat(np.arange(segments), width) * len(values) + inverse.ravel()
+    positions = np.flatnonzero(np.isfinite(bank) & (bank > 0))
+    values, inverse = np.unique(bank.ravel()[positions], return_inverse=True)
+    if len(values) * (segments + 1) * np.dtype(np.int64).itemsize > max_bytes:
+        return None
+    if not len(values):
+        return values, np.empty((segments, 0), dtype=np.int64)
+    codes = (positions // width) * len(values) + inverse
     counts = np.bincount(codes, minlength=segments * len(values)).reshape(segments, -1)
     return values, counts
 
@@ -61,13 +63,35 @@ def weighted_density(
     return density
 
 
-def mode_from_counts(values: np.ndarray, counts: np.ndarray) -> np.ndarray:
-    """Return the unchanged 256-grid KDE mode for positive resampled maxima.
+def mode_from_counts(
+    values: np.ndarray, counts: np.ndarray, *, selected: np.ndarray | None = None
+) -> np.ndarray:
+    """Evaluate the 256-grid KDE from each resample's positive multiplicities.
 
-    Recover bandwidth quantiles and moments from multiplicities. This avoids
-    sorting each expanded replicate. Each row has a nonempty positive sample;
-    constant and singleton rows collapse to their sole retained value.
+    Without ``selected``, retain the established positive-bank arithmetic;
+    all count rows must be nonempty. Supplying the corresponding expanded
+    maxima preserves their moment sums and quartile interpolation, avoiding
+    rounding changes in newly compressed banks. Empty positive rows return
+    NaN and singletons return their observation exactly.
+
+    A near-tied nonconstant grid also returns NaN when ``selected`` is given.
+    The bootstrap owner must retry such rows with the expanded evaluator,
+    retaining its original row/column reduction groups. This guard protects
+    the argmax from small differences in floating-point Gaussian sums.
     """
+    if selected is not None:
+        valid = np.isfinite(selected) & (selected > 0)
+        sizes = valid.sum(axis=1)
+        summaries = np.full(len(selected), np.nan)
+        single = sizes == 1
+        if np.any(single):
+            summaries[single] = np.max(np.where(valid[single], selected[single], -np.inf), axis=1)
+        multiple = sizes > 1
+        if not np.any(multiple):
+            return summaries
+        selected = selected[multiple]
+        valid = valid[multiple]
+        counts = counts[multiple]
     logs = np.log1p(values)
     n = counts.sum(axis=1)
     cumulative = counts.cumsum(axis=1)
@@ -83,11 +107,19 @@ def mode_from_counts(values: np.ndarray, counts: np.ndarray) -> np.ndarray:
         gamma = rank - low
         a, b = rank_values(low), rank_values(np.minimum(low + 1, n - 1))
         difference = b - a
+        if selected is not None:
+            return a + difference * gamma
         return np.where(gamma >= 0.5, b - difference * (1 - gamma), a + difference * gamma)
 
     iqr = quantile(0.75) - quantile(0.25)
-    sums = counts @ logs
-    second = counts @ (logs * logs)
+    if selected is None:
+        sums = counts @ logs
+        second = counts @ (logs * logs)
+    else:
+        expanded_logs = np.zeros_like(selected)
+        np.log1p(selected, out=expanded_logs, where=valid)
+        sums = expanded_logs.sum(axis=1)
+        second = (expanded_logs * expanded_logs).sum(axis=1)
     means = sums / n
     std = np.sqrt(np.maximum((second - n * means * means) / np.maximum(n - 1, 1), 0.0))
     sigma = np.minimum(std, np.where(iqr > 0, iqr / 1.349, std))
@@ -98,4 +130,16 @@ def mode_from_counts(values: np.ndarray, counts: np.ndarray) -> np.ndarray:
     density = weighted_density(logs, counts, grid, bandwidth)
     density /= n[:, None]
     density *= np.exp(-grid)  # Jacobian for z = log(1 + x).
-    return np.expm1(grid[np.arange(len(n)), np.argmax(density, axis=1)])
+    modes = np.expm1(grid[np.arange(len(n)), np.argmax(density, axis=1)])
+    if selected is None:
+        return modes
+    summaries[multiple] = modes
+    top = np.partition(density, -2, axis=1)[:, -2:]
+    best = top.max(axis=1)
+    # Conservative roundoff guard, not a statistical tuning parameter. A
+    # constant grid has the same returned value whichever point wins.
+    ambiguous = (best - top.min(axis=1) <= 64 * np.finfo(float).eps * selected.shape[1] * best) & (
+        high != low
+    )
+    summaries[np.flatnonzero(multiple)[ambiguous]] = np.nan
+    return summaries

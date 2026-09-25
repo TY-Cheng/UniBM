@@ -13,7 +13,7 @@ import numpy as np
 from .._block_grid import validate_block_sizes
 from .._bootstrap_precision import ADAPTIVE_REPS, adaptive_covariance
 from .._validation import as_1d_float_array, warn_on_negative_values
-from .._window_ops import circular_sliding_window_maximum
+from .._window_ops import _circular_sliding_maxima_rows
 from .._parallel import (
     BOOTSTRAP_WORKING_BYTES,
     bootstrap_executor,
@@ -34,12 +34,12 @@ _MODE_BOOTSTRAP_MAX_WORKING_BYTES = 64 * 1024 * 1024
 
 
 def _disjoint_block_maxima(segment: np.ndarray, block_size: int) -> np.ndarray:
-    """Return nonoverlapping segment maxima, discarding an incomplete final block."""
-    n_block = segment.size // block_size
+    """Reduce complete blocks along the last axis, independently for each segment."""
+    n_block = segment.shape[-1] // block_size
     if n_block < 1:
-        return np.asarray([], dtype=float)
-    trimmed = segment[: n_block * block_size]
-    return trimmed.reshape(n_block, block_size).max(axis=1)
+        return np.empty((*segment.shape[:-1], 0), dtype=float)
+    trimmed = segment[..., : n_block * block_size]
+    return trimmed.reshape(*segment.shape[:-1], n_block, block_size).max(axis=-1)
 
 
 def _segment_block_maxima(
@@ -48,13 +48,17 @@ def _segment_block_maxima(
     *,
     sliding: bool,
 ) -> np.ndarray:
-    """Return circular sliding or complete disjoint maxima within one segment.
+    """Return circular sliding or complete disjoint maxima along the last axis.
 
     Circular windows wrap inside this segment, never across the boundary
-    between independently resampled super-blocks.
+    between independently resampled super-blocks. A matrix batches segments
+    by row; a vector retains the single-segment result shape.
     """
     if sliding:
-        return circular_sliding_window_maximum(segment, block_size)
+        if block_size < 2 or segment.shape[-1] < block_size:
+            return np.empty((*segment.shape[:-1], 0), dtype=float)
+        maxima = _circular_sliding_maxima_rows(np.atleast_2d(segment), block_size)
+        return maxima[0] if segment.ndim == 1 else maxima
     return _disjoint_block_maxima(segment, block_size)
 
 
@@ -98,11 +102,27 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
             if target == "quantile" and np.asarray(quantile).dtype == np.dtype(float)
             else None
         )
-        if target == "mode":
+        # Reserve established positive-bank tables first. Extending support
+        # must not change their moment arithmetic or shared-budget allocation.
+        if (
+            target == "mode"
+            and bank.size * (len(bank) + 1) * 8 <= remaining
+            and np.all(np.isfinite(bank))
+            and np.all(bank > 0)
+        ):
             table = prepare_mode_counts(bank, max_bytes=remaining)
         tables.append(table)
         if table is not None:
             remaining -= table[0].nbytes + table[1].nbytes
+    expanded_mode = [False] * len(banks)
+    if target == "mode":
+        for index, bank in enumerate(banks):
+            if tables[index] is None:
+                table = prepare_mode_counts(bank, max_bytes=remaining)
+                if table is not None:
+                    tables[index] = table
+                    expanded_mode[index] = True
+                    remaining -= table[0].nbytes + table[1].nbytes
     with bootstrap_executor(threads) as pool:
 
         def evaluate(draws):
@@ -112,7 +132,7 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
             def column(index):
                 """Limit expanded maxima and mode temporaries independently of R."""
                 bank, table = banks[index], tables[index]
-                if table is not None and target == "mode":
+                if table is not None and target == "mode" and not expanded_mode[index]:
                     values, segment_counts = table
                     rows = max(1, BOOTSTRAP_WORKING_BYTES // max(1, len(values) * 8 * 8))
                     return (
@@ -127,7 +147,7 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
                         if len(draws)
                         else np.empty(0)
                     )
-                if table is not None:
+                if table is not None and target == "quantile":
                     return quantile_from_counts(
                         table,
                         weights,
@@ -159,6 +179,23 @@ def _summary_evaluator(backbone, *, target, quantile, n_threads, mode_batch=None
                             )
                         elif target == "mean":
                             values = np.mean(selected, axis=1)
+                        elif table is not None:
+                            support, segment_counts = table
+                            start = group_start + offset
+                            values = mode_from_counts(
+                                support,
+                                weights[start : start + len(selected)] @ segment_counts,
+                                selected=selected,
+                            )
+                            # NaN on an active row requests an original-order
+                            # retry; truly empty rows remain invalid summaries.
+                            retry = ~np.isfinite(values) & active[offset : offset + len(selected)]
+                            for row in np.flatnonzero(retry):
+                                values[row] = _evaluate_mode_bootstrap_column_batched(
+                                    selected[row : row + 1],
+                                    reduction_rows=total_active,
+                                    reduction_offset=int(np.sum(active[: offset + row])),
+                                )[0]
                         else:
                             values = _evaluate_mode_bootstrap_column_batched(
                                 selected,
@@ -479,12 +516,8 @@ def build_block_summary_bootstrap_backbone(
     rng = np.random.default_rng(random_state)
     maxima_by_block: dict[int, np.ndarray] = {}
     for block_size in block_sizes:
-        maxima_by_block[int(block_size)] = np.stack(
-            [
-                _segment_block_maxima(segment, int(block_size), sliding=sliding)
-                for segment in segments
-            ],
-            axis=0,
+        maxima_by_block[int(block_size)] = _segment_block_maxima(
+            segments, int(block_size), sliding=sliding
         )
     segment_draws = rng.integers(0, n_super, size=(reps, n_super))
     return BlockSummaryBootstrapBackbone(

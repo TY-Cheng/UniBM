@@ -7,12 +7,18 @@ the package layer, not on the full repo orchestration under
 
 ## Installation
 
-Install [UniBM 0.2.0 from PyPI](https://pypi.org/project/unibm/0.2.0/) with Python
+**Source checkout:** 0.3.1 (unreleased). **Latest published release:** 0.3.0.
+
+Install [UniBM 0.3.0 from PyPI](https://pypi.org/project/unibm/0.3.0/) with Python
 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.2.0
+python -m pip install unibm==0.3.0
 ```
+
+When upgrading from 0.2.0, review the
+[0.3.0 API migration notes](api/public-api.md#api-migration) for removed
+arguments and stricter validation.
 
 ## Source checkout and development
 
@@ -46,8 +52,8 @@ The repo-level workflow details stay in the repository `README.md` and
 
 ## Package usage
 
-These examples work with UniBM 0.1.0 and 0.2.0. Version 0.2.0
-also exposes all six core workflow functions directly from `unibm`; see
+These examples target UniBM 0.3.x. Since 0.2.0, all six core workflow
+functions are also available directly from `unibm`; see
 [Top-level convenience imports](api/public-api.md#top-level-convenience-imports).
 
 ```python
@@ -111,8 +117,8 @@ For a quick guide to which returned fields matter most, see
 
 ## Bootstrap threads
 
-Version 0.2.0 adds `n_threads` to EVI estimation and EVI/EI bootstrap
-functions. This option is not part of the published 0.1.0 release.
+Since 0.2.0, EVI estimation and EVI/EI bootstrap functions accept `n_threads`.
+This option is not part of the published 0.1.0 release.
 
 - `None` (default) selects a small pool from the workload and available CPUs;
   fewer than 2,048 observations stay serial. Automatic selection uses at most
@@ -142,11 +148,18 @@ use, so the batch budget is not a total process memory limit.
 
 ## Optional native acceleration
 
-Version 0.2.0 accelerates EVI mode KDE and bootstrap quantile
-rank searches with optional Cython kernels. The same APIs and `n_threads` setting
-work with or without the extension. Mode uses repeated-maxima multiplicities;
-tail estimators, FGLS regression and EI profile intervals also reuse computations
-within NumPy/SciPy. Mean bootstrap retains its original reduction order.
+The source checkout uses optional Cython kernels for EVI mode KDE, bootstrap
+quantile rank searches, and long-series EI bootstrap rolling minima.
+The same APIs and `n_threads` setting work with or without the extension.
+Mode and quantile bootstrap reuse repeated-maxima counts and budget their tables
+using the actual distinct values. Quantile counts retain zeros; mode's KDE uses
+positive finite maxima, preserving their segment membership. Newly compressed
+mode samples retain the original bandwidth arithmetic and retry nearly tied
+KDE peaks with the original summation order. These optimizations do not change
+the input time axis, invalid-replicate policy, or CI method.
+Batched segment maxima, window scoring and adaptive refits also reuse NumPy/SciPy computations.
+Mean and EI bootstrap retain NumPy's original reduction order. Final fits still
+return their covariance diagnostics; only unused monitoring diagnostics are skipped.
 
 Source installation attempts to build the extension and retains NumPy execution
 if a C compiler is unavailable. Set `UNIBM_NO_EXTENSIONS=1` before building for a
@@ -157,7 +170,8 @@ This does not reduce bootstrap replicates or relax adaptive precision tolerances
 Native wheels are specific to their Python/platform tags; a pure Python wheel
 provides the fallback wherever the runtime dependencies are supported. See the
 [build and platform notes](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration).
-These changes are not part of PyPI version 0.1.0.
+The additional bootstrap and window-selection optimizations are in the unreleased
+0.3.1 source checkout.
 
 ## Plotting
 

@@ -276,6 +276,17 @@ class EiPathsTests(unittest.TestCase):
                 self.assertEqual(mask.size, 10)
                 self.assertEqual(mask.sum(), 4)
 
+    def test_batched_window_scan_keeps_ties_and_finite_label_alignment(self) -> None:
+        levels = np.arange(2, 77)
+        for start in (0, 40, 70):
+            z = np.r_[100 + np.arange(start, dtype=float) ** 2, np.zeros(75 - start)]
+            if start:
+                z[2] = np.nan
+            window, mask = select_stable_path_window(levels, z)
+            self.assertEqual((window.lo, window.hi), (levels[start], levels[start + 3]))
+            self.assertEqual(mask.sum(), 4)
+            np.testing.assert_array_equal(levels[np.isfinite(z)][mask], levels[start : start + 4])
+
     def test_stable_path_selection_rejects_invalid_tuning_parameters(self) -> None:
         block_sizes = np.array([4, 8, 16], dtype=int)
         z_path = np.array([0.1, 0.11, 0.12], dtype=float)

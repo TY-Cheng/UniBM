@@ -50,18 +50,6 @@ def _finite_window_mask(arr: np.ndarray, window: int) -> np.ndarray:
     return (prefix[window:] - prefix[:-window]) == 0
 
 
-def _nan_window_mask(arr: np.ndarray, window: int) -> np.ndarray:
-    """Mark complete windows containing NaN; infinity is not marked.
-
-    The caller supplies a 1D array and a window between one and its length.
-    """
-    nan_count = np.isnan(arr).astype(np.int64, copy=False)
-    prefix = np.empty(arr.size + 1, dtype=np.int64)
-    prefix[0] = 0
-    np.cumsum(nan_count, out=prefix[1:])
-    return (prefix[window:] - prefix[:-window]) > 0
-
-
 def sliding_window_extreme_valid(
     vec: np.ndarray | list[float],
     window: int,
@@ -99,10 +87,25 @@ def circular_sliding_window_maximum(
     arr = _as_1d_float_array(vec)
     if window < 2 or arr.size < window:
         return np.asarray([], dtype=float)
-    wrapped = np.concatenate([arr, arr[: window - 1]])
-    safe = np.where(np.isnan(wrapped), -np.inf, wrapped)
-    maxima = _rolling_extreme_finite(safe, window, reducer="max")[: arr.size]
-    maxima[_nan_window_mask(wrapped, window)[: arr.size]] = np.nan
+    return _circular_sliding_maxima_rows(arr[None, :], window)[0]
+
+
+def _circular_sliding_maxima_rows(segments: np.ndarray, window: int) -> np.ndarray:
+    """Batch circular maxima within rows for an already validated window.
+
+    Each row is a separate segment. Preserve NaN-containing windows as NaN
+    and allow infinities as extrema, just as the one-segment entry point does.
+    """
+    width = segments.shape[1]
+    wrapped = np.concatenate([segments, segments[:, : window - 1]], axis=1)
+    missing = np.isnan(wrapped)
+    safe = np.where(missing, -np.inf, wrapped)
+    start = window // 2
+    maxima = maximum_filter1d(safe, size=window, axis=1)[:, start : start + width].copy()
+    prefix = np.empty((len(segments), wrapped.shape[1] + 1), dtype=np.int64)
+    prefix[:, 0] = 0
+    np.cumsum(missing, axis=1, out=prefix[:, 1:])
+    maxima[(prefix[:, window:] - prefix[:, :-window]) > 0] = np.nan
     return maxima
 
 

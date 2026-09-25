@@ -74,6 +74,22 @@ class EviSelectionTests(unittest.TestCase):
                 min_points=3,
             )
 
+    def test_batched_scan_keeps_first_tie_and_windows_after_batch_boundary(self) -> None:
+        x = np.arange(75.0)
+        for start in (0, 40, 70):
+            y = np.r_[100 + np.arange(start, dtype=float) ** 2, np.zeros(75 - start)]
+            plateau = select_penultimate_window(x, y)
+            self.assertEqual((plateau.start, plateau.stop), (start, start + 5))
+            self.assertEqual(plateau.score, 0.0)
+
+    def test_cancelled_prefix_denominator_retains_lstsq_fallback(self) -> None:
+        x = np.array([1e12, 1e12 + 1])
+        y = np.array([2.0, 3.0])
+        plateau = select_penultimate_window(x, y, min_points=2)
+        baseline = _baseline_select_penultimate_window(x, y, min_points=2)
+        self.assertEqual((plateau.start, plateau.stop), (0, 2))
+        self.assertAlmostEqual(plateau.score, baseline.score)
+
     def test_select_penultimate_window_supports_two_point_window(self) -> None:
         plateau = select_penultimate_window(
             np.array([1.0, 2.0], dtype=float),

@@ -21,7 +21,8 @@ from .._parallel import (
     resolve_n_threads,
     validate_n_threads,
 )
-from .._validation import subset_covariance_by_labels, validate_covariance_shrinkage
+from .._validation import _validated_covariance_matrix, validate_covariance_shrinkage
+from ..evi import _accelerator
 from ._stats import EI_TINY, Z_CRIT_95, _log_scale_theta_interval
 from ._validation import _validate_ei_series
 from .bm import EI_DEFAULT_COVARIANCE_SHRINKAGE, _fit_pooled_z_model
@@ -93,19 +94,29 @@ def _paths_from_cdf(cdf, block_sizes, path_keys):
         for base in dict.fromkeys(base for base, _ in path_keys)
     }
     n = cdf.shape[1]
+    # Short rows are already cheap in SciPy. Reuse native work buffers only
+    # in the long-series regime that benefited in paired full-fit trials.
+    native = _accelerator.kernels is not None and n >= 4096 and any(s for _, s in path_keys)
+    if native:
+        queue = np.empty(cdf.shape, dtype=np.int64)
+        scaled_minima = np.empty(cdf.shape, dtype=float)
     draws = {}
     for base, sliding in path_keys:
         score = scores[base]
         path = np.empty((len(cdf), len(block_sizes)))
         for j, block_size in enumerate(block_sizes):
             b = int(block_size)
-            if sliding:
+            if sliding and native:
+                _accelerator.kernels.rolling_scaled_minimum(score, b, queue, scaled_minima)
+                mean = np.mean(scaled_minima[:, : n - b + 1], axis=1)
+            elif sliding:
                 start = b // 2
                 minima = minimum_filter1d(score, size=b, axis=1)[:, start : start + n - b + 1]
+                mean = np.mean(float(b) * minima, axis=1)
             else:
                 minima = score[:, : n // b * b].reshape(len(score), -1, b).min(axis=2)
-            # Multiplying before the mean reproduces the original rounding.
-            mean = np.mean(float(b) * minima, axis=1)
+                mean = np.mean(float(b) * minima, axis=1)
+            # Both implementations multiply before NumPy's mean to preserve rounding.
             if base == "northrop":
                 eir = np.maximum(mean, 1.0)
             else:
@@ -278,14 +289,22 @@ def bootstrap_bm_ei_path(
         window, _ = select_stable_path_window(block_sizes, observed_z)
         mask = (block_sizes >= window.lo) & (block_sizes <= window.hi)
         levels, z_values = block_sizes[mask], observed_z[mask]
+        selected_indices = np.ix_(np.flatnonzero(mask), np.flatnonzero(mask))
+        design = np.ones((len(z_values), 1), dtype=float)
 
         def evaluate(covariance: np.ndarray, _rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Return theta/z targets and their SE scales for covariance-precision checks."""
-            selected = subset_covariance_by_labels(
-                covariance, block_sizes, levels, context="EI bootstrap covariance"
+            # The sampler owns the fixed label order; retain full validation
+            # and its roundoff correction before extracting the selected levels.
+            validated, _ = _validated_covariance_matrix(
+                covariance, context="EI bootstrap covariance"
             )
             model = _fit_pooled_z_model(
-                z_values, covariance=selected, covariance_shrinkage=shrinkage
+                z_values,
+                covariance=validated[selected_indices],
+                covariance_shrinkage=shrinkage,
+                design=design,
+                diagnostics=False,
             )
             z, se = model["intercept"], model["standard_error"]
             unconstrained = model["unconstrained_intercept"]

@@ -121,6 +121,9 @@ def _fit_linear_model(
     y: np.ndarray,
     covariance: np.ndarray | None = None,
     covariance_shrinkage: float = DEFAULT_COVARIANCE_SHRINKAGE,
+    *,
+    design: np.ndarray | None = None,
+    diagnostics: bool = True,
 ) -> dict[str, Any]:
     """Regress paired log summaries on an intercept and log block size.
 
@@ -129,10 +132,12 @@ def _fit_linear_model(
     OLS and the HC0 residual sandwich, which does not adjust for dependence
     between scales. The result includes coefficients, a 2x2 covariance in
     (intercept, slope) order, slope SE, fitted values, and diagnostics.
+    Adaptive monitoring may reuse its fixed design and skip unused condition
+    numbers; covariance validation and coefficient calculations stay identical.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    X = np.column_stack([np.ones_like(x), x])
+    X = np.column_stack([np.ones_like(x), x]) if design is None else design
     if covariance is not None:
         if np.asarray(covariance).shape != (x.size, x.size):
             raise ValueError("bootstrap covariance shape must match the regression window.")
@@ -148,8 +153,12 @@ def _fit_linear_model(
         fitted = X @ beta
         resid = y - fitted
         objective = float(resid @ inv_cov @ resid)
-        covariance_condition_number_raw = matrix_condition_number(covariance)
-        covariance_condition_number_regularized = matrix_condition_number(regularized)
+        covariance_condition_number_raw = (
+            matrix_condition_number(covariance) if diagnostics else None
+        )
+        covariance_condition_number_regularized = (
+            matrix_condition_number(regularized) if diagnostics else None
+        )
     else:
         normal_matrix = X.T @ X
         beta, *_ = np.linalg.lstsq(X, y, rcond=None)
@@ -161,10 +170,7 @@ def _fit_linear_model(
         objective = float(resid @ resid)
         covariance_condition_number_raw = None
         covariance_condition_number_regularized = None
-    try:
-        condition_number = float(np.linalg.cond(normal_matrix))
-    except np.linalg.LinAlgError:
-        condition_number = float("inf")
+    condition_number = matrix_condition_number(normal_matrix) if diagnostics else None
     return {
         "intercept": float(beta[0]),
         "slope": float(beta[1]),

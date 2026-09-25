@@ -90,9 +90,11 @@ project's [MIT License](LICENSE).
 
 ## Native acceleration
 
-The source checkout optionally compiles two EVI kernels: repeated-value KDE and
-integer quantile rank search. Statistical APIs, fitting and CI construction stay
-in Python/NumPy/SciPy. Cython and setuptools are build dependencies only; the
+The source checkout optionally compiles repeated-value EVI KDE, integer quantile
+rank search, and buffered rolling minima for long-series EI bootstrap. Short EI
+series retain SciPy; NumPy still performs the row reductions in both paths.
+Statistical APIs, fitting and CI construction stay in Python/NumPy/SciPy.
+Cython and setuptools are build dependencies only; the
 extension uses Python buffers without the NumPy C API, OpenMP, fast-math or
 machine-specific CPU flags. Existing per-call thread pools run the GIL-free work.
 
@@ -166,7 +168,7 @@ research scripts, datasets, local configuration and generated reports are exclud
 
 The `release` workflow runs **only through Actions → release → Run workflow** on
 `main`. Commits, pushes, pull requests, tags and draft releases do not trigger it.
-Provide an existing version tag, such as `v0.2.0`, whose draft release contains
+Provide an existing tag in `vMAJOR.MINOR.PATCH` format whose draft release contains
 the verified wheels, sdist, `SHA256SUMS` and `release-manifest.json`.
 
 The manifest records `version`, the full source `commit`, `artifacts` (filename

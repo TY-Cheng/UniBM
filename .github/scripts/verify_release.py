@@ -49,7 +49,7 @@ def verify_files(directory: Path, manifest: dict) -> None:
 def prepare(tag: str) -> None:
     """Download a tagged bundle and require successful CI at its exact source commit."""
     if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
-        raise ValueError("Expected an existing tag such as v0.2.0")
+        raise ValueError("Expected an existing tag in vMAJOR.MINOR.PATCH format")
     repository = os.environ["GITHUB_REPOSITORY"]
     subprocess.run(
         [

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag with verified draft-release assets (e.g. v0.2.0)
+        description: Existing tag in vMAJOR.MINOR.PATCH format with verified draft-release assets
         required: true
         type: string
 

@@ -1,5 +1,5 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
-"""Private GIL-free KDE and integer rank loops; no NumPy C API or OpenMP."""
+"""Private GIL-free KDE, rank and rolling-minimum loops; no NumPy C API or OpenMP."""
 from libc.stdint cimport int64_t
 from libc.math cimport exp
 
@@ -9,7 +9,7 @@ def kde(
 ):
     """Fuse weighted Gaussian sums; callers supply positive finite bandwidths."""
     cdef Py_ssize_t row, point, value
-    cdef double z, total
+    cdef double z, weight
     if (
         weights.shape[0] != grid.shape[0]
         or weights.shape[1] != logs.shape[0]
@@ -21,12 +21,44 @@ def kde(
     with nogil:
         for row in range(grid.shape[0]):
             for point in range(grid.shape[1]):
-                total = 0
-                for value in range(logs.shape[0]):
-                    if weights[row, value] != 0:
+                out[row, point] = 0
+            # Traverse contiguous grid points while preserving each point's
+            # original value-summation order and skipping zero multiplicities.
+            for value in range(logs.shape[0]):
+                weight = weights[row, value]
+                if weight != 0:
+                    for point in range(grid.shape[1]):
                         z = (grid[row, point] - logs[value]) / bandwidth[row]
-                        total += exp(-0.5 * z * z) * weights[row, value]
-                out[row, point] = total
+                        out[row, point] += exp(-0.5 * z * z) * weight
+
+
+def rolling_scaled_minimum(const double[:, ::1] data, Py_ssize_t b,
+                           int64_t[:, ::1] queue, double[:, ::1] out):
+    """Write b times each complete rolling minimum of finite rows into out.
+
+    The caller owns separate reusable queue/output buffers and reduces the
+    output with NumPy, preserving its row-summation order. A monotone queue
+    visits each observation at most twice, independently within each row.
+    """
+    cdef Py_ssize_t row, i, head, tail
+    if b < 1 or b > data.shape[1]:
+        raise ValueError("block size must lie between one and the row length")
+    if (queue.shape[0] != data.shape[0] or queue.shape[1] < data.shape[1]
+            or out.shape[0] != data.shape[0] or out.shape[1] < data.shape[1] - b + 1):
+        raise ValueError("rolling-minimum buffer shapes do not match the input")
+    with nogil:
+        for row in range(data.shape[0]):
+            head = 0
+            tail = 0
+            for i in range(data.shape[1]):
+                while head < tail and queue[row, head] <= i - b:
+                    head += 1
+                while tail > head and data[row, queue[row, tail - 1]] >= data[row, i]:
+                    tail -= 1
+                queue[row, tail] = i
+                tail += 1
+                if i >= b - 1:
+                    out[row, i - b + 1] = b * data[row, queue[row, head]]
 
 
 cdef inline Py_ssize_t find_rank(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from .._block_grid import validate_block_sizes
-from .._numeric import prefix_sum
+from .._numeric import candidate_window_batches, prefix_sum
 from .models import EiPathBundle, EiStableWindow
 
 
@@ -56,30 +56,26 @@ def select_stable_path_window(
     abs_diff1_prefix = prefix_sum(np.abs(np.diff(z)))
     abs_diff2_prefix = prefix_sum(np.abs(np.diff(np.diff(z))))
     best: tuple[float, int, int] | None = None
-    for start in range(levels.size - min_points + 1):
-        for stop in range(start + min_points, levels.size + 1):
-            window_len = stop - start
-            sum_z = prefix_z[stop] - prefix_z[start]
-            sum_z2 = prefix_z2[stop] - prefix_z2[start]
-            mean_z = float(sum_z / window_len)
-            variance = max(float(sum_z2 / window_len - mean_z * mean_z), 0.0)
-            if window_len > 1:
-                roughness_total = abs_diff1_prefix[stop - 1] - abs_diff1_prefix[start]
-                roughness = float(roughness_total / (window_len - 1))
-            else:
-                roughness = 0.0
-            if window_len > 2:
-                curvature_total = abs_diff2_prefix[stop - 2] - abs_diff2_prefix[start]
-                curvature = float(curvature_total / (window_len - 2))
-            else:
-                curvature = 0.0
-            score = (
-                variance
-                + float(roughness_penalty) * roughness
-                + float(curvature_penalty) * curvature
-            ) / np.sqrt(stop - start)
-            if best is None or score < best[0]:
-                best = (score, start, stop)
+    for start, stop in candidate_window_batches(levels.size, min_points):
+        window_len = stop - start
+        sum_z = prefix_z[stop] - prefix_z[start]
+        sum_z2 = prefix_z2[stop] - prefix_z2[start]
+        mean_z = sum_z / window_len
+        variance = np.maximum(sum_z2 / window_len - mean_z * mean_z, 0.0)
+        roughness = (abs_diff1_prefix[stop - 1] - abs_diff1_prefix[start]) / (window_len - 1)
+        curvature = np.zeros(len(start))
+        curved = window_len > 2
+        curvature[curved] = (
+            abs_diff2_prefix[stop[curved] - 2] - abs_diff2_prefix[start[curved]]
+        ) / (window_len[curved] - 2)
+        score = (
+            variance + roughness_penalty * roughness + curvature_penalty * curvature
+        ) / np.sqrt(window_len)
+        i = int(np.argmin(np.where(np.isnan(score), np.inf, score)))
+        if best is None and np.isnan(score[0]):
+            i = 0
+        if best is None or score[i] < best[0]:
+            best = (float(score[i]), int(start[i]), int(stop[i]))
     assert best is not None
     _, start, stop = best
     selected_mask = np.zeros(mask.sum(), dtype=bool)

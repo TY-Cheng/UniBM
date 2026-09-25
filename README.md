@@ -24,18 +24,23 @@ The public package is organized around four entrypoints:
 - `unibm.ei` for the persistence-side workflow
 - `unibm.cdf` for the public empirical CDF helper
 
-UniBM 0.2.0 exposes six core functions directly from `unibm`.
+UniBM exposes six core functions directly from `unibm`.
 The four additional root imports are not in PyPI 0.1.0: use `unibm.ei` for
 `prepare_ei_bundle`, `bootstrap_bm_ei_path`, and `estimate_pooled_bm_ei`, and
 `unibm.evi` for `estimate_design_life_level_interval` on that release.
 All existing subpackage import paths remain supported.
+When upgrading from 0.2.0, review the
+[0.3.0 API migration notes](https://ty-cheng.github.io/UniBM/api/public-api/#api-migration)
+for removed arguments and stricter validation.
 
 ## Quick start
 
-Install the [PyPI release](https://pypi.org/project/unibm/0.2.0/) with Python 3.11 or later:
+**Source checkout:** 0.3.1 (unreleased). **Latest published release:** 0.3.0.
+
+Install the [PyPI release](https://pypi.org/project/unibm/0.3.0/) with Python 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.2.0
+python -m pip install unibm==0.3.0
 ```
 
 This installs `unibm`, including its estimators, interval helpers, design-life
@@ -65,8 +70,9 @@ without an exported override it uses `.venv/`.
 
 ## Acceleration
 
-UniBM 0.2.0 includes NumPy/SciPy optimizations and optional Cython kernels
-for EVI mode KDE and bootstrap quantile rank searches. Source builds attempt to
+The source checkout includes NumPy/SciPy optimizations and optional Cython kernels
+for EVI mode KDE, bootstrap quantile rank searches, and long-series EI bootstrap
+rolling minima. Source builds attempt to
 compile these kernels; without a C compiler, the same APIs use NumPy. Set
 `UNIBM_NO_EXTENSIONS=1` before building for a pure Python distribution, or before
 starting Python to disable an installed extension.
@@ -77,7 +83,8 @@ pool; repository workflows already assign this inner budget to their workers.
 NumPy/SciPy BLAS thread settings remain separate. Design-life point estimates
 and intervals reuse the EVI fit without another bootstrap.
 
-These changes are **not included in PyPI 0.1.0**. See
+The additional bootstrap and window-selection optimizations are in the unreleased
+0.3.1 source checkout. See
 [Getting Started](https://ty-cheng.github.io/UniBM/getting-started/#bootstrap-threads)
 for thread and memory behavior, and
 [Native acceleration](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration)

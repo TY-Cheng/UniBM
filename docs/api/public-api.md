@@ -1,7 +1,7 @@
 # API Overview
 
 Choose an entrypoint by the quantity you want to estimate. EVI and EI estimators
-are public through `unibm.evi` and `unibm.ei`. Version 0.2.0 also exposes
+are public through `unibm.evi` and `unibm.ei`. UniBM also exposes
 six core workflow functions directly from `unibm`. These convenience imports
 refer to the same function objects; their placement does not select a default
 estimator for every task. See the [version note](#top-level-convenience-imports)
@@ -118,9 +118,11 @@ precision diagnostic monitors the EVI estimate and its CI endpoints, **not the
 extrapolated design-life levels**. See
 [Reading Returned Objects](../reading-returned-objects.md#reading-adaptive-precision).
 
-## Development API migration
+## API migration
 
-These changes in the current source tree are not a new PyPI release:
+The 0.3.1 source checkout preserves the 0.3.0 public API and inference defaults.
+Version 0.3.0 introduced the following API changes from 0.2.0.
+Review the [current defaults](#defaults-and-explicit-choices) above as well:
 
 | Earlier call | Current call or behavior |
 |---|---|
@@ -134,14 +136,14 @@ These changes in the current source tree are not a new PyPI release:
 
 ## Top-level convenience imports
 
-Version 0.2.0 also accepts `n_threads` on EVI estimation and EVI/EI
-bootstrap calls. Optional native kernels preserve the same public API. See
+Since 0.2.0, EVI estimation and EVI/EI bootstrap calls accept `n_threads`.
+Optional native kernels preserve the same public API. See
 [thread budgets](../getting-started.md#bootstrap-threads) and
 [native acceleration](../getting-started.md#optional-native-acceleration)
 for defaults, nested parallelism, and the NumPy fallback. These additions are
 not in PyPI 0.1.0.
 
-Version 0.2.0 supports:
+UniBM 0.3.x supports:
 
 ```python
 from unibm import (
@@ -163,7 +165,7 @@ namespaces above.
 **Version note:** the four additional root imports were added in 0.2.0. Version 0.1.0
 exports only `estimate_evi_quantile` and `estimate_design_life_level` at the
 root. On that release, import the other four functions as follows; these paths
-also remain supported in 0.2.0:
+also remain supported in current versions:
 
 ```python
 from unibm.ei import prepare_ei_bundle, bootstrap_bm_ei_path, estimate_pooled_bm_ei

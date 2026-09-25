@@ -1,9 +1,8 @@
 # Worked Examples
 
-These examples use UniBM 0.2.0's core imports. With version
-0.1.0, import the EI functions from `unibm.ei` and
-`estimate_design_life_level_interval` from `unibm.evi` instead; see the
-[version note](api/public-api.md#top-level-convenience-imports).
+These examples target UniBM 0.3.x. For earlier releases, see the
+[API migration notes](api/public-api.md#api-migration) and
+[import history](api/public-api.md#top-level-convenience-imports).
 
 ## Example 1: Median sliding-block EVI fit
 
