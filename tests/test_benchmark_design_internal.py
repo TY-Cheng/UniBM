@@ -46,7 +46,6 @@ def _baseline_fit_methods_for_series(
                 curve.log_block_sizes,
                 curve.log_values,
                 min_points=5,
-                trim_fraction=0.15,
             )
             ols_id = f"{scheme_name}_{summary_target}_ols"
             fits[ols_id] = estimate_target_scaling(
@@ -95,7 +94,7 @@ class BenchmarkDesignInternalTests(unittest.TestCase):
             )["sliding_median_fgls"]
         self.assertEqual(fit.bootstrap_reps_policy, "adaptive")
         self.assertIn(fit.bootstrap_reps_used, (128, 256, 512, 768, 1024))
-        self.assertEqual(fit.covariance_shrinkage, 0.37)
+        self.assertEqual(fit.covariance_shrinkage, 0.73)
 
     def test_cached_evi_bootstrap_restores_estimator_identity(self) -> None:
         block_sizes = np.array([4, 8], dtype=int)
@@ -120,6 +119,81 @@ class BenchmarkDesignInternalTests(unittest.TestCase):
         self.assertEqual(result["target"], "quantile")
         self.assertEqual(result["quantile"], 0.9)
         self.assertIs(result["sliding"], True)
+
+    def test_fixed_evi_bootstrap_does_not_reuse_old_4b_cache(self) -> None:
+        block_sizes = np.array([4, 8], dtype=int)
+        old_result = {
+            "block_sizes": block_sizes,
+            "samples": np.ones((2, 2)),
+            "covariance": np.eye(2),
+        }
+        fresh = {"quantile": {**old_result, "covariance": 2 * np.eye(2)}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            old_file = (
+                cache_dir
+                / "internal_bootstrap"
+                / f"{benchmark_design.BENCHMARK_CACHE_VERSION}__series__q0.5000__reps2.npz"
+            )
+            benchmark_design._save_bootstrap_results_bundle(
+                old_file, {"sliding": {"quantile": old_result}}
+            )
+            with mock.patch.object(
+                benchmark_design,
+                "circular_block_summary_bootstrap_multi_target",
+                return_value=fresh,
+            ) as draw:
+                result = benchmark_design._scheme_bootstrap_results(
+                    np.arange(1.0, 129.0),
+                    block_sizes=block_sizes,
+                    quantile=0.5,
+                    sliding=True,
+                    specs=[benchmark_design.METHOD_LOOKUP["sliding_median_fgls"]],
+                    random_state=7,
+                    reps=2,
+                    cache_dir=cache_dir,
+                    cache_key="series",
+                )
+            draw.assert_called_once()
+            self.assertIs(result, fresh)
+            self.assertTrue(old_file.is_file())
+
+    def test_fixed_evi_bootstrap_recomputes_when_grid_changes(self) -> None:
+        old_result = {
+            "block_sizes": np.array([4, 8], dtype=int),
+            "samples": np.ones((2, 2)),
+            "covariance": np.eye(2),
+        }
+        new_grid = np.array([6, 8], dtype=int)
+        fresh = {"quantile": {**old_result, "block_sizes": new_grid, "covariance": 2 * np.eye(2)}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            cache_file = benchmark_design._internal_bootstrap_cache_file(
+                cache_dir, cache_key="series", quantile=0.5, reps=2
+            )
+            benchmark_design._save_bootstrap_results_bundle(
+                cache_file, {"sliding": {"quantile": old_result}}
+            )
+            with mock.patch.object(
+                benchmark_design,
+                "circular_block_summary_bootstrap_multi_target",
+                return_value=fresh,
+            ) as draw:
+                for _ in range(2):
+                    result = benchmark_design._scheme_bootstrap_results(
+                        np.arange(1.0, 129.0),
+                        block_sizes=new_grid,
+                        quantile=0.5,
+                        sliding=True,
+                        specs=[benchmark_design.METHOD_LOOKUP["sliding_median_fgls"]],
+                        random_state=7,
+                        reps=2,
+                        cache_dir=cache_dir,
+                        cache_key="series",
+                    )
+                    np.testing.assert_array_equal(result["quantile"]["block_sizes"], new_grid)
+                    np.testing.assert_array_equal(result["quantile"]["covariance"], 2 * np.eye(2))
+            draw.assert_called_once()
 
     def test_fit_methods_for_series_matches_exact_baseline(self) -> None:
         rs = np.random.default_rng(71)

@@ -176,6 +176,7 @@ def screen_extremal_index_series(
     bundle = prepare_ei_bundle(
         series.values,
         allow_zeros=allow_zeros,
+        path_keys=(("bb", True),),
         threshold_quantiles=APPLICATION_EI_THRESHOLD_QUANTILES,
     )
     bb_fit = estimate_pooled_bm_ei(bundle, base_path="bb", sliding=True, regression="OLS")

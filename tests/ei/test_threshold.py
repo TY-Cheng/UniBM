@@ -179,6 +179,20 @@ class EiThresholdTests(unittest.TestCase):
                 fit = estimator(bundle)
                 self.assertIn(fit.selected_threshold_quantile, (0.80, 0.90))
 
+    def test_threshold_only_preparation_preserves_both_estimates(self) -> None:
+        values = self._positive_sample()
+        full = prepare_ei_bundle(values, allow_zeros=False)
+        thresholds = prepare_ei_bundle(values, allow_zeros=False, path_keys=())
+        for estimator in (estimate_ferro_segers, estimate_k_gaps):
+            with self.subTest(estimator=estimator.__name__):
+                expected, actual = estimator(full), estimator(thresholds)
+                self.assertEqual(actual.theta_hat, expected.theta_hat)
+                self.assertEqual(actual.confidence_interval, expected.confidence_interval)
+                self.assertEqual(actual.selected_run_k, expected.selected_run_k)
+                self.assertEqual(
+                    actual.selected_threshold_quantile, expected.selected_threshold_quantile
+                )
+
     def test_preparation_validates_threshold_quantiles(self) -> None:
         invalid_quantiles = (
             (),

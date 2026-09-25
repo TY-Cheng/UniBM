@@ -1,0 +1,69 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag with verified draft-release assets (e.g. v0.2.0)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Download and verify the existing release artifacts and source CI
+        run: |
+          python .github/scripts/verify_release.py prepare "$RELEASE_TAG"
+          uvx twine check --strict release-files/dist/*
+
+      - name: Publish the verified files to TestPyPI
+        run: |
+          uv publish --trusted-publishing always \
+            --publish-url https://test.pypi.org/legacy/ \
+            --check-url https://test.pypi.org/simple/ release-files/dist/*
+
+      - name: Verify TestPyPI hashes and install outside the checkout
+        run: |
+          python .github/scripts/verify_release.py verify-index https://test.pypi.org
+          WHEEL_URL="$(cat release-files/wheel-url.txt)"
+          cd "$RUNNER_TEMP"
+          uv run --isolated --no-project --python 3.14 --refresh-package unibm \
+            --with "unibm @ $WHEEL_URL" python -I "$GITHUB_WORKSPACE/release-files/smoke.py"
+
+      - name: Publish the same files to PyPI
+        run: |
+          uv publish --trusted-publishing always \
+            --publish-url https://upload.pypi.org/legacy/ \
+            --check-url https://pypi.org/simple/ release-files/dist/*
+
+      - name: Verify PyPI hashes and install outside the checkout
+        run: |
+          python .github/scripts/verify_release.py verify-index https://pypi.org
+          WHEEL_URL="$(cat release-files/wheel-url.txt)"
+          cd "$RUNNER_TEMP"
+          uv run --isolated --no-project --python 3.14 --refresh-package unibm \
+            --with "unibm @ $WHEEL_URL" python -I "$GITHUB_WORKSPACE/release-files/smoke.py"
+
+      - name: Publish the GitHub Release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

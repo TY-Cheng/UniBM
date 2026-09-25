@@ -45,8 +45,12 @@ class EviEstimationTests(unittest.TestCase):
     def test_generate_block_sizes_validates_and_supports_linear_grid(self) -> None:
         with self.assertRaisesRegex(ValueError, "At least 32 observations"):
             generate_block_sizes(16)
-        adjusted = generate_block_sizes(64, min_block_size=8, max_block_size=8, num_step=4)
-        self.assertTrue(np.all(adjusted >= 8))
+        for upper in (7, 8):
+            with self.subTest(upper=upper):
+                with self.assertRaisesRegex(ValueError, "max_block_size must be greater"):
+                    generate_block_sizes(64, min_block_size=8, max_block_size=upper, num_step=4)
+        with self.assertRaisesRegex(ValueError, "max_block_size must be greater"):
+            generate_block_sizes(64, max_block_size=5)
         block_sizes = generate_block_sizes(
             128,
             num_step=5,
@@ -55,6 +59,55 @@ class EviEstimationTests(unittest.TestCase):
             geom=False,
         )
         np.testing.assert_allclose(block_sizes, np.array([4, 8, 12, 16, 20]))
+
+    def test_generate_block_sizes_rejects_invalid_scalar_controls(self) -> None:
+        for name in ("min_block_size", "max_block_size", "num_step", "min_disjoint_blocks"):
+            for value in (0, -1, True, np.bool_(False), 2.5, 4.0, np.nan, np.inf, "4", [4]):
+                with self.subTest(name=name, value=value):
+                    with self.assertRaisesRegex(ValueError, name):
+                        generate_block_sizes(64, **{name: value})
+        for name in ("min_block_size", "max_block_size"):
+            for value in (1, 65):
+                with self.subTest(name=name, value=value):
+                    with self.assertRaisesRegex(ValueError, name):
+                        generate_block_sizes(64, **{name: value})
+        for value in (True, 64.0, np.nan, "64", [64]):
+            with self.subTest(n_obs=value):
+                with self.assertRaisesRegex(ValueError, "n_obs"):
+                    generate_block_sizes(value)
+        np.testing.assert_array_equal(
+            generate_block_sizes(
+                np.int64(64),
+                min_block_size=np.int64(4),
+                max_block_size=np.int64(16),
+                num_step=np.int64(3),
+                min_disjoint_blocks=np.int64(1),
+            ),
+            np.array([4, 8, 16]),
+        )
+
+    def test_default_block_grid_covers_short_and_long_records(self) -> None:
+        # An explicit lower bound cannot enlarge the automatic upper bound.
+        for n_obs, minimum in ((32, 5), (64, 5), (1000, 100)):
+            with self.subTest(n_obs=n_obs, minimum=minimum):
+                with self.assertRaisesRegex(ValueError, "max_block_size must be greater"):
+                    generate_block_sizes(n_obs, min_block_size=minimum)
+        for n_obs, expected_bounds in (
+            (128, (6, 7)),
+            (365, (8, 21)),
+            (2511, (14, 140)),
+        ):
+            with self.subTest(n_obs=n_obs):
+                grid = generate_block_sizes(n_obs)
+                self.assertEqual((grid[0], grid[-1]), expected_bounds)
+                self.assertTrue(np.all(np.diff(grid) > 0))
+        self.assertEqual(generate_block_sizes(365, min_disjoint_blocks=13)[-1], 28)
+        self.assertEqual(generate_block_sizes(365, min_disjoint_blocks=None)[-1], 41)
+
+    def test_short_default_grid_fails_at_evi_selection(self) -> None:
+        np.testing.assert_array_equal(generate_block_sizes(128), [6, 7])
+        with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
+            estimate_evi_quantile(self._positive_sample(128), regression="OLS")
 
     def test_validate_block_sizes_rejects_invalid_custom_grids(self) -> None:
         np.testing.assert_array_equal(
@@ -255,9 +308,9 @@ class EviEstimationTests(unittest.TestCase):
         self.assertIsNotNone(fit.bootstrap)
         self.assertIsNotNone(fit.bootstrap["covariance"])
         self.assertEqual(fit.covariance_shrinkage_policy, "fixed")
-        self.assertEqual(fit.covariance_shrinkage, 0.37)
+        self.assertEqual(fit.covariance_shrinkage, 0.73)
         self.assertEqual(fit.bootstrap_block_length_policy, "default")
-        self.assertEqual(fit.bootstrap_block_length, 12)
+        self.assertEqual(fit.bootstrap_block_length, 16)
         self.assertEqual(fit.bootstrap_reps_requested, 20)
         self.assertEqual(fit.bootstrap_reps_used, 20)
 
@@ -359,6 +412,51 @@ class EviEstimationTests(unittest.TestCase):
                         plateau_points=3,
                     )
 
+    def test_public_evi_rejects_competing_grid_sources(self) -> None:
+        values = self._positive_sample(seed=815)
+        block_sizes = np.array([4, 8, 16, 32, 64], dtype=int)
+        curve = block_summary_curve(values, block_sizes)
+        generation_controls = (("num_step", 5), ("min_block_size", 4), ("max_block_size", 64))
+        for function in (estimate_evi_quantile, estimate_target_scaling):
+            for name, value in generation_controls:
+                with self.subTest(function=function.__name__, source="block_sizes", name=name):
+                    with self.assertRaisesRegex(ValueError, "block_sizes cannot be combined"):
+                        function(
+                            values,
+                            regression="OLS",
+                            block_sizes=block_sizes,
+                            **{name: value},
+                        )
+            for name, value in (("block_sizes", block_sizes), *generation_controls):
+                with self.subTest(function=function.__name__, source="curve", name=name):
+                    with self.assertRaisesRegex(ValueError, "curve cannot be combined"):
+                        function(values, regression="OLS", curve=curve, **{name: value})
+
+    def test_public_evi_shrinkage_is_fgls_only_with_a_resolved_default(self) -> None:
+        values = self._positive_sample(seed=816)
+        block_sizes = np.array([4, 8, 16, 32, 64], dtype=int)
+        for function in (estimate_evi_quantile, estimate_target_scaling):
+            for shrinkage in (0.0, 0.37, 1.0):
+                with self.subTest(function=function.__name__, shrinkage=shrinkage):
+                    with self.assertRaisesRegex(
+                        ValueError, "OLS does not accept covariance_shrinkage"
+                    ):
+                        function(
+                            values,
+                            regression="OLS",
+                            block_sizes=block_sizes,
+                            covariance_shrinkage=shrinkage,
+                        )
+            for regression in ("FGLS", "AUTO"):
+                with self.subTest(function=function.__name__, regression=regression):
+                    fit = function(
+                        values,
+                        regression=regression,
+                        block_sizes=block_sizes,
+                        bootstrap_result=_evi_bootstrap_result(block_sizes, np.eye(5)),
+                    )
+                    self.assertEqual(fit.covariance_shrinkage, 0.73)
+
     def test_public_evi_rejects_invalid_quantiles(self) -> None:
         values = self._positive_sample(seed=813)
         block_sizes = np.array([4, 8, 16, 32, 64], dtype=int)
@@ -398,6 +496,23 @@ class EviEstimationTests(unittest.TestCase):
                 bootstrap_reps=2,
                 plateau_points=2,
             )
+
+    def test_public_evi_reports_infeasible_automatic_superblock_length(self) -> None:
+        values = self._positive_sample(size=128, seed=828)
+        block_sizes = np.array([4, 8, 16, 24, 33], dtype=int)
+        for reps in (None, 4):  # Adaptive and fixed repetition budgets.
+            with self.subTest(bootstrap_reps=reps):
+                with self.assertRaisesRegex(
+                    ValueError, "FGLS requires usable bootstrap covariance"
+                ):
+                    estimate_evi_quantile(
+                        values, regression="FGLS", block_sizes=block_sizes, bootstrap_reps=reps
+                    )
+                fit = estimate_evi_quantile(
+                    values, regression="AUTO", block_sizes=block_sizes, bootstrap_reps=reps
+                )
+                self.assertEqual(fit.regression, "OLS")
+                self.assertIsNone(fit.bootstrap["covariance"])
 
     def test_public_evi_validates_supplied_covariance(self) -> None:
         values = self._positive_sample(seed=919)
@@ -489,7 +604,7 @@ class EviEstimationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "covariance_shrinkage"):
                     estimate_evi_quantile(
                         values,
-                        regression="OLS",
+                        regression="FGLS",
                         block_sizes=block_sizes,
                         covariance_shrinkage=shrinkage,
                         plateau_points=3,
@@ -564,7 +679,9 @@ class EviEstimationTests(unittest.TestCase):
             self.assertWarnsRegex(RuntimeWarning, "non-positive block summaries"),
             self.assertRaisesRegex(ValueError, "Not enough positive block summaries"),
         ):
-            estimate_target_scaling(np.zeros(64, dtype=float), target="quantile", regression="OLS")
+            estimate_target_scaling(
+                np.zeros(256, dtype=float), target="quantile", regression="OLS"
+            )
 
     def test_prediction_and_design_life_level_helpers(self) -> None:
         values = self._positive_sample(seed=202)
@@ -629,10 +746,10 @@ class EviEstimationTests(unittest.TestCase):
                 ),
                 10.0,
             )
-        with self.assertRaisesRegex(ValueError, "same tau"):
-            estimate_design_life_level(fit, 10.0, tau=0.9)
-        with self.assertRaisesRegex(ValueError, "same tau"):
-            estimate_design_life_level_interval(fit, 10.0, tau=0.9)
+        for function in (estimate_design_life_level, estimate_design_life_level_interval):
+            with self.subTest(function=function.__name__):
+                with self.assertRaisesRegex(TypeError, "tau"):
+                    function(fit, 10.0, tau=fit.quantile)
         with self.assertRaisesRegex(ValueError, "Block size must be positive"):
             predict_block_quantile(fit, 0.0)
         with self.assertRaisesRegex(ValueError, "Design-life years must be positive"):

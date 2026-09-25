@@ -24,19 +24,13 @@ def _pyplot():
     return plt
 
 
-def _resolved_file_path(file_path: Path | str | None) -> Path | None:
-    """Convert a supplied output name to ``Path``, preserving ``None`` and relative paths."""
-    if file_path is None:
-        return None
-    return Path(file_path)
-
-
-def _save_figure_outputs(fig, file_path: Path) -> None:
+def _save_figure_outputs(fig, file_path: Path | str) -> None:
     """Create missing parent directories and save using Matplotlib's path-based format.
 
     An existing destination may be overwritten; filesystem and format errors
     propagate to the caller.
     """
+    file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(file_path)
 
@@ -72,19 +66,18 @@ def plot_ei_path(
     file_path: Path | str | None = None,
     dpi: int = 150,
     title: str | None = None,
-    save: bool = False,
     close: bool = False,
     xlabel: str = "log(block size)",
     ylabel: str = "extremal index",
 ) -> tuple[Figure, Axes]:
-    """Plot one observed EI path together with its selected stable window.
+    """Plot one observed EI path and any selected stable window.
 
     Plot finite theta values against the natural log of block size, shade the
-    stored stable window, and mark the native estimator's selected level. Raise
+    stored stable window when present, and mark the native estimator's level. Raise
     ``ValueError`` if the path has no finite theta values.
 
     Return ``(fig, ax)`` for customization at the requested ``dpi``. Saving
-    requires both ``save=True`` and a non-None ``file_path``; parent directories
+    requires a non-None ``file_path``; parent directories
     are created and an existing file may be overwritten. ``close=True`` closes
     the figure in pyplot after drawing/saving but still returns its objects.
     """
@@ -95,7 +88,8 @@ def plot_ei_path(
     x = np.log(levels.astype(float))
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(6.5, 4), dpi=dpi)
     ax.plot(x, theta, color="tab:blue", marker="o", ms=3.2, lw=1.1, label="observed path")
-    _draw_path_window(ax, lo=path.stable_window.lo, hi=path.stable_window.hi)
+    if path.stable_window is not None:
+        _draw_path_window(ax, lo=path.stable_window.lo, hi=path.stable_window.hi)
     ax.axvline(
         np.log(float(path.selected_level)),
         color="tab:red",
@@ -109,9 +103,8 @@ def plot_ei_path(
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    resolved = _resolved_file_path(file_path)
-    if save and resolved is not None:
-        _save_figure_outputs(fig, resolved)
+    if file_path is not None:
+        _save_figure_outputs(fig, file_path)
     if close:
         plt.close(fig)
     return fig, ax
@@ -195,7 +188,6 @@ def plot_ei_fit(
     file_path: Path | str | None = None,
     dpi: int = 150,
     title: str | None = None,
-    save: bool = False,
     close: bool = False,
 ) -> tuple[Figure, Axes]:
     """Plot one EI fit either as a retained path view or a threshold summary.
@@ -204,8 +196,8 @@ def plot_ei_fit(
     other fits use a single point with the stored interval when finite. The
     plotted interval is supplied by the estimator, not recomputed by this helper.
 
-    Return ``(fig, ax)`` at the requested ``dpi``. Saving requires both
-    ``save=True`` and a non-None ``file_path``; missing parent directories are
+    Return ``(fig, ax)`` at the requested ``dpi``. Saving requires a non-None
+    ``file_path``; missing parent directories are
     created and existing files may be overwritten. ``close=True`` closes the
     pyplot figure after drawing/saving while still returning its objects.
     """
@@ -217,9 +209,8 @@ def plot_ei_fit(
         _plot_threshold_fit(ax, fit)
     ax.set_title(title or _default_fit_title(fit))
     fig.tight_layout()
-    resolved = _resolved_file_path(file_path)
-    if save and resolved is not None:
-        _save_figure_outputs(fig, resolved)
+    if file_path is not None:
+        _save_figure_outputs(fig, file_path)
     if close:
         plt.close(fig)
     return fig, ax

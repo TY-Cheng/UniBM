@@ -99,6 +99,21 @@ class EiBootstrapTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(boot["covariance"])))
         self.assertEqual(boot["base_path"], "bb")
         self.assertIs(boot["sliding"], True)
+        np.testing.assert_array_equal(boot["covariance"], np.cov(boot["samples"], rowvar=False))
+
+    def test_fixed_reps_rejects_explicit_monitoring_shrinkage(self) -> None:
+        for shrinkage in (0.0, 0.37, 1.0, 999):
+            with self.subTest(shrinkage=shrinkage):
+                with self.assertRaisesRegex(ValueError, "covariance_shrinkage.*adaptive"):
+                    bootstrap_bm_ei_path(
+                        np.arange(1.0, 65.0),
+                        allow_zeros=False,
+                        base_path="bb",
+                        sliding=True,
+                        block_sizes=np.array([4, 8, 16]),
+                        reps=3,
+                        covariance_shrinkage=shrinkage,
+                    )
 
     def test_bootstrap_bm_ei_path_validates_fixed_block_length(self) -> None:
         values = np.arange(1.0, 65.0)

@@ -114,10 +114,11 @@ def _build_path_from_scores(
     *,
     sliding: bool,
 ) -> EiPathBundle:
-    """Construct one BM path and select its stable window from finite z values.
+    """Construct one BM path, selecting a window only for a multilevel grid.
 
     Retain per-level statistics for native inference. ``selected_level`` is the
-    smallest block size inside the chosen window, used by the native estimator.
+    sole supplied block size or the smallest size inside the selected window.
+    A fixed single level has no selected stable window.
     """
     theta_path, eir_path, z_path, sample_counts, sample_statistics = (
         _compute_path_arrays_from_scores(
@@ -128,8 +129,12 @@ def _build_path_from_scores(
             collect_statistics=True,
         )
     )
-    stable_window, stable_mask = select_stable_path_window(block_sizes, z_path)
-    selected_level = int(block_sizes[np.isfinite(z_path)][stable_mask][0])
+    if block_sizes.size == 1:
+        stable_window = None
+        selected_level = int(block_sizes[0])
+    else:
+        stable_window, stable_mask = select_stable_path_window(block_sizes, z_path)
+        selected_level = int(block_sizes[np.isfinite(z_path)][stable_mask][0])
     return EiPathBundle(
         base_path=base_path,
         sliding=bool(sliding),
@@ -178,13 +183,16 @@ def _build_bm_z_paths_from_values(
 def _build_bm_paths_from_values(
     values: np.ndarray,
     block_sizes: np.ndarray,
+    *,
+    path_keys: tuple[tuple[str, bool], ...] = BM_PATH_KEYS,
 ) -> dict[tuple[str, bool], EiPathBundle]:
-    """Build Northrop and BB paths with both sliding and disjoint blocks.
+    """Build only the requested Northrop/BB and sliding/disjoint paths.
 
     ``values`` and ``block_sizes`` have already been validated by preparation.
     Scaled empirical ranks yield ``-log(F)`` and ``1 - F`` score series; minima
     of these decreasing transforms correspond to maxima of the original data.
-    Return a dictionary keyed by ``(base_path, sliding)`` with selected windows.
+    Return a dictionary keyed by ``(base_path, sliding)``. A single supplied
+    block size bypasses window selection for fixed-b native inference.
     """
     cdf_values = np.asarray(empirical_cdf(values)(values), dtype=float)
     cdf_values = np.clip(cdf_values, EI_TINY, 1.0 - EI_TINY)
@@ -199,5 +207,5 @@ def _build_bm_paths_from_values(
             block_sizes,
             sliding=sliding,
         )
-        for base_path, sliding in BM_PATH_KEYS
+        for base_path, sliding in path_keys
     }

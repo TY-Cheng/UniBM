@@ -1,113 +1,146 @@
 # Case studies
 
-<p class="unibm-case-intro">
-Six case studies illustrate severity scaling and extremal clustering in environmental
-records. The figures and numerical summaries use the repository's archived provider inputs.
-</p>
-
-The four report cases are Texas and Florida streamflow and NFIP claims.
-The two GHCN cases are broader severity-only illustrations.
-
-**Analysis settings.** These results use fixed shrinkage `0.37`, the declared
-window-selection rules, and adaptive R at `128/256/512/768/1024`. Shrinkage is a
-pre-specified computational setting, not an optimum selected from sensitivity
-results.
-
-| Case | EVI R | BB-sliding EI R | Northrop-sliding EI R |
-|---|---:|---:|---:|
-| Texas streamflow | 256 | 256 | 256 |
-| Florida streamflow | 256 | 256 | 512 |
-| Texas NFIP | 128 | 256 | 256 |
-| Florida NFIP | 512 | 256 | 256 |
-| Houston precipitation | 256 | — | — |
-| Phoenix hot–dry severity | 128 | — | — |
-
-All listed fits met the 10%-of-statistical-SE MCSE criterion for the parameter
-estimate and its interval endpoints. This controls finite-bootstrap numerical
-precision conditional on the selected window; it does **not** establish 95%
-empirical coverage or certify the numerical precision of extrapolated
-design-life levels. Explicit fixed integer R remains supported by the API.
+Nine records across six pages illustrate EVI, EI, and design-life estimation on
+explicit observation scales. Streamflow and NFIP retain their physical or
+monetary scales; the other cases use the normalization defined below.
+GOES is an EVI point-estimation example. The other eight records include EI.
 
 <div class="unibm-domain-grid">
-  <a class="unibm-domain-card unibm-domain-climate" href="climate-extremes/">
-    <span class="unibm-domain-index">GHCN · 2 cases</span>
-    <h3>Climate extremes</h3>
-    <p>June–November precipitation in Houston and April–October hot–dry severity in Phoenix.</p>
-    <span class="unibm-domain-meta">Severity branch · no formal EI</span>
-  </a>
   <a class="unibm-domain-card unibm-domain-streamflow" href="streamflow/">
-    <span class="unibm-domain-index">USGS · 2 cases</span>
+    <span class="unibm-domain-index">01</span>
     <h3>Streamflow</h3>
-    <p>Long daily-discharge records at selected Texas and Florida streamgages.</p>
-    <span class="unibm-domain-meta">Severity + persistence</span>
+    <p>Texas and Florida daily mean discharge.</p>
+    <span class="unibm-domain-meta">USGS · Raw · EVI + EI</span>
   </a>
   <a class="unibm-domain-card unibm-domain-nfip" href="nfip-claims/">
-    <span class="unibm-domain-index">OpenFEMA · 2 cases</span>
+    <span class="unibm-domain-index">02</span>
     <h3>NFIP claims</h3>
-    <p>Daily building-claim totals, grouped by date of loss, on active-day and calendar-day clocks.</p>
-    <span class="unibm-domain-meta">Severity + persistence</span>
+    <p>Texas and Florida daily building-claim totals in 2025 dollars.</p>
+    <span class="unibm-domain-meta">OpenFEMA · CPI-adjusted · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-climate" href="houston-precipitation/">
+    <span class="unibm-domain-index">03</span>
+    <h3>Houston precipitation</h3>
+    <p>Full-calendar daily rainfall divided by its past EWMA level.</p>
+    <span class="unibm-domain-meta">GHCN · Normalized · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-climate" href="phoenix-hot-dry/">
+    <span class="unibm-domain-index">04</span>
+    <h3>Phoenix hot–dry severity</h3>
+    <p>A derived daily severity index divided by its past EWMA level.</p>
+    <span class="unibm-domain-meta">GHCN · Normalized · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-streamflow" href="goes-xray/">
+    <span class="unibm-domain-index">05</span>
+    <h3>GOES soft X-rays</h3>
+    <p>Hourly maxima divided by their past EWMA level, with gaps retained.</p>
+    <span class="unibm-domain-meta">NOAA · Normalized · EVI only</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-nfip" href="spy-qqq/">
+    <span class="unibm-domain-index">06</span>
+    <h3>SPY / QQQ losses</h3>
+    <p>Left-tail log losses divided by past EWMA return volatility.</p>
+    <span class="unibm-domain-meta">Massive · Normalized · EVI + EI</span>
   </a>
 </div>
 
-## Reading the evidence
+## What “normalized” means
 
-| Quantity | What it describes | What it does not establish |
-|---|---|---|
-| EVI `ξ` | Slope of log block-maximum quantiles against log block size | A causal mechanism or event forecast |
-| EI `θ` | Dimensionless measure of clustering among upper-tail exceedances | Elapsed flood duration or the number of all active days |
-| Design-life level `D_tau(T)` | The non-exceedance quantile `tau` of the maximum over design life `T`, on the specified clock | An annual-maxima return-level label |
+Normalization divides an observation by a positive scale estimated from earlier
+observations. It does not subtract a mean, produce z-scores, or establish stationarity.
+The resulting EVI and EI describe the **transformed series**, not automatically
+the raw process. A time-varying denominator can change both tail behavior and clustering.
 
-The reported headline design-life levels use `tau=0.5`: they estimate the median
-horizon maximum. Their 95% confidence intervals describe uncertainty in that
-estimated median, not the range of future maxima. Parameter intervals and
-design-life intervals are conditional on the selected window, fixed
-regularization, and stationary scaling model. NFIP's calendar-year conversion
-also assumes the historical active-day rate remains applicable.
+| Cases | Numerator | Denominator | Initialization and update | Clock |
+|---|---|---|---|---|
+| Streamflow | Daily mean discharge | None | No EWMA or warmup | Calendar days |
+| NFIP claims | Daily building-claim totals in 2025 USD | None | CPI adjustment retained; no EWMA | Active days for EVI; calendar days for EI |
+| Houston | Daily precipitation, including zeros | Past EWMA precipitation level | First 30 days' mean; 180-day half-life | Calendar days |
+| Phoenix | Derived hot–dry severity, including zeros | Past EWMA severity level | First 30 days' mean; 180-day half-life | Calendar days |
+| GOES | Qualified hourly maximum of minute-mean irradiance | Past EWMA irradiance level | First 720 hours' mean; 4,320-hour half-life; restart after each gap | UTC hours |
+| SPY / QQQ | `max(−r_t, 0)` from split- and dividend-adjusted log returns | Past EWMA root mean square of signed returns | First 252 returns' mean square; decay 0.94 | Trading sessions |
 
-## Results across the four main applications
+For Houston, Phoenix, and GOES, the level-normalized series is:
 
-The fitted EVI values are 0.33–0.64 for streamflow and 1.38–1.40 for NFIP
-building-claim totals on active days. Calendar-time EI estimates are about
-0.05 and 0.31, respectively. Streamflow therefore exhibits stronger extremal
-clustering in these records, while NFIP severity fits imply faster growth of
-maximum daily building-claim totals on the active-day clock as the design life
-increases.
+```text
+Y_t = X_t / m_t
+m_w = mean(X_0, ..., X_(w−1))
+m_t = ρ m_(t−1) + (1−ρ) X_(t−1),  t > w
+ρ = 2^(−1/h)
+```
 
-The streamflow records have similar EI estimates despite different EVI
-estimates: marginal tail behavior and extremal dependence describe different
-features of a record. NFIP estimates are close between states, but similar EVI
-and EI values can coexist with different loss magnitudes and regional
-dependence structures. A statewide claim ledger and an individual streamgage
-provide a descriptive comparison, not matched event-level outcomes.
+Here `w` is the warmup length and `h` is the half-life, both in observations.
+The first analyzed observation is `t=w`; its denominator uses only the warmup.
+For daily cases, `w=30, h=180`; for GOES, `w=720, h=4320` in each uninterrupted run.
+The zero-based convention makes explicit that the current observation does not
+enter its own denominator. No epsilon floor, interpolation, or zero deletion is applied.
 
-## Window sensitivity and interpretation
+SPY/QQQ use a different denominator:
 
-Refitting over the three best-ranked admissible windows gives the following
-min–max ranges under the fixed selection rules:
+```text
+Y_t = max(−r_t, 0) / sqrt(v_t)
+v_252 = mean(r_0², ..., r_251²)
+v_t = 0.94 v_(t−1) + 0.06 r_(t−1)²,  t > 252
+```
 
-| Application | EVI range | BB-sliding-FGLS EI range |
-|---|---:|---:|
-| Texas streamflow | [0.59, 0.64] | [0.0488, 0.0495] |
-| Florida streamflow | [0.32, 0.33] | [0.0551, 0.0569] |
-| Texas NFIP claims | [1.31, 1.49] | [0.3117, 0.3129] |
-| Florida NFIP claims | [1.37, 1.43] | [0.3087, 0.3092] |
+The scale uses **all signed returns**, including gains; it is a zero-mean EWMA
+volatility estimate. Gains remain as zero observations in `Y_t`. These are neither
+loss-only samples nor cumulative portfolio losses.
 
-EI estimates vary little across these windows; EVI sensitivity is greatest for
-Texas NFIP. These are window-sensitivity ranges, not post-selection confidence
-intervals. All four 50-year design-life levels extrapolate beyond the fitted
-block-size range, as detailed on the streamflow and NFIP pages.
+The EWMA steps are past-only. Phoenix's preceding climatological standardization
+uses the full retained period, and the provider archives are retrospective data
+snapshots. Neither feature should be described as point-in-time forecasting data.
 
-The applications use a stationary working model for each retained record.
-Block-size diagnostics assess scaling and EI-path stability, not temporal
-stationarity. Clear trends or regime shifts require separate treatment before
-future-design extrapolation; the reported intervals do not include uncertainty
-from temporal change or data-driven period selection.
+## Inference and units
 
-UniBM combines information across block sizes within one record. It can
-supplement standard flood-frequency analysis with severity and clustering
-summaries. Conventional annual-peak design and regional or ungauged-site
-estimation should follow established methods. Quantitative comparisons require
-aligned periods, observation scales, and probability definitions.
+The eight continuous-record cases use median-sliding FGLS for EVI and
+BB/Northrop-sliding FGLS for EI, with fixed shrinkage 0.73 and 0.37 respectively.
+K-gaps and Ferro–Segers provide EI comparisons. The random seed is 7, with
+adaptive bootstrap stages 128/256/512/768/1024 and model-based Wald intervals.
+There is no additional CI scale calibration.
 
-The shared analysis cutoff is **2025-12-31**. See [Validation](../validation.md)
-for synthetic benchmark evidence, with its separate data and scope.
+The shared grid starts at `max(5, ceil(N**(1/3)))`. Its upper bound is
+`min(floor(N**(1−1/e)), floor(N/17))` for EVI and
+`min(floor(sqrt(N)), floor(N/17))` for EI. Selection uses the full admissible
+grid without edge trimming. EVI uses `L=max(2B, floor(sqrt(N)))`;
+see [Concepts](../concepts.md). GOES instead uses OLS point estimates with
+complete windows on the uncompressed hourly calendar; it has no EI or reported CI.
+
+A reported 95% CI is conditional on the preprocessing, selected window,
+regularization, and stationary working model. EWMA is not re-estimated in each
+bootstrap draw. These intervals omit preprocessing and selection uncertainty;
+bootstrap numerical precision does not establish empirical coverage.
+See the separate [Benchmark](../benchmark.md) for coverage results with known truth.
+
+Design-life levels describe quantiles of a **maximum observation** over the
+stated horizon. The median curve uses `tau=0.5`; its CI is not a prediction
+interval for future maxima. Higher-quantile curves reuse the median fit's slope
+with quantile-specific intercepts. Normalized levels are dimensionless relative
+scales: they cannot be converted to future millimetres, irradiance, or loss
+percentages without a model for future denominators.
+
+## Data and reproduction
+
+The archive cutoff is 2025-12-31, but actual fitted dates vary after quality
+screening and warmup; Houston's longest complete record ends in 2022. No common
+end date or common sample size is implied. Provider, observation clock, preparation,
+fit dates, and numerical results are stated on each page and in its JSON record.
+
+From the repository root, rebuild only the documented figures and summaries:
+
+```bash
+PYTHONPATH=scripts uv run python -m application.docs_cases
+uv run mkdocs build --strict
+```
+
+This command uses existing local inputs and does not export to an external report
+directory. `--keys` selects case IDs; `--available` retains frozen optional
+GOES/finance assets when their local input pair is absent, and reports each skip.
+Malformed or hash-mismatched inputs still fail. The ordinary `just application`
+workflow also refreshes those extra cases when inputs are available. It retains
+its configured external report export behavior.
+
+GHCN, USGS, and NFIP use the repository's archived inputs. GOES and finance
+preparation commands and local-input requirements are on their respective pages.
+Building the documentation alone uses tracked static figures and requires no
+provider account, download, or model fit.

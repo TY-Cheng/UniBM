@@ -168,12 +168,20 @@ def estimate_max_spectrum_evi(
     """Estimate xi from weighted slopes of mean log2 block maxima versus scale.
 
     Preserve the finite series' time order and require positive maxima at
-    every chosen dyadic scale. Fit suffixes of at least ``min_scale_count``
-    scales, then choose a stable start-scale window and its lower-middle
+    every chosen dyadic scale. ``min_scale_count`` must be an integer at least
+    three. Fit suffixes of at least ``min_scale_count`` scales, then choose
+    a stable start-scale window and its lower-middle
     observed start. Return the selected slope, path, and a nominal 95% Wald
     interval using a scale-regression HC1 SE. That SE does not explicitly
     adjust for dependence between scales or start-scale selection.
     """
+    if (
+        isinstance(min_scale_count, (bool, np.bool_))
+        or not isinstance(min_scale_count, (int, np.integer))
+        or min_scale_count < 3
+    ):
+        raise ValueError("min_scale_count must be an integer at least 3.")
+    min_scale_count = int(min_scale_count)
     vec = _validate_spectrum_series(sample)
     if scales is None:
         scales = candidate_max_spectrum_scales(vec.size, min_scale=1, min_blocks=2)

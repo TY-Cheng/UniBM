@@ -11,6 +11,7 @@ from scipy.stats import rankdata
 
 from .._block_grid import validate_block_sizes
 from .._bootstrap_sampling import (
+    _validate_circular_bootstrap_block_size,
     default_circular_bootstrap_block_size,
 )
 from .._bootstrap_precision import adaptive_covariance
@@ -44,13 +45,9 @@ def _resolve_ei_bootstrap_block_length(
         raise ValueError("base_path must be 'bb' or 'northrop'.")
     if bootstrap_block_length is None:
         return "default", None
-    if (
-        isinstance(bootstrap_block_length, (bool, np.bool_))
-        or not isinstance(bootstrap_block_length, (int, np.integer))
-        or not 1 <= int(bootstrap_block_length) <= values.size
-    ):
-        raise ValueError("bootstrap_block_length must be None or an integer between 1 and n_obs.")
-    return "fixed", int(bootstrap_block_length)
+    return "fixed", _validate_circular_bootstrap_block_size(
+        bootstrap_block_length, n_obs=values.size, name="bootstrap_block_length"
+    )
 
 
 def _summarize_bm_ei_path_draws(
@@ -225,7 +222,7 @@ def bootstrap_bm_ei_path(
     reps: int | Literal["adaptive"] = "adaptive",
     random_state: int | None = 0,
     bootstrap_block_length: int | None = None,
-    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    covariance_shrinkage: float | None = None,
     n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Bootstrap BM-EI covariance; default adaptive precision targets pooled theta and z.
@@ -240,8 +237,11 @@ def bootstrap_bm_ei_path(
     BLAS settings. Outer parallel callers should allocate the inner cap.
     Batch/thread choices preserve draws, path order and adaptive stopping.
 
-    An explicit integer of at least two retains fixed-R sampling. Adaptive precision is conditional
-    on the original stable window and the declared covariance shrinkage.
+    An explicit integer of at least two retains fixed-R sampling and rejects
+    an explicit ``covariance_shrinkage``. That parameter only controls the
+    pooled fit monitored by adaptive stopping; ``None`` resolves to 0.37.
+    Neither mode shrinks the returned sample covariance. Adaptive precision
+    is conditional on the original stable window and the monitoring shrinkage.
     Checkpoints are 128, 256, 512, 768, and 1024. The target vector includes theta
     and its CI endpoints plus the unconstrained z fit and endpoints, so the
     theta=1 boundary cannot hide Monte Carlo error. The cap retains the result
@@ -250,7 +250,8 @@ def bootstrap_bm_ei_path(
 
     The returned in-memory dictionary contains full-grid covariance, path draws,
     block-size labels, estimator identity, and sampling/precision metadata. Pass
-    it to ``estimate_pooled_bm_ei`` with matching data, path, block scheme, and
+    it to ``estimate_pooled_bm_ei`` with matching data, path, and block scheme.
+    Reusing adaptive precision metadata also requires matching the monitored
     shrinkage (default 0.37). This function does not write intermediate files.
     ``allow_zeros`` declares whether observed zeros are legal; non-finite inputs
     are always rejected rather than removed from the observation clock.
@@ -265,7 +266,11 @@ def bootstrap_bm_ei_path(
     )
     length = resolved_block_length or default_circular_bootstrap_block_size(values.size)
     if reps == "adaptive":
-        shrinkage = validate_covariance_shrinkage(covariance_shrinkage)
+        shrinkage = validate_covariance_shrinkage(
+            EI_DEFAULT_COVARIANCE_SHRINKAGE
+            if covariance_shrinkage is None
+            else covariance_shrinkage
+        )
         path_key = (base_path, sliding)
         observed_z = _build_bm_z_paths_from_values(values, block_sizes, path_keys=(path_key,))[
             path_key
@@ -274,7 +279,7 @@ def bootstrap_bm_ei_path(
         mask = (block_sizes >= window.lo) & (block_sizes <= window.hi)
         levels, z_values = block_sizes[mask], observed_z[mask]
 
-        def evaluate(covariance: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        def evaluate(covariance: np.ndarray, _rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Return theta/z targets and their SE scales for covariance-precision checks."""
             selected = subset_covariance_by_labels(
                 covariance, block_sizes, levels, context="EI bootstrap covariance"
@@ -325,6 +330,10 @@ def bootstrap_bm_ei_path(
         }
     if isinstance(reps, (bool, np.bool_)) or not isinstance(reps, (int, np.integer)) or reps < 2:
         raise ValueError("reps must be an integer at least 2 or 'adaptive'.")
+    if covariance_shrinkage is not None:
+        raise ValueError(
+            "covariance_shrinkage only applies to adaptive monitoring; omit it for fixed reps."
+        )
     with _ei_path_sampler(
         values,
         block_sizes,

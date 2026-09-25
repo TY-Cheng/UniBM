@@ -14,7 +14,6 @@ def _baseline_select_penultimate_window(
     log_values: np.ndarray,
     *,
     min_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = 2.0,
 ) -> PlateauWindow:
     x = np.asarray(log_block_sizes, dtype=float)
@@ -22,15 +21,9 @@ def _baseline_select_penultimate_window(
     n = x.size
     if n < min_points:
         raise ValueError("Not enough positive block summaries to select a plateau.")
-    lo = int(np.floor(n * trim_fraction))
-    hi = n - lo
-    lo = min(lo, max(n - min_points, 0))
-    if hi - lo < min_points:
-        lo = 0
-        hi = n
     best: tuple[float, int, int] | None = None
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(n - min_points + 1):
+        for stop in range(start + min_points, n + 1):
             model = _fit_linear_model(x[start:stop], y[start:stop])
             resid = y[start:stop] - model["fitted"]
             mse = float(np.mean(resid**2))
@@ -63,9 +56,13 @@ class EviSelectionTests(unittest.TestCase):
         self.assertAlmostEqual(plateau.score, baseline.score)
         np.testing.assert_array_equal(plateau.mask, baseline.mask)
 
-        reset_plateau = select_penultimate_window(x, y, min_points=5, trim_fraction=0.49)
-        self.assertEqual(reset_plateau.start, 0)
-        self.assertEqual(reset_plateau.stop, 5)
+    def test_selection_can_reach_either_grid_endpoint(self) -> None:
+        x = np.arange(12.0)
+        y = np.array([0, 1, 2, 3, 4, 9, 16, 25, 36, 49, 64, 81], dtype=float)
+        for values, expected in ((y, (0, 5)), (y[::-1], (7, 12))):
+            with self.subTest(expected=expected):
+                plateau = select_penultimate_window(x, values)
+                self.assertEqual((plateau.start, plateau.stop), expected)
 
     def test_select_penultimate_window_validates_input(self) -> None:
         with self.assertRaisesRegex(ValueError, "Not enough positive block summaries"):
@@ -90,10 +87,6 @@ class EviSelectionTests(unittest.TestCase):
         y = np.arange(4.0)
         with self.assertRaisesRegex(ValueError, "min_points must be an integer at least 2"):
             select_penultimate_window(x, y, min_points=1)
-        for trim_fraction in (-0.1, 0.5, np.nan):
-            with self.subTest(trim_fraction=trim_fraction):
-                with self.assertRaisesRegex(ValueError, "trim_fraction must be finite"):
-                    select_penultimate_window(x, y, min_points=2, trim_fraction=trim_fraction)
         for curvature_penalty in (-1.0, np.nan):
             with self.subTest(curvature_penalty=curvature_penalty):
                 with self.assertRaisesRegex(ValueError, "curvature_penalty must be finite"):

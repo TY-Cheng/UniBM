@@ -6,8 +6,8 @@
     "screening_source": "freeze_usgs_station_selection"
   },
   "TX": {
-    "site_no": "08066500",
-    "station_name": "Trinity River at Romayor, TX",
+    "site_no": "08114000",
+    "station_name": "Brazos River at Richmond, TX",
     "state_code": "TX",
     "screening_source": "freeze_usgs_station_selection"
   }

@@ -27,7 +27,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
             xi_values=(0.10,),
             theta_values=(0.50,),
             families=("frechet_max_ar",),
-            n_obs=64,
+            n_obs=256,
             reps=1,
         )
         with (
@@ -37,7 +37,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
             build_evi_shrinkage_sensitivity_summary(
                 root=tmpdir,
                 configs=configs,
-                deltas=(0.35, 0.37),
+                deltas=(0.35, 0.73),
                 force=True,
             )
         self.assertEqual(
@@ -49,7 +49,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
             xi_values=(0.10,),
             theta_values=(0.50,),
             families=("frechet_max_ar",),
-            n_obs=64,
+            n_obs=256,
             reps=1,
         )[0]
         template = evaluate_config(cfg, random_state=29).iloc[[0]]
@@ -75,7 +75,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
             xi_values=(0.10,),
             theta_values=(0.50,),
             families=("frechet_max_ar",),
-            n_obs=64,
+            n_obs=256,
             reps=1,
         )[0]
 
@@ -130,7 +130,7 @@ class EviBenchmarkReportTests(unittest.TestCase):
                 xi_values=(0.10,),
                 theta_values=(0.50,),
                 families=("frechet_max_ar",),
-                n_obs=64,
+                n_obs=256,
                 reps=1,
             )
             summary, output_path = build_evi_shrinkage_sensitivity_summary(

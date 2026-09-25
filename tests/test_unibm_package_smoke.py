@@ -40,7 +40,7 @@ class UniBmPackageSmokeTests(unittest.TestCase):
         self.assertTrue(np.all(design_life <= upper))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "evi.png"
-            unibm.evi.plot_scaling_fit(fit, file_path=output, save=True, close=True)
+            unibm.evi.plot_scaling_fit(fit, file_path=output, close=True)
             self.assertTrue(output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_top_level_package_import_supports_minimal_formal_ei_workflow(self) -> None:
@@ -58,7 +58,7 @@ class UniBmPackageSmokeTests(unittest.TestCase):
         self.assertTrue(resources.files("unibm").joinpath("py.typed").is_file())
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "ei.png"
-            unibm.ei.plot_ei_fit(fit, file_path=output, save=True, close=True)
+            unibm.ei.plot_ei_fit(fit, file_path=output, close=True)
             self.assertTrue(output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_accelerated_targets_work_in_an_installed_distribution(self) -> None:

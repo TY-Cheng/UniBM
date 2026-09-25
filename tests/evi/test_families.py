@@ -93,6 +93,18 @@ class EviEstimatorFamilyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "scales"):
                     estimate_max_spectrum_evi(sample, scales=scales, min_scale_count=3)
 
+    def test_max_spectrum_validates_minimum_scale_count(self) -> None:
+        sample = self._pareto_sample(size=256)
+        for count in (0, 1, 2, 3.0, 3.5, True, np.bool_(False), None, np.nan):
+            with self.subTest(min_scale_count=count):
+                with self.assertRaisesRegex(ValueError, "min_scale_count.*integer at least 3"):
+                    estimate_max_spectrum_evi(sample, min_scale_count=count)
+
+        fit = estimate_max_spectrum_evi(
+            sample, scales=np.arange(1, 7), min_scale_count=np.int64(5)
+        )
+        self.assertEqual(fit.path_level, (1, 2))
+
     def test_confidence_intervals_and_stable_window_selection(self) -> None:
         lo, hi = wald_confidence_interval(1.0, 0.5, ci_level=0.95)
         self.assertLess(lo, 1.0)

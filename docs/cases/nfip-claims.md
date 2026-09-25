@@ -6,7 +6,11 @@ Severity uses active days with a positive total; EI describes clustering of extr
 totals on the calendar-day record. An active day need not be an extreme day.
 </p>
 
-These fits use [fixed shrinkage 0.37 and adaptive R](index.md), with unchanged
+**Scale.** “Raw” here means no EWMA normalization. Inflation adjustment to 2025
+USD and aggregation by date of loss are retained. EVI uses positive claim-active
+days; EI uses the full calendar, including zero claim totals.
+
+These fits use [fixed shrinkage 0.73 for EVI, 0.37 for EI, and adaptive R](index.md), with unchanged
 claim extracts, analysis windows, and CPI inputs.
 
 ## Texas daily building-claim totals
@@ -25,15 +29,17 @@ September and November. See the [CPI input](https://github.com/TY-Cheng/UniBM/bl
 and preparation code below for that data treatment.
 
 <div class="unibm-stat-grid">
-  <div class="unibm-stat"><strong>1.395</strong><span>EVI ξ · 95% CI [0.719, 2.071]</span></div>
-  <div class="unibm-stat"><strong>0.312</strong><span>EI θ · 95% CI [0.278, 0.349]</span></div>
-  <div class="unibm-stat"><strong>$478m</strong><span>median 10-year active-day level · CI [$24.1m, $9.47b]</span></div>
+  <div class="unibm-stat"><strong>1.536</strong><span>EVI ξ · 95% CI [0.957, 2.114]</span></div>
+  <div class="unibm-stat"><strong>0.3116</strong><span>BB-sliding-FGLS EI θ · 95% CI [0.2791, 0.3479]</span></div>
+  <div class="unibm-stat"><strong>0.96 billion USD</strong><span>median 10-year active-day level · CI [0.117, 7.86] billion USD</span></div>
 </div>
 
 <figure class="unibm-figure">
   <img src="../../assets/cases/tx_nfip_claims.png" alt="Four-panel diagnostic for Texas NFIP building payouts, showing target stability, active-day block-maximum scaling, calendar-day extremal-index estimates, and design-life levels.">
   <figcaption>Texas NFIP diagnostics. Severity uses active days; EI uses calendar days. The EI implies about 3.21 upper-tail exceedances of daily building-claim totals per cluster in the limiting interpretation.</figcaption>
 </figure>
+
+[Download numerical results and preparation settings (JSON)](../assets/cases/tx_nfip_claims.json).
 
 ## Florida daily building-claim totals
 
@@ -42,15 +48,17 @@ loss-date window. It contains 17,532 calendar days and 5,440 positive claim-acti
 113.333 per calendar year.
 
 <div class="unibm-stat-grid">
-  <div class="unibm-stat"><strong>1.383</strong><span>EVI ξ · 95% CI [1.051, 1.716]</span></div>
-  <div class="unibm-stat"><strong>0.309</strong><span>EI θ · 95% CI [0.271, 0.352]</span></div>
-  <div class="unibm-stat"><strong>$224m</strong><span>median 10-year active-day level · CI [$47.3m, $1.06b]</span></div>
+  <div class="unibm-stat"><strong>1.914</strong><span>EVI ξ · 95% CI [0.821, 3.007]</span></div>
+  <div class="unibm-stat"><strong>0.3077</strong><span>BB-sliding-FGLS EI θ · 95% CI [0.2671, 0.3544]</span></div>
+  <div class="unibm-stat"><strong>1.53 billion USD</strong><span>median 10-year active-day level · CI [0.0572, 40.8] billion USD</span></div>
 </div>
 
 <figure class="unibm-figure">
   <img src="../../assets/cases/fl_nfip_claims.png" alt="Four-panel diagnostic for Florida NFIP building payouts, showing target stability, active-day block-maximum scaling, calendar-day extremal-index estimates, and design-life levels.">
-  <figcaption>Florida NFIP diagnostics. The EI implies about 3.23 upper-tail exceedances of daily building-claim totals per cluster. These counts refer to extreme totals, not all active days or elapsed cluster durations.</figcaption>
+  <figcaption>Florida NFIP diagnostics. The EI implies about 3.25 upper-tail exceedances of daily building-claim totals per cluster. These counts refer to extreme totals, not all active days or elapsed cluster durations.</figcaption>
 </figure>
+
+[Download numerical results and preparation settings (JSON)](../assets/cases/fl_nfip_claims.json).
 
 ## Observation clocks and design-life levels
 
@@ -68,8 +76,8 @@ Under the stationary scaling model, the 50-year conversion gives:
 
 | State | Active days `b_50` | Estimated median maximum daily total | Conditional 95% CI for that median |
 |---|---:|---:|---:|
-| Texas | 6,049 | $4.51 billion | [$0.077, $264.68] billion |
-| Florida | 5,667 | $2.07 billion | [$0.257, $16.69] billion |
+| Texas | 6,049 | $11.35 billion | [$0.547, $235.46] billion |
+| Florida | 5,667 | $33.17 billion | [$0.215, $5,127.40] billion |
 
 All values are in 2025 U.S. dollars. These intervals quantify estimation
 uncertainty in the **median horizon maximum, `D_0.5(50)`**. They are not
@@ -79,18 +87,20 @@ maxima.
 ## Why the intervals remain wide
 
 Each severity fit uses block summaries from the full 48-year record. The
-selected scaling windows, however, span only 14–21 active days in Texas and
-10–19 in Florida. The 50-year targets of 6,049 and 5,667 active days are about
-288 and 298 times the respective largest fitted block size. A long calendar
+selected scaling windows, however, span 25–45 active days in Texas and
+48–73 in Florida. The 50-year targets of 6,049 and 5,667 active days are about
+134 and 77.6 times the respective largest fitted block size. A long calendar
 record does not by itself validate scaling over this distance.
 
 The interval width depends jointly on the intercept variance, slope variance,
 their covariance, and the target block size. Extrapolation amplifies these
 estimation errors, and exponentiation produces asymmetric dollar-scale bounds.
-At a 300-fold increase in block size, increasing the slope by 0.1 multiplies the
-extrapolated level by about 1.77, holding the fitted median at the reference
-block size fixed. Both states have EVI estimates near 1.4, but Texas has wider
-parameter uncertainty: tail heaviness alone does not explain interval width.
+At a 100-fold increase in block size, increasing the slope by 0.1 multiplies the
+extrapolated level by about 1.58, holding the fitted median at the reference
+block size fixed. Florida has the higher EVI point estimate and wider parameter
+uncertainty,
+but the parameter intervals overlap. Tail heaviness alone does not explain
+design-life interval width.
 
 Further assessment should test scaling at larger block sizes and evaluate
 design-life interval coverage with window-selection uncertainty included.
@@ -101,9 +111,9 @@ of these extrapolated design-life intervals.
 
 ## Interpretation and use
 
-The similar EVI and EI estimates describe similar active-day severity scaling
-and calendar-time extremal clustering within these fitted records. They can
-coexist with different loss magnitudes and regional dependence structures.
+The two states have similar EI point estimates. Their EVI point estimates
+differ, with overlapping conditional intervals. These summaries can coexist
+with different loss magnitudes and regional dependence structures.
 An asymptotic EVI above one would imply no finite mean under an unbounded
 regularly varying model, although fixed-probability quantiles remain finite.
 The reported levels describe maximum daily totals, not expected annual losses.

@@ -38,8 +38,19 @@ assumptions and cannot be passed to the quantile design-life helpers.
   when no `bootstrap_result` is supplied. An integer requests a fixed budget.
 - `"OLS"` does not bootstrap. `"FGLS"` requires usable covariance; `"AUTO"`
   permits missing internally generated covariance to fall back to OLS.
-- Covariance shrinkage defaults to the fixed value `0.37`; `random_state`
-  defaults to `0`.
+- Omitted `covariance_shrinkage=None` resolves to `0.73` for FGLS/AUTO. OLS
+  rejects an explicit shrinkage value because it does not use covariance weights.
+  `random_state` defaults to `0`.
+- Supply only one grid source: `min_block_size/max_block_size/num_step`, an
+  explicit `block_sizes`, or a reused `curve`. Reused curves reject additional
+  grid arguments; explicit grids reject generation controls.
+- Automatic EVI bounds are `max(5, ceil(n**(1/3)))` through
+  `min(floor(n**(1 - 1/e)), floor(n/17))`. An infeasible range raises;
+  a feasible range with fewer than five positive summaries cannot select a window.
+- Explicit grid bounds are valid integer sizes with `max_block_size` strictly
+  greater than `min_block_size`. They are not silently expanded. Explicit EVI
+  `super_block_size` is honored unchanged when valid; see
+  [bootstrap length rules](../concepts.md#bootstrap-lengths-repetitions-and-regularization).
 
 Thus, `estimate_evi_quantile(sample, regression="FGLS")` selects
 **median + sliding + adaptive FGLS**. The lower-level bootstrap backbone and
@@ -54,17 +65,32 @@ and K-gaps are separate entrypoints. The pooled workflow is:
 
 1. Call `prepare_ei_bundle` with an explicit `allow_zeros` choice appropriate to
    the observation clock. It prepares Northrop and BB paths with both block
-   schemes. Its threshold candidates default to `(0.90, 0.95)`.
+   schemes by default. `path_keys=(("bb", True),)` prepares only BB-sliding;
+   `path_keys=()` skips BM preparation for threshold-only use. Its threshold
+   candidates default to `(0.90, 0.95)`. Its automatic BM grid uses
+   `max(5, ceil(n**(1/3)))` through `min(floor(sqrt(n)), floor(n/17))`;
+   EVI retains the upper exponent `1 - 1/e`. Bounds are never widened to
+   satisfy an estimator's minimum window size.
 2. For FGLS, call `bootstrap_bm_ei_path` with explicit `base_path`, `sliding`,
    `block_sizes`, and `allow_zeros`. Its `reps` defaults to `"adaptive"`.
 3. Call `estimate_pooled_bm_ei` with explicit `base_path="northrop"` or `"bb"`,
    `sliding=True` or `False`, and `regression="OLS"` or `"FGLS"`. FGLS requires
-   the matching bootstrap result; OLS rejects one.
+   the matching bootstrap result; OLS rejects one and also rejects an explicit
+   `covariance_shrinkage`.
 
-Both the bootstrap and pooled fit default to covariance shrinkage `0.37`.
+The adaptive bootstrap monitors a pooled fit with shrinkage `0.37` by default
+(`covariance_shrinkage=None`). An explicit value only configures that adaptive
+monitor and is rejected with fixed integer `reps`. Both bootstrap modes return
+the raw sample covariance; `estimate_pooled_bm_ei` applies shrinkage when fitting
+FGLS, also defaulting to `0.37`.
 The bootstrap seed defaults to `0`. Native BM and threshold estimators do not
 automatically run this covariance bootstrap. See the complete
 [pooled EI example](../worked-examples.md#example-3-pooled-extremal-index-fit).
+
+For fixed-b native inference, prepare a single `block_sizes=[b]` and the required
+`path_keys`. No stable-window selection is performed, and `stable_window` is
+`None`. Multilevel native fits retain the smallest size in their selected window.
+`use_adjusted_chandwich=True` is supported only for native Northrop; BB rejects it.
 
 The repository application workflow selects quantile-sliding adaptive FGLS for
 EVI and both Northrop-sliding and BB-sliding adaptive FGLS for pooled EI. These
@@ -78,9 +104,9 @@ estimator. It maps the fitted scaling law to the horizon's observation count:
 
 - `observations_per_year=365.25` is a daily-clock default. Set it to match the
   fitted series' actual observation clock.
-- `tau=None` inherits `fit.quantile`; an explicit `tau` must match it. A median
-  fit yields the median of the horizon maximum, not a return level whose return
-  period equals `years`.
+- `fit.quantile` determines the probability; there is no separate post-fit `tau`
+  argument. A median fit yields the median of the horizon maximum, not a return
+  level whose return period equals `years`.
 - `estimate_design_life_level_interval` uses the fit's coefficient covariance
   for a log-scale delta-method interval, nominally 95% with `z_crit=1.96`.
   This is a conditional interval for the fitted quantile, not a prediction
@@ -91,6 +117,20 @@ draws. Reaching the cap can leave `bootstrap_precision_met=False`. EVI's
 precision diagnostic monitors the EVI estimate and its CI endpoints, **not the
 extrapolated design-life levels**. See
 [Reading Returned Objects](../reading-returned-objects.md#reading-adaptive-precision).
+
+## Development API migration
+
+These changes in the current source tree are not a new PyPI release:
+
+| Earlier call | Current call or behavior |
+|---|---|
+| Design-life helpers with `tau=fit.quantile` | Omit `tau`; choose the quantile when fitting. |
+| Plot helpers with `save=True, file_path=path` | Pass `file_path=path`; saving follows the path. |
+| Plot helpers with `save=False` | Omit both `save` and `file_path` to avoid saving. |
+| OLS with `covariance_shrinkage=...` | Omit shrinkage; it only applies to covariance-weighted fits. |
+| Native BB with `use_adjusted_chandwich=True` | Omit this Northrop-only adjustment. |
+| Conflicting bounds, duplicated grid sources, or infeasible explicit bootstrap lengths | Correct the arguments; these now raise `ValueError`. |
+| Max-spectrum with `min_scale_count < 3`, a boolean, or a fractional value | Supply an integer of at least 3. |
 
 ## Top-level convenience imports
 

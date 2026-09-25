@@ -92,7 +92,7 @@ import numpy as np
 from unibm import prepare_ei_bundle, estimate_pooled_bm_ei, bootstrap_bm_ei_path
 
 sample = np.random.default_rng(21).pareto(2.0, 4096) + 1.0
-bundle = prepare_ei_bundle(sample, allow_zeros=False)
+bundle = prepare_ei_bundle(sample, allow_zeros=False, path_keys=(("bb", True),))
 bootstrap = bootstrap_bm_ei_path(
     bundle.values,
     allow_zeros=False,
@@ -119,6 +119,28 @@ Both calls use fixed shrinkage `0.37` by default. If you override it, pass the
 same value to both calls to retain a matching adaptive precision diagnostic.
 Strict FGLS errors on unusable or mismatched covariance; it never silently
 switches to OLS.
+
+Threshold-only estimation can skip BM preparation entirely:
+
+```python
+from unibm.ei import estimate_k_gaps
+
+thresholds = prepare_ei_bundle(sample, allow_zeros=False, path_keys=())
+k_gaps = estimate_k_gaps(thresholds)
+```
+
+A single supplied block size gives native fixed-b inference without automatic
+window selection:
+
+```python
+from unibm.ei import estimate_native_bm_ei
+
+fixed = prepare_ei_bundle(
+    sample, allow_zeros=False, block_sizes=[32], path_keys=(("bb", True),)
+)
+native = estimate_native_bm_ei(fixed, base_path="bb", sliding=True)
+assert native.selected_level == 32 and native.stable_window is None
+```
 
 Inspect `fit.bootstrap_reps_used`, `fit.bootstrap_precision_met`, and
 `dict(zip(fit.bootstrap_mcse_targets, fit.bootstrap_mcse))` before interpreting

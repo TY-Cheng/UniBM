@@ -29,9 +29,6 @@ from unibm.evi import (
     ScalingFit,
     plot_scaling_fit,
 )
-from unibm.evi.plotting import (
-    _resolved_file_path,
-)
 from unibm._runtime import (
     _env_path_is_writable,
     _runtime_cache_suffix,
@@ -179,8 +176,6 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertIn("MPLCONFIGDIR", __import__("os").environ)
             self.assertIn("XDG_CACHE_HOME", __import__("os").environ)
 
-        self.assertIsNone(_resolved_file_path(None))
-
         np.testing.assert_allclose(
             sliding_window_extreme_valid([1.0, 2.0, 3.0], 1, reducer="max"),
             np.array([], dtype=float),
@@ -197,12 +192,12 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
     def test_plot_scaling_fit_saves_pdf_and_allows_open_figure(self) -> None:
         fit = _make_scaling_fit()
         with tempfile.TemporaryDirectory() as tmpdir:
-            out = Path(tmpdir) / "scaling.pdf"
-            plot_scaling_fit(fit, file_path=out, save=True, close=False, title="Scaling")
+            out = Path(tmpdir) / "nested" / "scaling.pdf"
+            plot_scaling_fit(fit, file_path=str(out), close=False, title="Scaling")
             self.assertTrue(out.exists())
             self.assertGreater(out.stat().st_size, 0)
             self.assertGreater(len(plt.get_fignums()), 0)
-            plot_scaling_fit(fit, save=False, close=True)
+            plot_scaling_fit(fit, close=True)
             plt.close("all")
 
     def test_public_plots_return_editable_figures_and_close_only_when_requested(self) -> None:
@@ -212,7 +207,9 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             (plot_ei_fit, _make_ei_bm_fit()),
         ):
             with self.subTest(plot=plot.__name__):
-                fig, ax = plot(value)
+                with mock.patch("matplotlib.figure.Figure.savefig") as savefig:
+                    fig, ax = plot(value)
+                savefig.assert_not_called()
                 self.assertIs(ax.figure, fig)
                 self.assertEqual(fig.dpi / fig.canvas.device_pixel_ratio, 150)
                 self.assertTrue(plt.fignum_exists(fig.number))
@@ -230,12 +227,11 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             path_out = Path(tmpdir) / "ei-path.pdf"
             fit_out = Path(tmpdir) / "ei-fit.pdf"
             threshold_out = Path(tmpdir) / "ei-threshold.pdf"
-            plot_ei_path(path, file_path=path_out, save=True, close=False, title="EI Path")
-            plot_ei_fit(bm_fit, file_path=fit_out, save=True, close=False, title="EI Fit")
+            plot_ei_path(path, file_path=path_out, close=False, title="EI Path")
+            plot_ei_fit(bm_fit, file_path=fit_out, close=False, title="EI Fit")
             plot_ei_fit(
                 threshold_fit,
                 file_path=threshold_out,
-                save=True,
                 close=True,
                 title="Threshold EI",
             )
@@ -247,6 +243,24 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             self.assertGreater(threshold_out.stat().st_size, 0)
             self.assertGreater(len(plt.get_fignums()), 0)
             plt.close("all")
+
+    def test_plot_ei_path_supports_fixed_block_size_without_selected_window(self) -> None:
+        path = EiPathBundle(
+            base_path="bb",
+            sliding=True,
+            block_sizes=np.array([8]),
+            theta_path=np.array([0.5]),
+            eir_path=np.array([2.0]),
+            z_path=np.array([np.log(2.0)]),
+            sample_counts=np.array([60]),
+            sample_statistics={8: np.array([1.5, 2.0])},
+            stable_window=None,
+            selected_level=8,
+        )
+        fig, ax = plot_ei_path(path, close=True)
+        np.testing.assert_array_equal(ax.lines[0].get_ydata(), path.theta_path)
+        self.assertFalse(ax.patches)
+        self.assertFalse(plt.fignum_exists(fig.number))
 
     def test_ei_plotting_guardrails_and_default_labels(self) -> None:
         self.assertIn("disjoint", _default_ei_path_title(_make_ei_disjoint_path()))
@@ -287,8 +301,8 @@ class UniBmPlottingAndApiTests(unittest.TestCase):
             theta_hat=0.63,
             confidence_interval=(np.nan, np.nan),
         )
-        plot_ei_fit(sparse_fit, save=False, close=False)
-        plot_ei_fit(threshold_fit, save=False, close=True)
+        plot_ei_fit(sparse_fit, close=False)
+        plot_ei_fit(threshold_fit, close=True)
         self.assertGreater(len(plt.get_fignums()), 0)
         plt.close("all")
 

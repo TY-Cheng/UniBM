@@ -70,6 +70,7 @@ def fit_application_ei_estimates(
     ei_bundle = prepare_ei_bundle(
         series.values,
         allow_zeros=allow_zeros,
+        path_keys=(("bb", True), ("northrop", True)),
         threshold_quantiles=APPLICATION_EI_THRESHOLD_QUANTILES,
     )
     if label is not None:

@@ -582,7 +582,6 @@ def _top_penultimate_windows(
     *,
     top_k: int = 3,
     min_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
 ) -> list[object]:
     """Return the top scoring plateau windows for one fitted EVI curve."""
@@ -591,15 +590,9 @@ def _top_penultimate_windows(
     x = np.asarray(fit.log_block_sizes, dtype=float)
     y = np.asarray(fit.log_values, dtype=float)
     n = x.size
-    lo = int(np.floor(n * trim_fraction))
-    hi = n - lo
-    lo = min(lo, max(n - min_points, 0))
-    if hi - lo < min_points:
-        lo = 0
-        hi = n
     candidates: list[tuple[float, int, int]] = []
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(n - min_points + 1):
+        for stop in range(start + min_points, n + 1):
             window_x = x[start:stop]
             window_y = y[start:stop]
             slope, intercept = np.polyfit(window_x, window_y, 1)
@@ -663,7 +656,6 @@ def _top_ei_windows(
     *,
     top_k: int = 3,
     min_points: int = 4,
-    trim_fraction: float = 0.15,
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> list[tuple[EiStableWindow, np.ndarray, float]]:
@@ -673,14 +665,9 @@ def _top_ei_windows(
     mask = np.isfinite(z)
     levels = levels[mask]
     z = z[mask]
-    lo = int(np.floor(levels.size * trim_fraction))
-    hi = levels.size - lo
-    if hi - lo < min_points:
-        lo = 0
-        hi = levels.size
     candidates: list[tuple[float, int, int]] = []
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(levels.size - min_points + 1):
+        for stop in range(start + min_points, levels.size + 1):
             window = z[start:stop]
             variance = float(np.mean((window - window.mean()) ** 2))
             first_diff = np.diff(window)
@@ -1940,10 +1927,83 @@ def write_application_figures(bundle: ApplicationBundle, fig_dir: Path) -> None:
     )
 
 
+def _write_application_web_record(bundle: ApplicationBundle, web: Path):
+    """Export inference scope and sample provenance beside each frozen figure."""
+    fit = bundle.evi_fit
+    series = bundle.prepared.evi.series
+    summary = application_summary_record(bundle)
+    if fit.regression == "OLS":
+        # The API's HC0 interval is not a valid time-series CI for this gapped case.
+        for k in ("xi_lo", "xi_hi", "evi_ci_variant"):
+            summary[k] = None
+    record = {
+        "summary": summary,
+        "preparation": bundle.prepared.evi.metadata,
+        "eligible_observations": int(series.notna().sum()),
+        "first_eligible_date": str(series.dropna().index[0]),
+        "last_eligible_date": str(series.dropna().index[-1]),
+        "ci_reported": fit.regression == "FGLS",
+        "evi_grid": fit.curve.block_sizes.tolist(),
+        "complete_window_counts": fit.curve.counts.tolist(),
+        "ei_methods": application_ei_method_rows(bundle),
+    }
+    # Pandas converts nonfinite numeric diagnostics to JSON null and numpy scalars to numbers.
+    (web / f"{bundle.spec.figure_stem}.json").write_text(
+        pd.Series(record).to_json(indent=2, force_ascii=False, double_precision=15) + "\n"
+    )
+
+
 def write_application_web_figure(bundle: ApplicationBundle, web_dir: Path) -> Path:
-    """Write the browser-ready composite figure for one case study."""
+    """Write a readable browser figure and its numeric/provenance record."""
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
+
+    web_dir.mkdir(parents=True, exist_ok=True)
     file_path = web_dir / f"{bundle.spec.figure_stem}.png"
-    _plot_composite_application_diagnostics(bundle, file_path=file_path, save=True)
+    _plot_composite_application_diagnostics(bundle, close=False)
+    fig = plt.gcf()
+    a, b, c, d = fig.axes
+    fig.set_size_inches(12.6, 8.7)
+    a.set_title("Summary stability across block sizes")
+    b.set_title("Sliding block-maxima quantile scaling")
+    d.set_title("Design-life levels")
+    for axis in (a, b, d):
+        legend = axis.get_legend()
+        if legend is not None:
+            axis.legend(
+                loc="upper left",
+                ncol=1 if axis is a else 2,
+                fontsize=8,
+                title=legend.get_title().get_text() or None,
+            )
+    unit = (
+        "active days"
+        if bundle.spec.design_life_level_basis == "claim_active_day"
+        else "trading sessions"
+        if bundle.spec.design_life_level_basis == "trading_day"
+        else "hours"
+        if bundle.spec.key == "goes"
+        else "days"
+    )
+    a.set_xlabel(f"block size ({unit})")
+    a.xaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
+    a.xaxis.set_major_formatter(ScalarFormatter())
+    a.xaxis.set_minor_formatter(NullFormatter())
+    b.set_xlabel(f"log(block size in {unit})")
+    if bundle.spec.formal_ei:
+        c.set_title("Extremal-index comparison")
+        ei_unit = "trading sessions" if unit == "trading sessions" else "days"
+        c.set_xlabel(f"log(block size in {ei_unit})")
+    if bundle.spec.key == "goes":
+        b.set_title("Complete-window quantile scaling · OLS")
+        c.set_title("Hourly history · gaps and warmups retained")
+        c.set_yscale("log")
+        c.set_xlabel("UTC date")
+        fig.suptitle("GOES XRS-B: EWMA normalized · OLS, no EI / no CI", y=0.995)
+    fig.tight_layout()
+    fig.savefig(file_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    _write_application_web_record(bundle, web_dir)
     return file_path
 
 

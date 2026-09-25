@@ -148,6 +148,45 @@ class EiBmTests(unittest.TestCase):
         self.assertIsNotNone(fit.z_standard_error)
         self.assertAlmostEqual(fit.standard_error, fit.z_standard_error)
 
+    def test_fixed_single_b_native_inference_has_no_selected_window(self) -> None:
+        for base_path in ("bb", "northrop"):
+            for sliding in (True, False):
+                with self.subTest(base_path=base_path, sliding=sliding):
+                    bundle = prepare_ei_bundle(
+                        self._positive_sample(),
+                        allow_zeros=False,
+                        block_sizes=[8],
+                        path_keys=((base_path, sliding),),
+                    )
+                    fit = estimate_native_bm_ei(bundle, base_path=base_path, sliding=sliding)
+                    self.assertEqual(fit.selected_level, 8)
+                    self.assertIsNone(fit.stable_window)
+                    self.assertTrue(np.all(np.isfinite(fit.confidence_interval)))
+                    with self.assertRaisesRegex(ValueError, "fixed-b path"):
+                        estimate_pooled_bm_ei(
+                            bundle, base_path=base_path, sliding=sliding, regression="OLS"
+                        )
+
+    def test_bm_entrypoints_reject_unused_parameters_and_unprepared_paths(self) -> None:
+        bundle = prepare_ei_bundle(
+            self._positive_sample(), allow_zeros=False, path_keys=(("bb", True),)
+        )
+        with self.assertRaisesRegex(ValueError, "only supported for Northrop"):
+            estimate_native_bm_ei(
+                bundle, base_path="bb", sliding=True, use_adjusted_chandwich=True
+            )
+        with self.assertRaisesRegex(ValueError, "OLS does not use covariance_shrinkage"):
+            estimate_pooled_bm_ei(
+                bundle, base_path="bb", sliding=True, regression="OLS", covariance_shrinkage=0.37
+            )
+        for estimator, kwargs in (
+            (estimate_native_bm_ei, {}),
+            (estimate_pooled_bm_ei, {"regression": "OLS"}),
+        ):
+            with self.subTest(estimator=estimator.__name__):
+                with self.assertRaisesRegex(ValueError, "path was not prepared"):
+                    estimator(bundle, base_path="northrop", sliding=True, **kwargs)
+
     def test_fgls_subsets_full_grid_covariance_by_block_size(self) -> None:
         block_sizes = np.array([4, 6, 8, 12, 16, 24, 32, 48, 64], dtype=int)
         bundle = prepare_ei_bundle(

@@ -162,7 +162,30 @@ only `unibm` and distribution metadata. The source distribution also contains
 build configuration, the `.pyx` source, README, license and package metadata;
 research scripts, datasets, local configuration and generated reports are excluded.
 
-Building does not publish. Upload the reviewed files first with `uv publish
+### GitHub Trusted Publishing
+
+The `release` workflow runs **only through Actions → release → Run workflow** on
+`main`. Commits, pushes, pull requests, tags and draft releases do not trigger it.
+Provide an existing version tag, such as `v0.2.0`, whose draft release contains
+the verified wheels, sdist, `SHA256SUMS` and `release-manifest.json`.
+
+The manifest records `version`, the full source `commit`, `artifacts` (filename
+to SHA256), and `validation_runs` (the successful `ci`, `wheels` and `docs` run IDs
+for that commit). The workflow checks the tag, hashes and matching CI, uploads the
+same files to TestPyPI, verifies registry hashes and installation, repeats for
+PyPI, then publishes the GitHub Release. It never rebuilds the distributions.
+An interrupted upload can be retried with the same tag and identical files;
+never replace already published distribution contents or move the version tag.
+
+Configure a Trusted Publisher separately on PyPI and TestPyPI with owner
+`TY-Cheng`, repository `UniBM`, workflow filename `release.yml`, and environment
+`release`. The GitHub `release` environment permits deployments from `main`.
+GitHub supplies short-lived OIDC credentials; no saved API token is required.
+See [PyPI's configuration guide](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
+
+### Manual local upload
+
+Building does not publish. As an alternative, upload the reviewed files first with `uv publish
 --index testpypi` for rehearsal, then with `uv publish` for PyPI as a separate
 maintainer action. Supply file paths explicitly rather than a wildcard of old
 builds. Supply local tokens via `UV_PUBLISH_TOKEN`, never repository files or

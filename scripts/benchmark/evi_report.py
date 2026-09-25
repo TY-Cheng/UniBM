@@ -81,7 +81,7 @@ from shared.runtime import bootstrap_thread_cap, initialize_numerical_worker, st
 # Aggregation helpers
 # ---------------------------------------------------------------------------
 
-EVI_SHRINKAGE_GRID = (0.00, 0.15, 0.37, 0.55, 0.75, 1.00)
+EVI_SHRINKAGE_GRID = (0.00, 0.15, 0.37, 0.55, 0.73, 0.75, 1.00)
 _EVI_SHRINKAGE_REQUIRED_COLUMNS = {
     "benchmark_set",
     "family",
@@ -1081,7 +1081,7 @@ def build_evi_benchmark_report_outputs(root: Path | str = ".") -> dict[str, Path
     fig_dir = dirs["DIR_REPORT_FIGURE"]
     table_dir = dirs["DIR_REPORT_TABLE"]
     out_dir = dirs["DIR_OUT_BENCHMARK"]
-    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "validation"
+    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "benchmark"
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 
-DEFAULT_MIN_DISJOINT_BLOCKS = 15
+DEFAULT_MIN_DISJOINT_BLOCKS = 17
 
 
 def validate_block_sizes(
@@ -49,30 +49,54 @@ def generate_block_sizes(
     min_block_size: int | None = None,
     max_block_size: int | None = None,
     geom: bool = True,
-    min_disjoint_blocks: int = DEFAULT_MIN_DISJOINT_BLOCKS,
+    min_disjoint_blocks: int | None = DEFAULT_MIN_DISJOINT_BLOCKS,
 ) -> np.ndarray:
     """Build a rounded, unique geometric or linear grid for a series of length n.
 
     At least 32 observations are required. By default the lower bound is
-    ``max(5, ceil(n_obs**0.2))``; the upper bound balances ``n_obs**0.55``
-    against the requested number of disjoint blocks. A minimum span of four
-    takes precedence over that block-count target. Explicit bounds override
-    these defaults, except that a nonincreasing upper bound is expanded.
+    ``max(5, ceil(n_obs**(1 / 3)))``; the upper bound is
+    ``min(floor(n_obs**(1 - 1 / e)), floor(n_obs / 17))``. Set
+    ``min_disjoint_blocks=None`` to omit the disjoint-block cap, or supply a
+    positive integer to change it. This cap applies only to the automatic
+    upper bound, not an explicit ``max_block_size``. Bounds are never expanded to provide
+    extra grid points; estimators check their own minimum usable point counts.
+    Bounds must increase and fit within the series.
 
     ``num_step`` counts grid points before rounding and deduplication, so the
-    returned 1D integer array can be shorter. All sizes must fit the series.
+    returned 1D integer array can be shorter. Size bounds are integers of at
+    least two; supplied ``num_step`` and ``min_disjoint_blocks`` are positive integers.
     """
+    if (
+        isinstance(n_obs, (bool, np.bool_))
+        or not isinstance(n_obs, (int, np.integer))
+        or n_obs < 1
+    ):
+        raise ValueError("n_obs must be a positive integer.")
     if n_obs < 32:
         raise ValueError("At least 32 observations are required for block-size selection.")
+    for name, value, minimum in (
+        ("min_block_size", min_block_size, 2),
+        ("max_block_size", max_block_size, 2),
+        ("num_step", num_step, 1),
+        ("min_disjoint_blocks", min_disjoint_blocks, 1),
+    ):
+        if value is not None and (
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, np.integer))
+            or value < minimum
+        ):
+            raise ValueError(f"{name} must be an integer at least {minimum}.")
+    for name, value in (("min_block_size", min_block_size), ("max_block_size", max_block_size)):
+        if value is not None and value > n_obs:
+            raise ValueError(f"{name} cannot exceed the number of observations.")
     if min_block_size is None:
-        min_block_size = max(5, int(np.ceil(n_obs**0.2)))
+        min_block_size = max(5, int(np.ceil(n_obs ** (1.0 / 3.0))))
     if max_block_size is None:
-        exponent_cap = int(np.floor(n_obs**0.55))
-        disjoint_cap = int(np.floor(n_obs / max(min_disjoint_blocks, 1)))
-        max_block_size = min(exponent_cap, disjoint_cap)
-        max_block_size = max(min_block_size + 4, max_block_size)
+        max_block_size = int(np.floor(n_obs ** (1.0 - 1.0 / np.e)))
+        if min_disjoint_blocks is not None:
+            max_block_size = min(max_block_size, n_obs // min_disjoint_blocks)
     if max_block_size <= min_block_size:
-        max_block_size = min_block_size + 4
+        raise ValueError("max_block_size must be greater than min_block_size.")
     if num_step is None:
         num_step = min(32, max(10, max_block_size - min_block_size + 1))
     if geom:

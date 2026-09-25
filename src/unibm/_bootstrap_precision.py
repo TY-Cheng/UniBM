@@ -16,16 +16,17 @@ JACK_PARTITIONS = 2
 
 def adaptive_covariance(
     draw: Callable[[int, np.random.Generator], np.ndarray],
-    evaluate: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
+    evaluate: Callable[[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
     *,
     random_state: int | None,
 ) -> dict:
     """Estimate covariance, extending paired bootstrap draws until MCSE is small.
 
     ``draw(count, rng)`` must return ``(count, n_levels)`` finite rows, each
-    representing one resampled path across the same grid. ``evaluate(cov)``
+    representing one resampled path across the same grid. ``evaluate(cov, rows)``
     refits the same observed path and selected window using that covariance,
     returning target values and their positive statistical standard errors.
+    The paired rows also support monitoring empirical bootstrap CI endpoints.
     Fit errors propagate; this helper never substitutes an OLS fit.
 
     At checkpoints 128, 256, 512, 768 and 1024, delete-group jackknifing
@@ -53,13 +54,14 @@ def adaptive_covariance(
         generated = reps
         samples = np.concatenate(pieces)
         covariance = np.atleast_2d(np.cov(samples, rowvar=False))
-        _, scales = evaluate(covariance)
+        _, scales = evaluate(covariance, samples)
         deleted = []
         for _ in range(JACK_PARTITIONS):
             for group in jack_rng.permutation(reps).reshape(JACK_GROUPS, -1):
                 keep = np.ones(reps, dtype=bool)
                 keep[group] = False
-                targets, _ = evaluate(np.atleast_2d(np.cov(samples[keep], rowvar=False)))
+                retained = samples[keep]
+                targets, _ = evaluate(np.atleast_2d(np.cov(retained, rowvar=False)), retained)
                 deleted.append(targets)
         grouped = np.asarray(deleted).reshape(JACK_PARTITIONS, JACK_GROUPS, -1)
         centered = grouped - grouped.mean(axis=1, keepdims=True)

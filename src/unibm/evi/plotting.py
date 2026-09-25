@@ -24,38 +24,23 @@ def _pyplot():
     return plt
 
 
-def _resolved_file_path(file_path: Path | str | None) -> Path | None:
-    """Convert an optional output path to Path without resolving or creating it."""
-    if file_path is None:
-        return None
-    return Path(file_path)
-
-
-def _save_figure_outputs(fig, file_path: Path) -> None:
-    """Create parent directories and save the figure, overwriting an existing file."""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(file_path)
-
-
 def plot_scaling_fit(
     fit: ScalingFit,
     *,
     file_path: Path | str | None = None,
     dpi: int = 150,
     title: str | None = None,
-    save: bool = False,
     close: bool = False,
     xlabel: str = "log(block size)",
     ylabel: str | None = None,
 ) -> tuple[Figure, Axes]:
     """Plot an EVI scaling fit on the log-log block-size scale.
 
-    Return ``(fig, ax)`` for customization. No file is saved by default; set
-    ``save=True`` and ``file_path`` to save. Use ``close=True`` for batch jobs.
+    Return ``(fig, ax)`` for customization. No file is saved by default; supply
+    ``file_path`` to save. Use ``close=True`` for batch jobs.
     Both axes show natural-log coordinates. Highlight the selected plateau
     and draw its fitted line; points outside it are shown for context.
     Saving creates parent directories and replaces an existing output file.
-    A missing ``file_path`` skips saving even when ``save=True``.
     """
     plt = _pyplot()
     if ylabel is None:
@@ -93,9 +78,10 @@ def plot_scaling_fit(
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    file_path = _resolved_file_path(file_path)
-    if save and file_path is not None:
-        _save_figure_outputs(fig, file_path)
+    if file_path is not None:
+        file_path = Path(file_path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(file_path)
     if close:
         plt.close(fig)
     return fig, ax

@@ -68,6 +68,7 @@ from benchmark.design import (
     sort_by_family_order,
 )
 from benchmark.ei_eval import (
+    EI_BM_PATH_KEYS,
     EI_EXTERNAL_METHODS,
     EI_FGLS_METHODS,
     EI_INTERNAL_METHODS,
@@ -334,6 +335,8 @@ def _ei_shrinkage_scenario(args: tuple) -> list[dict[str, float | int | str]]:
         bundle = prepare_ei_bundle(
             vec,
             allow_zeros=False,
+            # Fixed-R caches retain all four paths; adaptive fits only need the requested ones.
+            path_keys=path_keys if FGLS_BOOTSTRAP_REPS == "adaptive" else EI_BM_PATH_KEYS,
             threshold_quantiles=EI_BENCHMARK_THRESHOLD_QUANTILES,
         )
         cache_key = f"{cfg.scenario}__seed{scenario_seed}__rep{rep:04d}"
@@ -1161,7 +1164,7 @@ def build_ei_benchmark_report_outputs(root: Path | str = ".") -> dict[str, Path]
     fig_dir = dirs["DIR_REPORT_FIGURE"]
     table_dir = dirs["DIR_REPORT_TABLE"]
     out_dir = dirs["DIR_OUT_BENCHMARK"]
-    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "validation"
+    web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "benchmark"
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)

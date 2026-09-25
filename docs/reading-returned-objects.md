@@ -25,7 +25,7 @@ diagnostics, and workflow-side reuse.
 `OLS` does not bootstrap. `FGLS` and `AUTO` use adaptive bootstrap repetitions by
 default unless a labeled `bootstrap_result` is supplied. `bootstrap_reps="adaptive"`
 is explicit; an integer such as `bootstrap_reps=480` uses exactly that fixed budget.
-The checkpoints are 128, 256, 512, 768, and 1024, with fixed diagonal shrinkage 0.37.
+The checkpoints are 128, 256, 512, 768, and 1024, with fixed diagonal shrinkage 0.73.
 FGLS fails closed when
 covariance is unavailable or invalid; only `AUTO` can fall back to OLS, and
 malformed caller-supplied covariance is always an error.
@@ -49,6 +49,10 @@ The path-level fields are supporting diagnostics:
 - `fit.path_theta` and `fit.path_eir` retain the observed path values for
   plotting and method audits
 
+For native EI prepared with a single `block_sizes=[b]`, `selected_level` is that
+fixed size and `stable_window` is `None`: no stability search was performed.
+Threshold-only bundles prepared with `path_keys=()` contain no BM paths or grid.
+
 ## FGLS versus OLS
 
 Pooled EI fits always pool the observed stable-window path. If you switch from
@@ -59,8 +63,10 @@ matrix used for FGLS weighting.
 `bootstrap_bm_ei_path` likewise defaults to `reps="adaptive"`; passing an integer
 retains fixed-R sampling. It checks pooled `theta` and CI endpoints, plus the
 unconstrained `z` fit and endpoints so clipping at `theta=1` cannot conceal
-Monte Carlo error. Supply the same `covariance_shrinkage` to bootstrap and fit
-when overriding the default 0.37. The pooled estimator still requires explicit
+Monte Carlo error. For adaptive monitoring, supply the same
+`covariance_shrinkage` to bootstrap and fit when overriding the default 0.37.
+Fixed-R bootstrap rejects explicit shrinkage; both modes return raw sample
+covariance, which is regularized only when fitting. The pooled estimator still requires explicit
 usable covariance for FGLS and never silently falls back to OLS.
 
 ## Reading adaptive precision

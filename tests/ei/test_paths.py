@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -20,7 +21,6 @@ def _baseline_select_stable_ei_window(
     z_path: np.ndarray,
     *,
     min_points: int = 4,
-    trim_fraction: float = 0.15,
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> tuple[EiStableWindow, np.ndarray]:
@@ -31,14 +31,9 @@ def _baseline_select_stable_ei_window(
     z = z[mask]
     if levels.size < min_points:
         raise ValueError("Not enough finite EI path values to select a stable window.")
-    lo = int(np.floor(levels.size * trim_fraction))
-    hi = levels.size - lo
-    if hi - lo < min_points:
-        lo = 0
-        hi = levels.size
     best: tuple[float, int, int] | None = None
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(levels.size - min_points + 1):
+        for stop in range(start + min_points, levels.size + 1):
             window = z[start:stop]
             variance = float(np.mean((window - window.mean()) ** 2))
             first_diff = np.diff(window)
@@ -135,6 +130,16 @@ class EiPathsTests(unittest.TestCase):
             {("northrop", True), ("northrop", False), ("bb", True), ("bb", False)},
         )
 
+    def test_default_ei_grid_uses_square_root_cap(self) -> None:
+        for n_obs, upper in ((170, 10), (365, 19), (2500, 50)):
+            with self.subTest(n_obs=n_obs):
+                bundle = prepare_ei_bundle(self._positive_sample(n_obs), allow_zeros=False)
+                self.assertEqual(bundle.block_sizes[-1], upper)
+        with self.assertRaisesRegex(ValueError, "Not enough finite EI path values"):
+            prepare_ei_bundle(self._positive_sample(128), allow_zeros=False)
+        with self.assertRaisesRegex(ValueError, "max_block_size must be greater"):
+            prepare_ei_bundle(self._positive_sample(91), allow_zeros=False)
+
     def test_rolling_window_minima(self) -> None:
         scores = np.array([4.0, 2.0, np.nan, 1.0, 3.0, 5.0], dtype=float)
         np.testing.assert_allclose(
@@ -143,6 +148,44 @@ class EiPathsTests(unittest.TestCase):
         np.testing.assert_allclose(
             _rolling_window_minima(scores, 2, sliding=False), np.array([2.0, 3.0])
         )
+
+    def test_requested_paths_match_full_preparation_without_unrequested_work(self) -> None:
+        values = self._positive_sample()
+        full = prepare_ei_bundle(values, allow_zeros=False)
+        with mock.patch(
+            "unibm.ei.paths._build_path_from_scores", wraps=_build_path_from_scores
+        ) as build_path:
+            selected = prepare_ei_bundle(values, allow_zeros=False, path_keys=(("bb", True),))
+        self.assertEqual(build_path.call_count, 1)
+        self.assertEqual(set(selected.paths), {("bb", True)})
+        actual, expected = selected.paths[("bb", True)], full.paths[("bb", True)]
+        np.testing.assert_array_equal(actual.theta_path, expected.theta_path)
+        self.assertEqual(actual.stable_window, expected.stable_window)
+        for invalid in (
+            None,
+            (("unknown", True),),
+            (("bb", 1),),
+            (("bb", True), ("bb", True)),
+            (([], True),),
+        ):
+            with self.subTest(path_keys=invalid):
+                with self.assertRaisesRegex(ValueError, "path_keys"):
+                    prepare_ei_bundle(values, allow_zeros=False, path_keys=invalid)
+
+    def test_threshold_only_skips_block_grid_and_path_preparation(self) -> None:
+        with (
+            mock.patch("unibm.ei.preparation.generate_block_sizes") as grid,
+            mock.patch("unibm.ei.preparation._build_bm_paths_from_values") as paths,
+        ):
+            bundle = prepare_ei_bundle(self._positive_sample(), allow_zeros=False, path_keys=())
+        grid.assert_not_called()
+        paths.assert_not_called()
+        self.assertEqual(bundle.paths, {})
+        self.assertEqual(bundle.block_sizes.size, 0)
+        with self.assertRaisesRegex(ValueError, "block_sizes is not used"):
+            prepare_ei_bundle(
+                self._positive_sample(), allow_zeros=False, path_keys=(), block_sizes=[8]
+            )
 
     def test_path_builders_and_stable_window_selection(self) -> None:
         block_sizes = np.array([4, 8, 16, 32], dtype=int)
@@ -202,7 +245,7 @@ class EiPathsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Stable EI window did not retain any finite"):
             extract_stable_path_window(bad_path)
 
-    def test_selection_edge_cases_cover_trim_fallback_and_minimal_windows(self) -> None:
+    def test_selection_edge_cases_cover_missing_values_and_minimal_windows(self) -> None:
         with self.assertRaisesRegex(ValueError, "Not enough finite EI path values"):
             select_stable_path_window(
                 np.array([4, 8], dtype=int),
@@ -215,27 +258,27 @@ class EiPathsTests(unittest.TestCase):
                 np.array([0.2], dtype=float),
                 min_points=1,
             )
-        trimmed_window, trimmed_mask = select_stable_path_window(
+        window, mask = select_stable_path_window(
             np.array([4, 8, 16], dtype=int),
             np.array([0.1, 0.11, 0.12], dtype=float),
             min_points=3,
-            trim_fraction=0.49,
         )
-        self.assertEqual(trimmed_window, EiStableWindow(4, 16))
-        np.testing.assert_array_equal(trimmed_mask, np.array([True, True, True]))
+        self.assertEqual(window, EiStableWindow(4, 16))
+        np.testing.assert_array_equal(mask, np.array([True, True, True]))
+
+    def test_selection_can_reach_either_finite_grid_endpoint(self) -> None:
+        levels = np.arange(2, 14)
+        z = np.array([np.nan, 1, 1, 1, 1, 2, 4, 8, 16, 32, 64, np.nan])
+        for values, expected in ((z, (3, 6)), (z[::-1], (9, 12))):
+            with self.subTest(expected=expected):
+                window, mask = select_stable_path_window(levels, values)
+                self.assertEqual((window.lo, window.hi), expected)
+                self.assertEqual(mask.size, 10)
+                self.assertEqual(mask.sum(), 4)
 
     def test_stable_path_selection_rejects_invalid_tuning_parameters(self) -> None:
         block_sizes = np.array([4, 8, 16], dtype=int)
         z_path = np.array([0.1, 0.11, 0.12], dtype=float)
-        for trim_fraction in (-0.1, 0.5, np.nan):
-            with self.subTest(trim_fraction=trim_fraction):
-                with self.assertRaisesRegex(ValueError, "trim_fraction must be finite"):
-                    select_stable_path_window(
-                        block_sizes,
-                        z_path,
-                        min_points=2,
-                        trim_fraction=trim_fraction,
-                    )
         for name, value in (("roughness_penalty", -1.0), ("curvature_penalty", np.nan)):
             with self.subTest(name=name, value=value):
                 kwargs = {name: value}

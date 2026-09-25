@@ -766,11 +766,11 @@ def _internal_bootstrap_cache_file(
     quantile: float,
     reps: int,
 ) -> Path:
-    """Return the on-disk cache path for one series-wide EVI bootstrap bundle."""
+    """Keep EVI bundles using the 2B default separate from earlier 4B bundles."""
     return (
         cache_dir
         / "internal_bootstrap"
-        / f"{BENCHMARK_CACHE_VERSION}__{cache_key}__q{quantile:.4f}__reps{reps}.npz"
+        / f"{BENCHMARK_CACHE_VERSION}__superblock-2b__{cache_key}__q{quantile:.4f}__reps{reps}.npz"
     )
 
 
@@ -872,7 +872,6 @@ def _shared_curve_and_plateau(
         curve.log_block_sizes,
         curve.log_values,
         min_points=5,
-        trim_fraction=0.15,
     )
     return curve, plateau
 
@@ -916,7 +915,10 @@ def _scheme_bootstrap_results(
             except FileNotFoundError:
                 cached_bundle = {}
             cached = cached_bundle.get(scheme_name, {})
-            if set(cached) == set(fgls_targets):
+            if set(cached) == set(fgls_targets) and all(
+                np.array_equal(result.get("block_sizes"), block_sizes)
+                for result in cached.values()
+            ):
                 return cached
     bootstrap_results = circular_block_summary_bootstrap_multi_target(
         vec,

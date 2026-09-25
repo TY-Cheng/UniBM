@@ -43,6 +43,27 @@ def _bootstrap_bundle_with_zero_northrop_sliding(
 
 
 class EiBenchmarkReportTests(unittest.TestCase):
+    def test_fixed_r_sensitivity_keeps_paths_needed_by_shared_cache(self) -> None:
+        configs = default_ei_simulation_configs(
+            xi_values=(0.50,),
+            theta_values=(0.25,),
+            families=("frechet_max_ar",),
+            n_obs=256,
+            reps=1,
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch("benchmark.ei_report.FGLS_BOOTSTRAP_REPS", 16),
+            mock.patch(
+                "benchmark.ei_report.prepare_ei_bundle", wraps=ei_eval.prepare_ei_bundle
+            ) as prepare,
+        ):
+            summary, _ = build_ei_shrinkage_sensitivity_summary(
+                root=tmpdir, configs=configs, max_workers=1, force=True
+            )
+        self.assertEqual(set(prepare.call_args.kwargs["path_keys"]), set(ei_eval.EI_BM_PATH_KEYS))
+        self.assertFalse(summary.empty)
+
     def test_selected_bootstrap_paths_match_full_bundle(self) -> None:
         values = np.random.default_rng(71).pareto(2.3, 365) + 1.0
         bundle = ei_eval.prepare_ei_bundle(values, allow_zeros=False)
@@ -241,7 +262,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 xi_values=(0.50,),
                 theta_values=(0.25,),
                 families=("frechet_max_ar",),
-                n_obs=64,
+                n_obs=256,
                 reps=1,
             )
             summary, output_path = build_ei_shrinkage_sensitivity_summary(
@@ -275,7 +296,7 @@ class EiBenchmarkReportTests(unittest.TestCase):
                 xi_values=(0.50,),
                 theta_values=(0.25,),
                 families=("frechet_max_ar",),
-                n_obs=64,
+                n_obs=256,
                 reps=1,
             )
             _, internal_summary, _, external_summary = run_ei_benchmark(

@@ -13,15 +13,14 @@ def select_penultimate_window(
     log_values: np.ndarray,
     *,
     min_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = 2.0,
 ) -> PlateauWindow:
     """Select the lowest-scoring contiguous window of paired log summaries.
 
     Inputs must be finite one-dimensional arrays of equal length, with
-    strictly increasing ``log_block_sizes``. Trim ``trim_fraction`` from
-    each end when at least ``min_points`` remain, then score every eligible
-    window by ``(OLS MSE + curvature_penalty * curvature) / sqrt(length)``.
+    strictly increasing ``log_block_sizes``. Search the full supplied range,
+    scoring every contiguous window of at least ``min_points`` by
+    ``(OLS MSE + curvature_penalty * curvature) / sqrt(length)``.
     Curvature is the mean absolute change between adjacent local slopes.
     Return a ``PlateauWindow`` whose start/stop and mask index the input
     arrays; stop is exclusive. This is a heuristic selection rule, not a
@@ -37,9 +36,6 @@ def select_penultimate_window(
         or min_points < 2
     ):
         raise ValueError("min_points must be an integer at least 2.")
-    trim_fraction = float(trim_fraction)
-    if not np.isfinite(trim_fraction) or not 0.0 <= trim_fraction < 0.5:
-        raise ValueError("trim_fraction must be finite and lie in [0, 0.5).")
     curvature_penalty = float(curvature_penalty)
     if not np.isfinite(curvature_penalty) or curvature_penalty < 0.0:
         raise ValueError("curvature_penalty must be finite and non-negative.")
@@ -50,12 +46,6 @@ def select_penultimate_window(
         raise ValueError("log_block_sizes must be finite and strictly increasing.")
     if not np.all(np.isfinite(y)):
         raise ValueError("log_values must be finite.")
-    lo = int(np.floor(n * trim_fraction))
-    hi = n - lo
-    lo = min(lo, max(n - min_points, 0))
-    if hi - lo < min_points:
-        lo = 0
-        hi = n
     # Prefix moments make each candidate OLS score independent of window length.
     prefix_x = prefix_sum(x)
     prefix_y = prefix_sum(y)
@@ -65,8 +55,8 @@ def select_penultimate_window(
     local_slopes = np.diff(y) / np.diff(x)
     slope_curvature_prefix = prefix_sum(np.abs(np.diff(local_slopes)))
     best: tuple[float, int, int] | None = None
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(n - min_points + 1):
+        for stop in range(start + min_points, n + 1):
             window_len = stop - start
             sum_x = prefix_x[stop] - prefix_x[start]
             sum_y = prefix_y[stop] - prefix_y[start]

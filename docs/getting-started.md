@@ -173,8 +173,9 @@ fig.savefig("scaling.pdf")
 plt.close(fig)
 ```
 
-`plot_ei_path` and `plot_ei_fit` follow the same convention. Use `save=True` with
-`file_path` for direct saving and `close=True` for batch jobs. The default figure
+`plot_ei_path` and `plot_ei_fit` follow the same convention. Supply `file_path`
+for direct saving and `close=True` for batch jobs; omit the path to avoid saving.
+The default figure
 DPI is 150; repository report scripts retain their explicit report settings.
 Plotting does not infer a repository or external report destination.
 

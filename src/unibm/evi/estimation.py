@@ -44,9 +44,8 @@ def estimate_evi_quantile(
     random_state: int | None = 0,
     n_threads: int | None = None,
     plateau_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
-    covariance_shrinkage: float = DEFAULT_COVARIANCE_SHRINKAGE,
+    covariance_shrinkage: float | None = None,
     curve: BlockSummaryCurve | None = None,
     plateau: PlateauWindow | None = None,
     bootstrap_result: dict[str, object] | None = None,
@@ -58,8 +57,11 @@ def estimate_evi_quantile(
     quantiles; only positive summaries enter the log regression. Sliding
     windows overlap, while disjoint windows discard the incomplete tail.
     Supply an increasing integer ``block_sizes`` grid or let ``num_step`` and
-    the size bounds control its generation. ``plateau_points`` is the minimum
-    window length; trimming and curvature scoring select the fitted interval.
+    the size bounds control its generation, but not both. A supplied ``curve``
+    owns its grid and cannot be combined with any grid arguments.
+    ``plateau_points`` is the minimum
+    window length. The selector scores windows across the full positive-summary
+    grid; the supplied bounds are not narrowed before selection.
 
     ``regression`` is explicit: OLS uses HC0 uncertainty; strict FGLS requires
     usable bootstrap covariance. AUTO permits an internally generated missing
@@ -70,7 +72,8 @@ def estimate_evi_quantile(
     check 128, 256, 512, 768, and 1024 draws. An integer requests a fixed budget.
     Adaptive precision monitors xi and its CI endpoints, not design-life levels.
     A cap warning retains the fit with ``bootstrap_precision_met=False``.
-    Default covariance shrinkage is fixed at 0.37, not automatically tuned.
+    ``covariance_shrinkage=None`` resolves to the fixed 0.73 weight for
+    FGLS/AUTO. OLS rejects an explicit shrinkage weight because it has no effect.
     ``n_threads=None`` chooses a CPU/workload-aware bootstrap pool (at most 8);
     a positive integer caps it, and 1 stays serial. This does not change BLAS
     settings. Callers with an outer process pool should allocate the inner cap.
@@ -94,7 +97,6 @@ def estimate_evi_quantile(
         min_block_size=min_block_size,
         max_block_size=max_block_size,
         plateau_points=plateau_points,
-        trim_fraction=trim_fraction,
         curvature_penalty=curvature_penalty,
         covariance_shrinkage=covariance_shrinkage,
         bootstrap_reps=bootstrap_reps,
@@ -123,9 +125,8 @@ def estimate_target_scaling(
     random_state: int | None = 0,
     n_threads: int | None = None,
     plateau_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
-    covariance_shrinkage: float = DEFAULT_COVARIANCE_SHRINKAGE,
+    covariance_shrinkage: float | None = None,
     curve: BlockSummaryCurve | None = None,
     plateau: PlateauWindow | None = None,
     bootstrap_result: dict[str, object] | None = None,
@@ -143,7 +144,23 @@ def estimate_target_scaling(
     validate_n_threads(n_threads)
     if regression not in {"OLS", "FGLS", "AUTO"}:
         raise ValueError("regression must be 'OLS', 'FGLS', or 'AUTO'.")
-    shrinkage_policy = validate_covariance_shrinkage(covariance_shrinkage)
+    has_grid_controls = any(
+        value is not None for value in (num_step, min_block_size, max_block_size)
+    )
+    if curve is not None and (block_sizes is not None or has_grid_controls):
+        raise ValueError(
+            "curve cannot be combined with block_sizes, num_step, min_block_size, "
+            "or max_block_size."
+        )
+    if block_sizes is not None and has_grid_controls:
+        raise ValueError(
+            "block_sizes cannot be combined with num_step, min_block_size, or max_block_size."
+        )
+    if regression == "OLS" and covariance_shrinkage is not None:
+        raise ValueError("OLS does not accept covariance_shrinkage; omit it or use None.")
+    shrinkage_policy = validate_covariance_shrinkage(
+        DEFAULT_COVARIANCE_SHRINKAGE if covariance_shrinkage is None else covariance_shrinkage
+    )
     if regression == "OLS":
         if bootstrap_result is not None:
             raise ValueError("OLS does not accept bootstrap_result.")
@@ -204,7 +221,6 @@ def estimate_target_scaling(
             curve.log_block_sizes,
             curve.log_values,
             min_points=plateau_points,
-            trim_fraction=trim_fraction,
             curvature_penalty=curvature_penalty,
         )
     _validate_plateau_slice(curve, plateau)
@@ -212,7 +228,7 @@ def estimate_target_scaling(
     if bootstrap is None and resolved_bootstrap_reps == "adaptive":
         levels = curve.positive_block_sizes[plateau.start : plateau.stop]
 
-        def evaluate(cov: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        def evaluate(cov: np.ndarray, _rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Return xi and its Wald endpoints plus SE scales for MC precision checks."""
             selected_cov = subset_covariance_by_labels(
                 cov, curve.positive_block_sizes, levels, context="bootstrap covariance"

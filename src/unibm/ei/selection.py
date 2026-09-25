@@ -14,16 +14,14 @@ def select_stable_path_window(
     z_path: np.ndarray,
     *,
     min_points: int = 4,
-    trim_fraction: float = 0.15,
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> tuple[EiStableWindow, np.ndarray]:
     """Select a flat window of ``z = log(1 / theta)`` over increasing block sizes.
 
     ``z_path`` must be 1D and aligned with ``block_sizes``. Drop non-finite z
-    entries, trim ``floor(trim_fraction * n_finite)`` levels from each end, and
-    examine windows of at least ``min_points`` levels. If trimming leaves too
-    few levels, search the full finite path instead.
+    entries and examine every contiguous window of at least ``min_points``
+    retained levels across the full supplied range.
 
     Minimize variance plus weighted mean absolute first and second differences,
     divided by the square root of the window length. Differences are across
@@ -42,9 +40,6 @@ def select_stable_path_window(
         or min_points < 2
     ):
         raise ValueError("min_points must be an integer at least 2.")
-    trim_fraction = float(trim_fraction)
-    if not np.isfinite(trim_fraction) or not 0.0 <= trim_fraction < 0.5:
-        raise ValueError("trim_fraction must be finite and lie in [0, 0.5).")
     roughness_penalty = float(roughness_penalty)
     if not np.isfinite(roughness_penalty) or roughness_penalty < 0.0:
         raise ValueError("roughness_penalty must be finite and non-negative.")
@@ -56,18 +51,13 @@ def select_stable_path_window(
     z = z[mask]
     if levels.size < min_points:
         raise ValueError("Not enough finite EI path values to select a stable window.")
-    lo = int(np.floor(levels.size * trim_fraction))
-    hi = levels.size - lo
-    if hi - lo < min_points:
-        lo = 0
-        hi = levels.size
     prefix_z = prefix_sum(z)
     prefix_z2 = prefix_sum(z * z)
     abs_diff1_prefix = prefix_sum(np.abs(np.diff(z)))
     abs_diff2_prefix = prefix_sum(np.abs(np.diff(np.diff(z))))
     best: tuple[float, int, int] | None = None
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(levels.size - min_points + 1):
+        for stop in range(start + min_points, levels.size + 1):
             window_len = stop - start
             sum_z = prefix_z[stop] - prefix_z[start]
             sum_z2 = prefix_z2[stop] - prefix_z2[start]
@@ -101,9 +91,12 @@ def select_stable_path_window(
 def extract_stable_path_window(path: EiPathBundle) -> tuple[np.ndarray, np.ndarray]:
     """Return aligned finite block levels and z values inside the stored window.
 
-    Include both window endpoints; raise ``ValueError`` if no levels remain.
+    Include both window endpoints; raise ``ValueError`` if no levels remain
+    or if the path fixes a single block size without selecting a window.
     The returned arrays preserve the original path order.
     """
+    if path.stable_window is None:
+        raise ValueError("A fixed-b path has no stable window; use native BM inference.")
     finite_mask = np.isfinite(path.z_path)
     finite_levels = path.block_sizes[finite_mask]
     finite_z = path.z_path[finite_mask]

@@ -51,14 +51,12 @@ def estimate_design_life_level(
     years: float | np.ndarray,
     *,
     observations_per_year: float = 365.25,
-    tau: float | None = None,
 ) -> float | np.ndarray:
     """Map one fitted quantile-scaling law to horizon-maximum quantiles.
 
     The design block size is ``ceil(years * observations_per_year)`` on the
     caller's observation clock. This does not split observations by calendar
-    year or refit annual maxima. ``tau`` must match the fit's quantile; changing
-    it does not construct an application-style shared-slope companion curve.
+    year or refit annual maxima. The probability is fixed by ``fit.quantile``.
     A median fit therefore gives a median design-life level, not a return level
     whose waiting time equals ``years``.
 
@@ -70,13 +68,6 @@ def estimate_design_life_level(
         raise ValueError(
             "estimate_design_life_level requires a quantile-based ScalingFit. "
             f"Received target={fit.target!r}."
-        )
-    fit_tau = float(fit.quantile)
-    tau_value = fit_tau if tau is None else float(tau)
-    if not np.isclose(tau_value, fit_tau):
-        raise ValueError(
-            "estimate_design_life_level must use the same tau as the fitted ScalingFit. "
-            f"Received tau={tau_value:.4f}, fit.quantile={fit_tau:.4f}."
         )
     block_sizes = _design_block_sizes(years, observations_per_year)
     estimates = np.asarray(
@@ -90,7 +81,6 @@ def estimate_design_life_level_interval(
     years: float | np.ndarray,
     *,
     observations_per_year: float = 365.25,
-    tau: float | None = None,
     z_crit: float = Z_CRIT_95,
 ) -> tuple[float, float] | tuple[np.ndarray, np.ndarray]:
     """Return delta-method design-life intervals on the original response scale.
@@ -103,8 +93,8 @@ def estimate_design_life_level_interval(
     matrix ``cov_beta``. The returned interval is pointwise and does not include
     any post-selection or model-class uncertainty beyond that covariance matrix.
 
-    ``years`` is a positive finite scalar or 1D array and ``tau`` must match
-    the fitted quantile. Return ``(lower, upper)`` as floats for a scalar or
+    ``years`` is a positive finite scalar or 1D array; the probability is fixed
+    by ``fit.quantile``. Return ``(lower, upper)`` as floats for a scalar or
     aligned arrays otherwise. The default ``z_crit=1.96`` gives nominal 95%
     normal intervals on the log scale; these are intervals for the fitted
     quantile, not prediction intervals for future observed maxima.
@@ -113,13 +103,6 @@ def estimate_design_life_level_interval(
         raise ValueError(
             "estimate_design_life_level_interval requires a quantile-based ScalingFit. "
             f"Received target={fit.target!r}."
-        )
-    fit_tau = float(fit.quantile)
-    tau_value = fit_tau if tau is None else float(tau)
-    if not np.isclose(tau_value, fit_tau):
-        raise ValueError(
-            "estimate_design_life_level_interval must use the same tau as the fitted ScalingFit. "
-            f"Received tau={tau_value:.4f}, fit.quantile={fit_tau:.4f}."
         )
     cov_beta = np.asarray(fit.cov_beta, dtype=float)
     if cov_beta.shape != (2, 2):

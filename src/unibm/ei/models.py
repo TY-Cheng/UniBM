@@ -21,7 +21,9 @@ class EiPathBundle:
 
     ``theta_path`` and ``z_path`` are computed from the observed series over the
     candidate block-size grid. ``stable_window`` and ``selected_level`` record
-    where that observed path is judged stable, while ``sample_statistics``
+    where that observed path is judged stable. For an explicitly fixed single
+    block size, ``stable_window`` is None and ``selected_level`` is that size.
+    ``sample_statistics``
     preserves the per-block-size window statistics reused by native fixed-``b``
     estimators.
     """
@@ -34,7 +36,7 @@ class EiPathBundle:
     z_path: np.ndarray
     sample_counts: np.ndarray
     sample_statistics: dict[int, np.ndarray]
-    stable_window: EiStableWindow
+    stable_window: EiStableWindow | None
     selected_level: int
 
 
@@ -104,10 +106,11 @@ class EiPreparedBundle:
     """Reusable EI preparation outputs derived from one observed series.
 
     The bundle stores the validated observed values without filtering, the block-size
-    grid, all BM path variants, and threshold-side exceedance candidates so the
+    grid, requested BM path variants, and threshold-side exceedance candidates so the
     native BM, pooled BM, and threshold estimators can all reuse the same
     preparation step. ``paths`` uses ``(base_path, sliding)`` keys, while
     ``threshold_candidates`` maps quantiles to strict-exceedance index arrays.
+    Threshold-only preparation has an empty block-size grid and empty paths.
     Frozen fields do not make the contained arrays and dictionaries immutable.
     """
 

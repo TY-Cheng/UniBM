@@ -1,7 +1,7 @@
 # UniBM
 
 UniBM is a Python package for dependence-aware block-maxima inference in
-environmental extremes.
+heavy-tailed time series.
 
 It exposes two complementary inferential targets:
 
@@ -123,6 +123,25 @@ workflows separately.
 
 ## Documentation
 
+The site presents a [statistical Benchmark](https://ty-cheng.github.io/UniBM/benchmark/)
+followed by nine records across six case pages: streamflow, NFIP claims, Houston,
+Phoenix, GOES, and SPY/QQQ. Each page defines its raw or normalized observation
+scale. GOES reports OLS EVI point diagnostics only; other cases include EVI and EI.
+
+To regenerate just the documented case figures and numerical records without
+external report export or network access:
+
+```bash
+PYTHONPATH=scripts uv run python -m application.docs_cases
+```
+
+GHCN, USGS, and NFIP use archived repository inputs. GOES/finance require the
+local snapshots described on their pages. Add `--available` to retain frozen
+optional assets when these inputs are absent; corrupt inputs still fail. The
+ordinary application workflow uses this optional-input policy. Site builds need
+only the tracked static assets, not provider access. Use `just --command` for
+these uv commands when relying on environment overrides from `.env`.
+
 Package documentation is available at:
 
 - [https://ty-cheng.github.io/UniBM/](https://ty-cheng.github.io/UniBM/)
@@ -152,8 +171,9 @@ The stable top-level entrypoints are:
 formatting and lint rules. `just check-full` runs the complete parallel test
 suite with the coverage gate.
 `just data` validates the tracked canonical inputs and prepares the four report
-cases without network access. `just refresh-data` is the only networked data
-entrypoint; it refreshes the fixed-cutoff provider snapshots and leaves their
+cases without network access. `just refresh-data` is the networked recipe for canonical inputs; the optional
+GOES downloader is documented separately. The recipe refreshes fixed-cutoff
+provider snapshots and leaves their
 Git diff for review. `just reports` reuses valid benchmark summaries, computes
 missing ones, and reruns application fits to refresh reports and web snapshots.
 `just full` checks the project, cleans named outputs, and rebuilds the benchmark,
@@ -184,4 +204,4 @@ The example uses the default adaptive policy with checkpoints 128, 256, 512,
 768, and 1024. An explicit integer such as `bootstrap_reps=480` instead fixes R. Inspect
 `bootstrap_reps_used` and `bootstrap_precision_met`: reaching the cap does not
 imply precision was met. Adaptive R controls numerical Monte Carlo error, not
-statistical CI width or coverage. Both EVI/EI FGLS defaults use fixed shrinkage 0.37.
+statistical CI width or coverage. FGLS uses fixed shrinkage 0.73 for EVI and 0.37 for EI.

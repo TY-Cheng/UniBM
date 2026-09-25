@@ -12,13 +12,12 @@ from data_prep.fema import (
 from data_prep.ghcn import (
     PreparedSeries,
     ghcn_station_data_needs_refresh,
-    prepare_hot_dry_series,
-    prepare_precipitation_series,
 )
 from data_prep.usgs import (
     prepare_usgs_streamflow_series,
     usgs_daily_discharge_needs_refresh,
 )
+from application.normalization import prepare_normalized_climate
 from application.metadata import ensure_application_metadata
 from application.specs import (
     CLIMATE_APPLICATIONS,
@@ -137,12 +136,12 @@ def build_application_inputs(
     if "houston_hobby_precipitation" in keys:
         status("application", "preparing Houston precipitation inputs")
         inputs["houston_hobby_precipitation"] = _shared_prepared_series(
-            prepare_precipitation_series(raw_paths["houston_hobby_precipitation"])
+            prepare_normalized_climate(raw_paths["houston_hobby_precipitation"], "houston")
         )
     if "phoenix_hot_dry_severity" in keys:
         status("application", "preparing Phoenix hot-dry inputs")
         inputs["phoenix_hot_dry_severity"] = _shared_prepared_series(
-            prepare_hot_dry_series(raw_paths["phoenix_hot_dry_severity"])
+            prepare_normalized_climate(raw_paths["phoenix_hot_dry_severity"], "phoenix")
         )
     if keys.intersection({"tx_streamflow", "fl_streamflow"}):
         frozen_sites = load_usgs_frozen_sites(dirs["DIR_DATA_METADATA_APPLICATION"])

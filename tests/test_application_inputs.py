@@ -24,8 +24,7 @@ class ApplicationInputsTests(unittest.TestCase):
         with (
             mock.patch.object(inputs, "ensure_application_metadata") as metadata,
             mock.patch.object(inputs, "ensure_ghcn_raw_data", return_value=raw_paths),
-            mock.patch.object(inputs, "prepare_precipitation_series", return_value=prepared),
-            mock.patch.object(inputs, "prepare_hot_dry_series", return_value=prepared),
+            mock.patch.object(inputs, "prepare_normalized_climate", return_value=prepared),
         ):
             result = build_application_inputs(dirs, specs=CLIMATE_APPLICATIONS)
 

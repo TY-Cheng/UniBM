@@ -703,9 +703,9 @@ class ApplicationOutputTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             registry["houston_hobby_precipitation"].observations_per_year,
-            14_454 / 79,
+            365.25,
         )
-        self.assertEqual(registry["phoenix_hot_dry_severity"].observations_per_year, 214.0)
+        self.assertEqual(registry["phoenix_hot_dry_severity"].observations_per_year, 365.25)
 
     def test_nfip_application_specs_use_log_annual_max_time_series_scale(self) -> None:
         from application.specs import spec_by_key

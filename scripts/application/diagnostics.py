@@ -65,21 +65,14 @@ def _top_penultimate_windows(
     *,
     top_k: int = APPLICATION_DIAGNOSTIC_TOP_K,
     min_points: int = 5,
-    trim_fraction: float = 0.15,
     curvature_penalty: float = DEFAULT_CURVATURE_PENALTY,
 ) -> list[PlateauWindow]:
     x = np.asarray(fit.log_block_sizes, dtype=float)
     y = np.asarray(fit.log_values, dtype=float)
     n_obs = x.size
-    lo = int(np.floor(n_obs * trim_fraction))
-    hi = n_obs - lo
-    lo = min(lo, max(n_obs - min_points, 0))
-    if hi - lo < min_points:
-        lo = 0
-        hi = n_obs
     candidates: list[tuple[float, int, int]] = []
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(n_obs - min_points + 1):
+        for stop in range(start + min_points, n_obs + 1):
             window_x = x[start:stop]
             window_y = y[start:stop]
             slope, intercept = np.polyfit(window_x, window_y, 1)
@@ -272,7 +265,6 @@ def _top_ei_windows(
     *,
     top_k: int = APPLICATION_DIAGNOSTIC_TOP_K,
     min_points: int = 4,
-    trim_fraction: float = 0.15,
     roughness_penalty: float = 0.75,
     curvature_penalty: float = 0.5,
 ) -> list[tuple[EiStableWindow, np.ndarray, float]]:
@@ -281,14 +273,9 @@ def _top_ei_windows(
     mask = np.isfinite(z_path)
     levels = levels[mask]
     z_path = z_path[mask]
-    lo = int(np.floor(levels.size * trim_fraction))
-    hi = levels.size - lo
-    if hi - lo < min_points:
-        lo = 0
-        hi = levels.size
     candidates: list[tuple[float, int, int]] = []
-    for start in range(lo, hi - min_points + 1):
-        for stop in range(start + min_points, hi + 1):
+    for start in range(levels.size - min_points + 1):
+        for stop in range(start + min_points, levels.size + 1):
             window = z_path[start:stop]
             variance = float(np.mean((window - window.mean()) ** 2))
             first_diff = np.diff(window)

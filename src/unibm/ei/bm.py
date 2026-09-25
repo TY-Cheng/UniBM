@@ -358,18 +358,23 @@ def estimate_native_bm_ei(
     """Estimate ``theta`` with a native single-block-size BM estimator.
 
     ``bundle`` comes from ``prepare_ei_bundle``. Choose ``base_path="northrop"``
-    or ``"bb"`` and a sliding/disjoint scheme. Fit at the smallest block size in
-    that path's selected stable window and retain the path for diagnostics.
+    or ``"bb"`` and a prepared sliding/disjoint scheme. Fit at an explicitly
+    supplied single block size, or the smallest size in the selected stable
+    window, and retain the path for diagnostics.
 
     Northrop uses a nominal 95% profile interval and observed-information SE,
     or a score-based Chandler--Bate adjustment when ``use_adjusted_chandwich``
-    is true. That option has no effect on BB, which uses a bounded 95% Wald
+    is true. BB rejects this Northrop-only option and uses a bounded 95% Wald
     interval and delta-method SE. All returned SEs are on the theta scale.
 
     These intervals condition on the selected block size. Their variance
     estimates do not include cross-block score/statistic covariances, so using
     sliding blocks does not by itself provide dependence-adjusted coverage.
     """
+    if base_path != "northrop" and use_adjusted_chandwich:
+        raise ValueError("use_adjusted_chandwich is only supported for Northrop.")
+    if (base_path, sliding) not in bundle.paths:
+        raise ValueError("Requested BM path was not prepared; include it in path_keys.")
     path = bundle.paths[(base_path, sliding)]
     selected_level = path.selected_level
     statistics = path.sample_statistics[selected_level]
@@ -408,7 +413,7 @@ def estimate_pooled_bm_ei(
     sliding: bool,
     regression: str,
     bootstrap_result: dict[str, Any] | None = None,
-    covariance_shrinkage: float = EI_DEFAULT_COVARIANCE_SHRINKAGE,
+    covariance_shrinkage: float | None = None,
 ) -> ExtremalIndexEstimate:
     """Estimate ``theta`` by pooling an observed BM path over a stable window.
 
@@ -422,8 +427,9 @@ def estimate_pooled_bm_ei(
     ``regression`` must be OLS or FGLS. OLS rejects a bootstrap result; FGLS
     requires covariance from the matching base path and sliding/disjoint scheme
     and never falls back to OLS. Full-grid covariance is subset by block-size
-    labels. The default diagonal shrinkage is fixed at 0.37. OLS estimates its
-    variance from between-level residuals and does not model their dependence.
+    labels. Omitted shrinkage uses 0.37 for FGLS. OLS rejects an explicit
+    shrinkage value; it estimates variance from between-level residuals and
+    does not model their dependence. A fixed-b path requires native inference.
     Return an ``ExtremalIndexEstimate`` with a nominal 95% interval and retained
     path, covariance, and bootstrap diagnostics.
 
@@ -436,7 +442,13 @@ def estimate_pooled_bm_ei(
         raise ValueError("regression must be 'OLS' or 'FGLS'.")
     if regression == "OLS" and bootstrap_result is not None:
         raise ValueError("OLS does not accept bootstrap_result.")
-    covariance_shrinkage = validate_covariance_shrinkage(covariance_shrinkage)
+    if regression == "OLS" and covariance_shrinkage is not None:
+        raise ValueError("OLS does not use covariance_shrinkage; omit it.")
+    covariance_shrinkage = validate_covariance_shrinkage(
+        EI_DEFAULT_COVARIANCE_SHRINKAGE if covariance_shrinkage is None else covariance_shrinkage
+    )
+    if (base_path, sliding) not in bundle.paths:
+        raise ValueError("Requested BM path was not prepared; include it in path_keys.")
     path = bundle.paths[(base_path, sliding)]
     method = f"{base_path}_{'sliding' if sliding else 'disjoint'}_{regression.lower()}"
     return _build_bm_estimate(

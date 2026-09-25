@@ -31,6 +31,22 @@ def default_circular_bootstrap_block_size(
     return int(min(max(minimum, round(np.sqrt(n_obs))), n_obs))
 
 
+def _validate_circular_bootstrap_block_size(
+    block_size: int,
+    *,
+    n_obs: int,
+    name: str = "block_size",
+) -> int:
+    """Require a non-boolean integer length within the observed series."""
+    if (
+        isinstance(block_size, (bool, np.bool_))
+        or not isinstance(block_size, (int, np.integer))
+        or not 1 <= int(block_size) <= n_obs
+    ):
+        raise ValueError(f"{name} must be an integer between 1 and n_obs.")
+    return int(block_size)
+
+
 def draw_circular_block_bootstrap_sample(
     vec: np.ndarray | list[float],
     *,
@@ -39,7 +55,7 @@ def draw_circular_block_bootstrap_sample(
 ) -> np.ndarray:
     """Join randomly started circular blocks and truncate to the input length.
 
-    The input is flattened to floats and ``block_size`` is clamped to [1, n].
+    The input is flattened to floats; ``block_size`` must be an integer in [1, n].
     Block starts are sampled independently using, and advancing, ``rng``.
     Observations keep their order within each block, wrapping at the end of
     the series. Non-finite values are retained if sampled; callers that need
@@ -49,7 +65,7 @@ def draw_circular_block_bootstrap_sample(
     arr = np.asarray(vec, dtype=float).reshape(-1)
     if arr.size == 0 or not np.any(np.isfinite(arr)):
         raise ValueError("Cannot bootstrap a series without any finite observations.")
-    block_size = int(min(max(block_size, 1), arr.size))
+    block_size = _validate_circular_bootstrap_block_size(block_size, n_obs=arr.size)
     wrapped = np.concatenate([arr, arr[: block_size - 1]]) if block_size > 1 else arr
     n_blocks = int(np.ceil(arr.size / block_size))
     starts = rng.integers(0, arr.size, size=n_blocks)
@@ -68,9 +84,9 @@ def draw_circular_block_bootstrap_samples(
 
     ``reps`` must be positive. A missing block size uses the square-root
     heuristic, and ``random_state`` seeds a local generator. The returned
-    ``samples`` array has shape ``(reps, n)``. The bank records the requested
-    block size; each draw clamps it to [1, n]. Input is flattened, and any
-    non-finite observations are retained rather than silently removed.
+    ``samples`` array has shape ``(reps, n)``. A supplied block size must be an
+    integer in [1, n], and the bank records the exact length used. Input is
+    flattened, and any non-finite observations are retained rather than silently removed.
     """
     arr = np.asarray(vec, dtype=float).reshape(-1)
     if arr.size == 0 or not np.any(np.isfinite(arr)):
@@ -79,6 +95,7 @@ def draw_circular_block_bootstrap_samples(
         raise ValueError("reps must be at least 1.")
     if block_size is None:
         block_size = default_circular_bootstrap_block_size(arr.size)
+    block_size = _validate_circular_bootstrap_block_size(block_size, n_obs=arr.size)
     rng = np.random.default_rng(random_state)
     samples = np.empty((reps, arr.size), dtype=float)
     for rep in range(reps):
@@ -87,4 +104,4 @@ def draw_circular_block_bootstrap_samples(
             block_size=block_size,
             rng=rng,
         )
-    return CircularBootstrapSampleBank(block_size=int(block_size), samples=samples)
+    return CircularBootstrapSampleBank(block_size=block_size, samples=samples)

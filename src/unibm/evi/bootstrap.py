@@ -204,13 +204,13 @@ def _adaptive_block_summary_bootstrap(
     sliding: bool,
     super_block_size: int | None,
     random_state: int | None,
-    evaluate: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
+    evaluate: Callable[[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
     n_threads: int | None = None,
 ) -> dict[str, Any]:
     """Grow log-summary bootstrap samples until MC precision or the cap is reached.
 
     Cache segment maxima once, draw additional rows in batches, and pass
-    covariance estimates to ``evaluate`` for the monitored statistics and
+    covariance estimates and their paired rows to ``evaluate`` for the monitored statistics and
     SE scales. If too few super-blocks exist, return empty samples and no
     covariance; adaptive precision does not certify statistical coverage.
     """
@@ -443,25 +443,36 @@ def build_block_summary_bootstrap_backbone(
 
     Split the 1D series into equal complete super-blocks, discarding the
     incomplete tail. Sliding maxima wrap within each segment; disjoint
-    maxima discard each segment's incomplete block. The requested
-    ``super_block_size`` is adjusted to fit the largest block and, when
-    possible, allow four segments. Return None for fewer than two segments
-    or ``reps < 2``. A fixed ``random_state`` reproduces segment draws.
+    maxima discard each segment's incomplete block. The default length is
+    ``max(2 * B, floor(sqrt(N)))``, where B is the largest supplied block size
+    and N is the series length. This length is used without adjustment. An explicit
+    ``super_block_size`` must be an integer above B, no greater than N, and
+    allow at least two complete segments; it is never adjusted.
+    Return None if an automatic length yields fewer than two segments or
+    ``reps < 2``. A fixed ``random_state`` reproduces segment draws.
     """
     warn_on_negative_values(vec, context="build_block_summary_bootstrap_backbone", stacklevel=3)
     arr = as_1d_float_array(vec)
     block_sizes = validate_block_sizes(block_sizes, n_obs=arr.size)
-    if reps < 2:
-        return None
     max_block_size = int(block_sizes.max())
     if super_block_size is None:
-        super_block_size = max(max_block_size * 4, int(np.sqrt(arr.size)))
-    super_block_size = min(max(super_block_size, max_block_size + 1), arr.size)
-    n_super = arr.size // super_block_size
-    if n_super < 4:
-        super_block_size = max(max_block_size + 1, arr.size // 4)
+        super_block_size = max(max_block_size * 2, int(np.sqrt(arr.size)))
         n_super = arr.size // super_block_size
-    if n_super < 2:
+    else:
+        if (
+            isinstance(super_block_size, (bool, np.bool_))
+            or not isinstance(super_block_size, (int, np.integer))
+            or not max_block_size < int(super_block_size) <= arr.size
+        ):
+            raise ValueError(
+                "super_block_size must be an integer above the largest block size "
+                "and no greater than n_obs."
+            )
+        super_block_size = int(super_block_size)
+        n_super = arr.size // super_block_size
+        if n_super < 2:
+            raise ValueError("super_block_size must allow at least two complete super-blocks.")
+    if n_super < 2 or reps < 2:
         return None
     trimmed = arr[: n_super * super_block_size]
     segments = trimmed.reshape(n_super, super_block_size)
@@ -544,7 +555,7 @@ def circular_block_summary_bootstrap(
     False uses disjoint maxima. Invalid log-summary rows are removed jointly
     across scales. Fewer than two requested draws or usable segments gives
     empty samples and no covariance. See the backbone builder for how the
-    super-block length is adjusted.
+    automatic super-block lengths are chosen and explicit lengths validated.
     ``n_threads`` follows the backbone evaluator's per-call thread budget.
     """
     validate_n_threads(n_threads)
@@ -553,15 +564,6 @@ def circular_block_summary_bootstrap(
     if target not in {"quantile", "mean", "mode"}:
         raise ValueError(f"Unsupported target: {target}")
     resolved_quantile = _validate_quantile(quantile) if target == "quantile" else None
-    if reps < 2:
-        return {
-            "block_sizes": block_sizes,
-            "samples": np.empty((0, block_sizes.size)),
-            "covariance": None,
-            "target": target,
-            "quantile": resolved_quantile,
-            "sliding": bool(sliding),
-        }
     backbone = build_block_summary_bootstrap_backbone(
         vec=arr,
         block_sizes=block_sizes,

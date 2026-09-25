@@ -5,7 +5,7 @@
       <h1>Severity, persistence, and design-life levels under serial dependence.</h1>
       <p class="unibm-lead">
         UniBM is a Python package for dependence-aware block-maxima inference in
-        environmental extremes. It keeps severity inference, persistence
+        heavy-tailed time series. It keeps severity inference, persistence
         inference, and design-life levels in one coherent workflow while
         exposing a small public API under <code>unibm</code>,
         <code>unibm.evi</code>, <code>unibm.ei</code>, and <code>unibm.cdf</code>.
@@ -34,8 +34,8 @@
           <span><code>unibm</code>, <code>unibm.evi</code>, <code>unibm.ei</code>, and <code>unibm.cdf</code>.</span>
         </div>
         <div class="unibm-metric">
-          <strong>Six case studies</strong>
-          <span>Climate extremes, streamflow, and NFIP claims with frozen evidence and explicit limits.</span>
+          <strong>Nine case studies</strong>
+          <span>Water, climate, space weather, and financial losses, with explicit observation scales.</span>
         </div>
       </div>
     </aside>
@@ -63,26 +63,49 @@
   </a>
 </div>
 
+<p class="unibm-section-label">Statistical benchmark</p>
+
+<p>Compare estimation error, interval score, and coverage against known targets in the
+<a href="benchmark/">EVI and EI benchmark</a>.</p>
+
 <p class="unibm-section-label">Evidence in use</p>
 
 <div class="unibm-domain-grid">
-  <a class="unibm-domain-card unibm-domain-climate" href="cases/climate-extremes/">
-    <span class="unibm-domain-index">01</span>
-    <h3>Climate extremes</h3>
-    <p>Houston precipitation and a compound Phoenix hot–dry severity index.</p>
-    <span class="unibm-domain-meta">GHCN · EVI only</span>
-  </a>
   <a class="unibm-domain-card unibm-domain-streamflow" href="cases/streamflow/">
-    <span class="unibm-domain-index">02</span>
+    <span class="unibm-domain-index">01</span>
     <h3>Streamflow</h3>
-    <p>Texas and Florida daily discharge on the calendar-day clock.</p>
-    <span class="unibm-domain-meta">USGS · EVI + EI</span>
+    <p>Texas and Florida daily mean discharge.</p>
+    <span class="unibm-domain-meta">USGS · Raw · EVI + EI</span>
   </a>
   <a class="unibm-domain-card unibm-domain-nfip" href="cases/nfip-claims/">
-    <span class="unibm-domain-index">03</span>
+    <span class="unibm-domain-index">02</span>
     <h3>NFIP claims</h3>
-    <p>Inflation-adjusted building payouts as impact-side stress records.</p>
-    <span class="unibm-domain-meta">OpenFEMA · EVI + EI</span>
+    <p>Texas and Florida daily building-claim totals in 2025 dollars.</p>
+    <span class="unibm-domain-meta">OpenFEMA · CPI-adjusted · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-climate" href="cases/houston-precipitation/">
+    <span class="unibm-domain-index">03</span>
+    <h3>Houston precipitation</h3>
+    <p>Full-calendar daily rainfall divided by its past EWMA level.</p>
+    <span class="unibm-domain-meta">GHCN · Normalized · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-climate" href="cases/phoenix-hot-dry/">
+    <span class="unibm-domain-index">04</span>
+    <h3>Phoenix hot–dry severity</h3>
+    <p>A derived daily severity index divided by its past EWMA level.</p>
+    <span class="unibm-domain-meta">GHCN · Normalized · EVI + EI</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-streamflow" href="cases/goes-xray/">
+    <span class="unibm-domain-index">05</span>
+    <h3>GOES soft X-rays</h3>
+    <p>Hourly maxima divided by their past EWMA level, with gaps retained.</p>
+    <span class="unibm-domain-meta">NOAA · Normalized · EVI only</span>
+  </a>
+  <a class="unibm-domain-card unibm-domain-nfip" href="cases/spy-qqq/">
+    <span class="unibm-domain-index">06</span>
+    <h3>SPY / QQQ losses</h3>
+    <p>Left-tail log losses divided by past EWMA return volatility.</p>
+    <span class="unibm-domain-meta">Massive · Normalized · EVI + EI</span>
   </a>
 </div>
 
@@ -108,7 +131,7 @@
 </div>
 
 <p class="unibm-note">
-  This site is package-first. Case figures and validation summaries are frozen
+  This site is package-first. Case figures and benchmark summaries are frozen
   outputs: the browser renders them but never downloads data or fits a model.
   Repository-level orchestration remains in the root
   <a href="https://github.com/TY-Cheng/UniBM/blob/main/README.md">README</a>
