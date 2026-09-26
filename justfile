@@ -37,7 +37,7 @@ reports workers="8" screening_bootstrap="20": _require-workflow-env
 data screening_bootstrap="20":
     uv sync --dev
     UNIBM_SCREENING_BOOTSTRAP_REPS={{ screening_bootstrap }} uv run python scripts/application/freeze_usgs.py
-    PYTHONPATH=scripts uv run python -c 'from application.inputs import build_application_inputs; from config import resolve_repo_dirs; build_application_inputs(resolve_repo_dirs("."))'
+    PYTHONPATH=scripts uv run python -c 'from application.inputs import build_application_inputs; from application.specs import APPLICATIONS; from config import resolve_repo_dirs; build_application_inputs(resolve_repo_dirs("."), specs=APPLICATIONS)'
 
 refresh-data:
     uv sync --dev

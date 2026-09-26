@@ -414,10 +414,8 @@ def main():
     """Validate retained inputs, cross-fit without resampling and save provenance."""
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=root / "out/benchmark/evi_ci_exploration")
-    parser.add_argument(
-        "--out", type=Path, default=root / "out/benchmark/evi_ci_scale_calibration"
-    )
+    parser.add_argument("--source", type=Path, default=root / "out/research/evi_ci_exploration")
+    parser.add_argument("--out", type=Path, default=root / "out/research/evi_ci_scale_calibration")
     args = parser.parse_args()
     out_dir = args.out.resolve()
     if not any(out_dir.is_relative_to(root / folder) for folder in ("out", ".cache")):

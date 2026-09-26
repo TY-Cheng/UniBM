@@ -10,9 +10,6 @@ from .fema import (
 )
 from .ghcn import (
     PreparedSeries,
-    materialize_derived_series,
-    prepare_hot_dry_series,
-    prepare_precipitation_series,
     read_ghcn_station_csv,
 )
 from .usgs import (
@@ -28,10 +25,7 @@ __all__ = [
     "download_monthly_cpi",
     "download_usgs_daily_discharge",
     "load_monthly_cpi",
-    "materialize_derived_series",
     "prepare_nfip_claim_series",
-    "prepare_hot_dry_series",
-    "prepare_precipitation_series",
     "prepare_usgs_streamflow_series",
     "read_nfip_claims_csv",
     "read_ghcn_station_csv",

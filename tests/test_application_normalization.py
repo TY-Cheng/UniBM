@@ -78,9 +78,11 @@ def test_absent_optional_inputs_keep_assets_but_corrupt_inputs_fail():
         build_documented_cases(root, keys=["goes"], available=True)
         assert bootstrap_thread_cap() == parent_cap
         assert asset.read_bytes() == b"frozen"
-        local = root / "data/processed/pilots"
+        local = root / "data/processed/inputs"
         local.mkdir(parents=True)
         (local / "goes_hourly.csv").write_text("not a valid input")
+        with pytest.raises(FileNotFoundError, match="Incomplete"):
+            build_documented_cases(root, keys=["goes"], available=True)
         (local / "goes_hourly.json").write_text(json.dumps({"output_sha256": "wrong"}))
         with pytest.raises(ValueError, match="hash"):
             load_extra_input("goes", root)

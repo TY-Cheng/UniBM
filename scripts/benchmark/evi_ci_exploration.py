@@ -329,7 +329,7 @@ def main():
 
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=root / "out/benchmark/evi_ci_exploration")
+    parser.add_argument("--out", type=Path, default=root / "out/research/evi_ci_exploration")
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
     parser.add_argument(
         "--limit-reps",

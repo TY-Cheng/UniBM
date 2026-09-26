@@ -88,7 +88,7 @@ uv run python scripts/data_prep/goes_hourly.py
 ```
 
 `goes_snapshot.py --offline` reuses the previously saved listings and NetCDF files.
-Inputs remain local under `data/raw/pilots/goes` and `data/processed/pilots`.
+Inputs remain local under `data/raw/goes` and `data/processed/inputs`.
 The scripts record source URLs, quality rules, satellite priorities, and SHA-256
 hashes. Available archive versions may change, so a new retrieval need not recreate
 the frozen result exactly.

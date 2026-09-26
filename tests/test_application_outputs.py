@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import cache
+import json
 import tempfile
 import unittest
 from unittest import mock
@@ -28,6 +29,7 @@ from application.outputs import (
     _draw_ei_ax,
     _draw_design_life_levels_ax,
     _usgs_screening_has_detail,
+    _write_application_web_record,
     application_ei_method_rows,
     application_design_life_level_table,
     application_extrapolation_table,
@@ -39,10 +41,12 @@ from application.outputs import (
     application_usgs_screening_disclosure_table,
     write_application_figures,
     write_application_web_figure,
+    write_application_report,
 )
 from application.specs import APPLICATION_DESIGN_LIFE_TAUS, APPLICATION_RANDOM_STATE
 from benchmark.design import fit_methods_for_series
 from unibm.ei import ExtremalIndexEstimate
+from unibm.evi import estimate_evi_quantile
 
 
 def _make_prepared(series: pd.Series, *, name: str, provider: str, role: str) -> PreparedSeries:
@@ -142,6 +146,48 @@ def _make_nfip_bundle() -> object:
 
 
 class ApplicationOutputTests(unittest.TestCase):
+    def test_browser_outputs_are_utf8_with_a_legacy_default_encoding(self) -> None:
+        source = _make_evi_only_bundle()
+        bundle = replace(source, spec=replace(source.spec, label="EVI ξ · 测试"))
+        write_text = Path.write_text
+
+        def legacy_write(path, text, **kwargs):
+            # Reproduce the Windows/Python 3.11 CP1252 default on any platform.
+            kwargs.setdefault("encoding", "cp1252")
+            return write_text(path, text, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(Path, "write_text", autospec=True, side_effect=legacy_write):
+                report = write_application_report([bundle], Path(tmp), skipped=[])
+                _write_application_web_record(bundle, Path(tmp))
+            self.assertIn(bundle.spec.label, report.read_text(encoding="utf-8"))
+            record = json.loads(
+                (Path(tmp) / f"{bundle.spec.figure_stem}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(record["summary"]["label"], bundle.spec.label)
+
+    def test_point_only_case_has_no_ci_and_reuses_ols_in_every_output(self) -> None:
+        source = _make_evi_only_bundle()
+        prepared = replace(source.prepared.evi, metadata={"ci_scope": "not reported"})
+        fit = estimate_evi_quantile(prepared.series.values, regression="OLS", sliding=True)
+        bundle = replace(source, evi_fit=fit, prepared=replace(source.prepared, evi=prepared))
+        summary = application_summary_record(bundle)
+        self.assertFalse(summary["ci_reported"])
+        self.assertIsNone(summary["xi_lo"])
+        self.assertIsNone(summary["xi_hi"])
+        self.assertIsNone(summary["evi_ci_variant"])
+        rows = application_method_rows(bundle)
+        self.assertEqual({row["method"] for row in rows}, {"sliding_median_ols"})
+        self.assertTrue(all(row["xi_hat"] == fit.slope for row in rows))
+        self.assertTrue(all(row["xi_lo"] is None and row["xi_hi"] is None for row in rows))
+        self.assertEqual(application_ei_method_rows(bundle), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            report = write_application_report([bundle], Path(tmp), skipped=["spy"])
+            html = report.read_text(encoding="utf-8")
+            self.assertIn("No EI or CI is reported", html)
+            self.assertNotIn("95% CI", html)
+            self.assertIn("inputs absent): spy", html)
+
     def test_application_summary_records_evi_regression_provenance(self) -> None:
         record = application_summary_record(_make_evi_only_bundle())
 

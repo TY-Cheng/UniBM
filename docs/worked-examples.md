@@ -1,6 +1,6 @@
 # Worked Examples
 
-These examples target UniBM 0.3.x. For earlier releases, see the
+These examples target UniBM v0.3.x. For earlier releases, see the
 [API migration notes](api/public-api.md#api-migration) and
 [import history](api/public-api.md#top-level-convenience-imports).
 

@@ -1,8 +1,8 @@
-"""Rebuild SPY/QQQ pilot inputs from frozen Massive connector responses.
+"""Rebuild SPY/QQQ prepared inputs from frozen Massive connector responses.
 
 Run with uv run python scripts/data_prep/finance_snapshot.py
 No credentials or network are used. To refresh, repeat the exact call_api and
-query_data requests preserved beside their responses in data/raw/pilots/finance.
+query_data requests preserved beside their responses in data/raw/finance.
 The original full-history requests were entitlement-clipped by the provider;
 separate old-history probes returned NOT_ENTITLED. Never describe this as a
 full-inception sample. The first close is a lag and is not a zero-loss observation.
@@ -32,8 +32,8 @@ from pandas.tseries.holiday import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-RAW = ROOT / "data/raw/pilots/finance"
-OUT = ROOT / "data/processed/pilots"
+RAW = ROOT / "data/raw/finance"
+OUT = ROOT / "data/processed/inputs"
 CUTOFF = "2025-12-31"
 RETRIEVED_ON = "2026-09-25"
 CALENDAR_SOURCES = [

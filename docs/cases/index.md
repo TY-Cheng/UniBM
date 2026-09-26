@@ -137,8 +137,12 @@ This command uses existing local inputs and does not export to an external repor
 directory. `--keys` selects case IDs; `--available` retains frozen optional
 GOES/finance assets when their local input pair is absent, and reports each skip.
 Malformed or hash-mismatched inputs still fail. The ordinary `just application`
-workflow also refreshes those extra cases when inputs are available. It retains
-its configured external report export behavior.
+workflow includes available extra cases in its combined CSVs, prepared-series
+registry, and `out/applications/report.html`. The figures and JSON under
+`out/applications/cases/` are copied identically to `docs/assets/cases/` from the
+same fits. The local report lists only cases rebuilt in that run, with skipped
+optional inputs identified. The four-case streamflow/NFIP report export retains
+its configured destination.
 
 GHCN, USGS, and NFIP use the repository's archived inputs. GOES and finance
 preparation commands and local-input requirements are on their respective pages.

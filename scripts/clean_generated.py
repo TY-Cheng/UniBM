@@ -11,6 +11,8 @@ from benchmark.evi_benchmark import (
     _resolve_benchmark_n_obs as evi_n_obs,
 )
 from config import resolve_repo_dirs
+from application.specs import APPLICATIONS
+from application.docs_cases import EXTRA_KEYS
 
 
 def clean_generated(root: Path | str = ".") -> list[Path]:
@@ -26,8 +28,15 @@ def clean_generated(root: Path | str = ".") -> list[Path]:
         benchmark / "benchmark_evi_shrinkage_sensitivity.csv",
         benchmark / "benchmark_ei_shrinkage_sensitivity.csv",
         applications / "application_summary.json",
+        applications / "report.html",
         dirs["DIR_REPORT"] / "report_subset_manifest.json",
     ]
+    paths.extend(
+        applications / "cases" / f"{stem}{suffix}"
+        for stem in [spec.figure_stem for spec in APPLICATIONS]
+        + [f"{key}_normalized" for key in EXTRA_KEYS]
+        for suffix in (".png", ".json")
+    )
     paths.extend(
         applications / f"application_{name}.csv"
         for name in (

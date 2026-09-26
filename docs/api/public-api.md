@@ -5,7 +5,7 @@ are public through `unibm.evi` and `unibm.ei`. UniBM also exposes
 six core workflow functions directly from `unibm`. These convenience imports
 refer to the same function objects; their placement does not select a default
 estimator for every task. See the [version note](#top-level-convenience-imports)
-below when using PyPI 0.1.0.
+below when using PyPI v0.1.0.
 
 ## Estimator map
 
@@ -120,8 +120,8 @@ extrapolated design-life levels**. See
 
 ## API migration
 
-The 0.3.1 source checkout preserves the 0.3.0 public API and inference defaults.
-Version 0.3.0 introduced the following API changes from 0.2.0.
+The v0.3.1 source checkout preserves the v0.3.0 public API and inference defaults.
+Version v0.3.0 introduced the following API changes from v0.2.0.
 Review the [current defaults](#defaults-and-explicit-choices) above as well:
 
 | Earlier call | Current call or behavior |
@@ -136,14 +136,14 @@ Review the [current defaults](#defaults-and-explicit-choices) above as well:
 
 ## Top-level convenience imports
 
-Since 0.2.0, EVI estimation and EVI/EI bootstrap calls accept `n_threads`.
+Since v0.2.0, EVI estimation and EVI/EI bootstrap calls accept `n_threads`.
 Optional native kernels preserve the same public API. See
 [thread budgets](../getting-started.md#bootstrap-threads) and
 [native acceleration](../getting-started.md#optional-native-acceleration)
 for defaults, nested parallelism, and the NumPy fallback. These additions are
-not in PyPI 0.1.0.
+not in PyPI v0.1.0.
 
-UniBM 0.3.x supports:
+UniBM v0.3.x supports:
 
 ```python
 from unibm import (
@@ -162,7 +162,7 @@ calls. All six imports load lazily and resolve to the original subpackage
 functions. Comparator estimators and other helpers remain in the grouped
 namespaces above.
 
-**Version note:** the four additional root imports were added in 0.2.0. Version 0.1.0
+**Version note:** the four additional root imports were added in v0.2.0. Version v0.1.0
 exports only `estimate_evi_quantile` and `estimate_design_life_level` at the
 root. On that release, import the other four functions as follows; these paths
 also remain supported in current versions:

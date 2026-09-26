@@ -6,12 +6,14 @@
     "secondary_case":false,
     "n_display_obs":2076,
     "n_evi_obs":2076,
+    "n_evi_eligible_obs":2076,
     "n_ei_obs":2076,
     "start":"2017-09-28",
     "end":"2025-12-31",
     "xi_hat":0.275083436134608,
     "xi_lo":-0.230391473988824,
     "xi_hi":0.78055834625804,
+    "ci_reported":true,
     "evi_regression_policy":"FGLS",
     "evi_regression":"FGLS",
     "evi_ci_variant":"bootstrap_cov",
@@ -50,7 +52,7 @@
       "warmup_observations":252,
       "decay":0.94
     },
-    "input":"data\/processed\/pilots\/spy.csv",
+    "input":"data\/processed\/inputs\/spy.csv",
     "ci_scope":"conditional on preprocessing; EWMA not re-estimated in bootstrap"
   },
   "eligible_observations":2076,

@@ -18,7 +18,6 @@ import pandas as pd
 from application.fit import build_application_bundle
 from application.inputs import build_application_inputs
 from application.normalization import ewma_scale
-from application.outputs import write_application_web_figure
 from application.specs import (
     APPLICATIONS,
     ApplicationBundle,
@@ -32,6 +31,16 @@ from unibm.evi import estimate_evi_quantile
 
 ROOT = Path(__file__).resolve().parents[2]
 EXTRA_KEYS = ("goes", "spy", "qqq")
+
+
+def extra_input_available(key: str, root: Path) -> bool:
+    """Skip absent snapshots, but reject an incomplete CSV/provenance pair."""
+    name = "goes_hourly" if key == "goes" else key
+    base = root / "data/processed/inputs" / name
+    present = [base.with_suffix(ext).is_file() for ext in (".csv", ".json")]
+    if any(present) and not all(present):
+        raise FileNotFoundError(f"Incomplete prepared input: {base} requires CSV and JSON")
+    return all(present)
 
 
 def segmented_scale(values, warmup=720, decay=2 ** (-1 / 4320)):
@@ -48,7 +57,7 @@ def segmented_scale(values, warmup=720, decay=2 ** (-1 / 4320)):
 def load_extra_input(key: str, root: Path):
     """Check local prepared-input provenance before reconstructing normalization."""
     name = "goes_hourly" if key == "goes" else key
-    source = root / "data/processed/pilots" / f"{name}.csv"
+    source = root / "data/processed/inputs" / f"{name}.csv"
     metadata = json.loads(source.with_suffix(".json").read_text())
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     expected = metadata["output_sha256" if key == "goes" else "processed_sha256"]
@@ -146,6 +155,8 @@ def extra_bundle(key: str, root: Path):
 
 def build_documented_cases(root=ROOT, *, keys=None, available=False):
     """Render selected cases; absent optional inputs are reported, never downloaded."""
+    from application.outputs import write_application_web_figure
+
     root = Path(root)
     keys = list(keys) if keys is not None else [s.key for s in APPLICATIONS] + list(EXTRA_KEYS)
     known = {s.key: s for s in APPLICATIONS}
@@ -154,12 +165,9 @@ def build_documented_cases(root=ROOT, *, keys=None, available=False):
     for key in keys:
         if key not in known and key not in EXTRA_KEYS:
             raise ValueError(f"Unknown documented case: {key}")
-        if key in EXTRA_KEYS and available:
-            name = "goes_hourly" if key == "goes" else key
-            base = root / "data/processed/pilots" / name
-            if not all(base.with_suffix(ext).is_file() for ext in (".csv", ".json")):
-                status("cases", f"{key}: local input unavailable; keeping frozen docs assets")
-                continue
+        if key in EXTRA_KEYS and available and not extra_input_available(key, root):
+            status("cases", f"{key}: local input unavailable; keeping frozen docs assets")
+            continue
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             if key in known:

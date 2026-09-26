@@ -25,22 +25,22 @@ The public package is organized around four entrypoints:
 - `unibm.cdf` for the public empirical CDF helper
 
 UniBM exposes six core functions directly from `unibm`.
-The four additional root imports are not in PyPI 0.1.0: use `unibm.ei` for
+The four additional root imports are not in PyPI v0.1.0: use `unibm.ei` for
 `prepare_ei_bundle`, `bootstrap_bm_ei_path`, and `estimate_pooled_bm_ei`, and
 `unibm.evi` for `estimate_design_life_level_interval` on that release.
 All existing subpackage import paths remain supported.
-When upgrading from 0.2.0, review the
-[0.3.0 API migration notes](https://ty-cheng.github.io/UniBM/api/public-api/#api-migration)
+When upgrading from v0.2.0, review the
+[v0.3.0 API migration notes](https://ty-cheng.github.io/UniBM/api/public-api/#api-migration)
 for removed arguments and stricter validation.
 
 ## Quick start
 
-**Source checkout:** 0.3.1 (unreleased). **Latest published release:** 0.3.0.
+**Latest published release:** v0.3.1.
 
-Install the [PyPI release](https://pypi.org/project/unibm/0.3.0/) with Python 3.11 or later:
+Install the [PyPI release](https://pypi.org/project/unibm/0.3.1/) with Python 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.3.0
+python -m pip install unibm==0.3.1
 ```
 
 This installs `unibm`, including its estimators, interval helpers, design-life
@@ -70,7 +70,7 @@ without an exported override it uses `.venv/`.
 
 ## Acceleration
 
-The source checkout includes NumPy/SciPy optimizations and optional Cython kernels
+UniBM includes NumPy/SciPy optimizations and optional Cython kernels
 for EVI mode KDE, bootstrap quantile rank searches, and long-series EI bootstrap
 rolling minima. Source builds attempt to
 compile these kernels; without a C compiler, the same APIs use NumPy. Set
@@ -83,8 +83,7 @@ pool; repository workflows already assign this inner budget to their workers.
 NumPy/SciPy BLAS thread settings remain separate. Design-life point estimates
 and intervals reuse the EVI fit without another bootstrap.
 
-The additional bootstrap and window-selection optimizations are in the unreleased
-0.3.1 source checkout. See
+Version v0.3.1 adds the bootstrap and window-selection optimizations. See
 [Getting Started](https://ty-cheng.github.io/UniBM/getting-started/#bootstrap-threads)
 for thread and memory behavior, and
 [Native acceleration](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration)
@@ -96,7 +95,10 @@ Calculation results stay in the code repository:
 
 - `out/benchmark/`: benchmark CSVs and sensitivity summaries
 - `out/benchmark/cache/`: reusable simulation caches
-- `out/applications/`: application CSVs and JSON
+- `out/applications/`: current application CSVs, JSON, and `report.html`
+- `out/applications/cases/`: four-panel figures and per-case provenance, copied identically to docs
+- `out/research/`: explicitly requested CI-calibration and application-sensitivity experiments
+- `out/archive/`: completed local experiments, separate from current workflow outputs
 
 Final PDF figures and LaTeX tables go to `Figure/` and `Table/` inside a single
 report destination. `UNIBM_REPORT_DIR` unset or blank means `out/reports/`.
@@ -148,6 +150,17 @@ optional assets when these inputs are absent; corrupt inputs still fail. The
 ordinary application workflow uses this optional-input policy. Site builds need
 only the tracked static assets, not provider access. Use `just --command` for
 these uv commands when relying on environment overrides from `.env`.
+
+`just application` regenerates the prepared series, combined summaries, local
+report, and docs assets together. The local report includes only cases rebuilt in
+that run; it identifies skipped optional inputs explicitly. The EVI/EI method
+tables cover those same cases (GOES has OLS EVI points, no EI or CI). Daily candidate
+screening remains limited to the six core cases; design-life CI and LaTeX report
+tables retain the four streamflow/NFIP cases. Completed CI-calibration and
+shrinkage experiments are not part of this command; their scripts remain in
+`scripts/benchmark/` and `scripts/application/shrinkage_sensitivity.py`.
+Their default output directories are under `out/research/`; existing archives
+are not loaded automatically. Use each script's `--help` for an explicit rerun.
 
 Package documentation is available at:
 

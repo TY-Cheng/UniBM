@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data/processed/pilots"
+DATA = ROOT / "data/processed/inputs"
 
 
 def aggregate(flux, unresolved):

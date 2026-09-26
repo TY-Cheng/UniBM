@@ -6,12 +6,14 @@
     "secondary_case":false,
     "n_display_obs":271704,
     "n_evi_obs":271704,
+    "n_evi_eligible_obs":94226,
     "n_ei_obs":null,
     "start":"1995-01-03",
     "end":"2025-12-31",
     "xi_hat":0.884799591809879,
     "xi_lo":null,
     "xi_hi":null,
+    "ci_reported":false,
     "evi_regression_policy":"OLS",
     "evi_regression":"OLS",
     "evi_ci_variant":null,
@@ -51,7 +53,7 @@
       "half_life_observations":4320,
       "reset_after_gap":true
     },
-    "input":"data\/processed\/pilots\/goes_hourly.csv",
+    "input":"data\/processed\/inputs\/goes_hourly.csv",
     "ci_scope":"not reported"
   },
   "eligible_observations":94226,

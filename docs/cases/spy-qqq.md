@@ -108,8 +108,8 @@ uv run python scripts/data_prep/finance_snapshot.py
 ```
 
 The tracked script documents the split/dividend calculation and exchange-calendar
-checks. It reads the frozen response exports under `data/raw/pilots/finance` and
-writes inputs under `data/processed/pilots`; it neither requests credentials nor
+checks. It reads the frozen response exports under `data/raw/finance` and
+writes inputs under `data/processed/inputs`; it neither requests credentials nor
 contacts the provider. Those responses and price histories remain local. A fresh
 checkout can build the documentation from the frozen figures without a provider
 account, but reproducing the financial fits requires the corresponding local

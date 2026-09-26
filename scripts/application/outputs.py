@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from html import escape
 import json
 from pathlib import Path
+import shutil
 import sys
 
 from unibm._runtime import prepare_matplotlib_env
@@ -29,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from application.fit import build_application_bundles_from_inputs
+from application.docs_cases import EXTRA_KEYS, extra_bundle, extra_input_available
 from application.inputs import (
     build_application_inputs,
     ensure_ghcn_raw_data,
@@ -777,6 +780,7 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
     northrop = bundle.ei_northrop_sliding_fgls
     k_gaps = bundle.ei_k_gaps
     ferro = bundle.ei_ferro_segers
+    ci_reported = bundle.prepared.evi.metadata.get("ci_scope") != "not reported"
     return {
         "application": bundle.spec.key,
         "label": bundle.spec.label,
@@ -784,15 +788,17 @@ def application_summary_record(bundle: ApplicationBundle) -> dict[str, object]:
         "secondary_case": bundle.spec.secondary_case,
         "n_display_obs": int(bundle.prepared.display.series.size),
         "n_evi_obs": int(bundle.prepared.evi.series.size),
+        "n_evi_eligible_obs": int(bundle.prepared.evi.series.notna().sum()),
         "n_ei_obs": (int(bundle.prepared.ei.series.size) if bundle.spec.formal_ei else np.nan),
         "start": str(bundle.prepared.display.series.index.min().date()),
         "end": str(bundle.prepared.display.series.index.max().date()),
         "xi_hat": float(bundle.evi_fit.slope),
-        "xi_lo": float(bundle.evi_fit.confidence_interval[0]),
-        "xi_hi": float(bundle.evi_fit.confidence_interval[1]),
+        "xi_lo": float(bundle.evi_fit.confidence_interval[0]) if ci_reported else None,
+        "xi_hi": float(bundle.evi_fit.confidence_interval[1]) if ci_reported else None,
+        "ci_reported": ci_reported,
         "evi_regression_policy": bundle.evi_fit.regression_policy,
         "evi_regression": bundle.evi_fit.regression,
-        "evi_ci_variant": bundle.evi_fit.ci_variant,
+        "evi_ci_variant": bundle.evi_fit.ci_variant if ci_reported else None,
         "evi_bootstrap_reps_policy": bundle.evi_fit.bootstrap_reps_policy,
         "evi_bootstrap_reps_used": bundle.evi_fit.bootstrap_reps_used,
         "evi_bootstrap_precision_met": bundle.evi_fit.bootstrap_precision_met,
@@ -1125,12 +1131,14 @@ def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]
     """Create the default application-side EVI summary rows."""
     rows: list[dict[str, object]] = []
     observations_per_year = _application_observations_per_year(bundle)
+    ci_reported = bundle.prepared.evi.metadata.get("ci_scope") != "not reported"
+    headline_method = f"sliding_median_{bundle.evi_fit.regression.lower()}"
     fits = fit_methods_for_series(
         bundle.prepared.evi.series.values,
         quantile=bundle.spec.quantile,
         random_state=APPLICATION_RANDOM_STATE,
-        method_ids=APPLICATION_EVI_METHOD_IDS,
-        reuse_fits={"sliding_median_fgls": bundle.evi_fit},
+        method_ids=APPLICATION_EVI_METHOD_IDS if ci_reported else (headline_method,),
+        reuse_fits={headline_method: bundle.evi_fit},
     )
     for method, fit in fits.items():
         spec = METHOD_LOOKUP[method]
@@ -1156,8 +1164,8 @@ def application_method_rows(bundle: ApplicationBundle) -> list[dict[str, object]
                         "block_scheme": spec.block_scheme,
                         "regression": spec.regression,
                         "xi_hat": float(fit.slope),
-                        "xi_lo": float(fit.confidence_interval[0]),
-                        "xi_hi": float(fit.confidence_interval[1]),
+                        "xi_lo": float(fit.confidence_interval[0]) if ci_reported else None,
+                        "xi_hi": float(fit.confidence_interval[1]) if ci_reported else None,
                         "plateau_lo": int(fit.plateau_bounds[0]),
                         "plateau_hi": int(fit.plateau_bounds[1]),
                         "one_year_design_life_level": float(one_year),
@@ -1932,24 +1940,21 @@ def _write_application_web_record(bundle: ApplicationBundle, web: Path):
     fit = bundle.evi_fit
     series = bundle.prepared.evi.series
     summary = application_summary_record(bundle)
-    if fit.regression == "OLS":
-        # The API's HC0 interval is not a valid time-series CI for this gapped case.
-        for k in ("xi_lo", "xi_hi", "evi_ci_variant"):
-            summary[k] = None
     record = {
         "summary": summary,
         "preparation": bundle.prepared.evi.metadata,
         "eligible_observations": int(series.notna().sum()),
         "first_eligible_date": str(series.dropna().index[0]),
         "last_eligible_date": str(series.dropna().index[-1]),
-        "ci_reported": fit.regression == "FGLS",
+        "ci_reported": summary["ci_reported"],
         "evi_grid": fit.curve.block_sizes.tolist(),
         "complete_window_counts": fit.curve.counts.tolist(),
         "ei_methods": application_ei_method_rows(bundle),
     }
     # Pandas converts nonfinite numeric diagnostics to JSON null and numpy scalars to numbers.
     (web / f"{bundle.spec.figure_stem}.json").write_text(
-        pd.Series(record).to_json(indent=2, force_ascii=False, double_precision=15) + "\n"
+        pd.Series(record).to_json(indent=2, force_ascii=False, double_precision=15) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -2010,7 +2015,7 @@ def write_application_web_figure(bundle: ApplicationBundle, web_dir: Path) -> Pa
 def _usgs_site_audit_frame(metadata_dir: Path) -> pd.DataFrame:
     """Build a lightweight shortlist audit from the candidate and frozen registries."""
     candidate_path = metadata_dir / "usgs_candidate_sites.json"
-    with candidate_path.open() as fh:
+    with candidate_path.open(encoding="utf-8") as fh:
         candidate_map = json.load(fh)
     frozen_map = load_usgs_frozen_sites(metadata_dir)
     rows: list[dict[str, object]] = []
@@ -2147,15 +2152,104 @@ def application_usgs_screening_disclosure_table(
     ]
 
 
+def write_application_report(
+    bundles: list[ApplicationBundle], out_dir: Path, *, skipped: list[str]
+) -> Path:
+    """Index this run's figures and provenance; never mix in stale optional results."""
+    links = []
+    sections = []
+    for bundle in bundles:
+        spec = bundle.spec
+        summary = application_summary_record(bundle)
+        metadata = bundle.prepared.evi.metadata
+        normalization = metadata.get("normalization")
+        if spec.key in ("spy", "qqq"):
+            scale = (
+                "Zero-clamped adjusted log loss divided by the lagged EWMA root mean "
+                "square of signed returns (decay 0.94; 252-session warmup). Gains remain zero."
+            )
+        elif normalization:
+            scale = (
+                "Observation divided by its lagged EWMA level (180-day half-life; "
+                "30-day warmup). Only earlier observations enter the scale."
+            )
+        elif spec.provider == "fema":
+            scale = (
+                "CPI-adjusted building claim totals in 2025 USD. EVI uses positive "
+                "claim-active days; EI uses the calendar-day series, retaining zeros."
+            )
+        else:
+            scale = "Raw daily streamflow, retaining its physical units."
+        scope = (
+            "Exploratory EVI point diagnostics only: hourly gaps and EWMA warmups remain "
+            "missing; only complete windows contribute. No EI or CI is reported."
+            if not summary["ci_reported"]
+            else "Conditional CIs do not include window-selection or preprocessing uncertainty."
+        )
+        label = escape(spec.label)
+        links.append(f'<a href="#{spec.key}">{label}</a>')
+        interval = (
+            f"; 95% CI [{summary['xi_lo']:.4f}, {summary['xi_hi']:.4f}]"
+            if summary["ci_reported"]
+            else ""
+        )
+        sections.append(
+            f'<section id="{spec.key}"><h2>{label}</h2><p>{scale}</p><p>{scope}</p>'
+            f"<p>{summary['start']}–{summary['end']} · "
+            f"{summary['n_evi_eligible_obs']:,} eligible EVI observations · "
+            f"ξ = {summary['xi_hat']:.4f}{interval}</p>"
+            f'<img src="cases/{spec.figure_stem}.png" alt="{label}: four-panel diagnostics" '
+            'loading="lazy">'
+            f'<p><a href="cases/{spec.figure_stem}.json">Numerical results and provenance</a></p>'
+            "</section>"
+        )
+    absent = (
+        f"<p>Not rebuilt in this run (local inputs absent): {escape(', '.join(skipped))}. "
+        "Their frozen docs assets are retained separately.</p>"
+        if skipped
+        else ""
+    )
+    path = out_dir / "report.html"
+    path.write_text(
+        '<!doctype html><html lang="en"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        "<title>UniBM application cases</title><style>"
+        "body{font:17px/1.55 system-ui,sans-serif;color:#24333b;background:#f7f5f0;"
+        "max-width:1250px;margin:40px auto;padding:0 24px}"
+        "a{color:#246f79}nav{display:flex;gap:12px;flex-wrap:wrap}"
+        "section{margin:36px 0;padding:24px;background:white;border-radius:12px}"
+        "img{width:100%;height:auto}h1,h2{line-height:1.2}</style>"
+        "<h1>UniBM application cases</h1>"
+        "<p>Generated by <code>just application</code>. These figures and JSON records "
+        "are also copied to the documentation from the same fits. "
+        "Normalized means division by a past-data EWMA scale; it does not guarantee stationarity. "
+        "Design-life curves extrapolate the selected scaling relation.</p>"
+        '<p><a href="application_summary.csv">Summary CSV</a> · '
+        '<a href="application_series_registry.csv">Prepared-series registry</a> · '
+        '<a href="application_evi_methods.csv">EVI methods</a> · '
+        '<a href="application_ei_methods.csv">EI methods</a></p>'
+        + absent
+        + "<nav>"
+        + " · ".join(links)
+        + "</nav>"
+        + "\n".join(sections)
+        + "</html>\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     """Materialize all application-side CSVs, metadata, and figures."""
     dirs = resolve_repo_dirs(root)
     metadata_app_dir = dirs["DIR_DATA_METADATA_APPLICATION"]
-    derived_dir = dirs["DIR_DATA_DERIVED"]
+    derived_dir = dirs["DIR_DATA_PROCESSED"]
     out_dir = dirs["DIR_OUT_APPLICATIONS"]
     fig_dir = dirs["DIR_REPORT_FIGURE"]
     table_dir = dirs["DIR_REPORT_TABLE"]
     web_dir = dirs["DIR_WORK"] / "docs" / "assets" / "cases"
+    cases_dir = out_dir / "cases"
+    cases_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
     table_dir.mkdir(parents=True, exist_ok=True)
@@ -2180,6 +2274,20 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     inputs = build_application_inputs(dirs, raw_paths=raw_paths, specs=APPLICATIONS)
     status("application", "building application bundles")
     bundles = build_application_bundles_from_inputs(inputs, specs=APPLICATIONS)
+    skipped = []
+    for key in EXTRA_KEYS:
+        if extra_input_available(key, dirs["DIR_WORK"]):
+            status("application", f"building local case {key}")
+            bundles.append(extra_bundle(key, dirs["DIR_WORK"]))
+        else:
+            skipped.append(key)
+            status("application", f"{key}: input unavailable; retaining frozen docs assets")
+    order = (
+        [s.key for s in REPORT_APPLICATIONS]
+        + [s.key for s in APPLICATIONS if s not in REPORT_APPLICATIONS]
+        + list(EXTRA_KEYS)
+    )
+    bundles.sort(key=lambda bundle: order.index(bundle.spec.key))
     report_bundles = _report_bundles(bundles)
     series_registry_rows: list[dict[str, object]] = []
     screening_rows: list[dict[str, object]] = []
@@ -2191,18 +2299,21 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     for bundle in bundles:
         status("application", f"collecting outputs for {bundle.spec.label}")
         series_registry_rows.extend(_role_series_rows(bundle, derived_dir=derived_dir))
-        evi_review = screen_extreme_series(
-            bundle.prepared.evi.series, name=bundle.spec.key
-        ).to_record()
-        evi_review["analysis_type"] = "evi"
-        screening_rows.append(evi_review)
-        if bundle.spec.formal_ei:
-            ei_review = screen_extremal_index_series(
-                bundle.prepared.ei.series,
-                name=bundle.spec.key,
-                allow_zeros=bundle.spec.ei_allow_zeros,
+        # Historical candidate screening is daily and assumes gap-free inputs.
+        # It does not apply to GOES hours or finance trading sessions.
+        if bundle.spec.key not in EXTRA_KEYS:
+            evi_review = screen_extreme_series(
+                bundle.prepared.evi.series, name=bundle.spec.key
             ).to_record()
-            screening_rows.append(ei_review)
+            evi_review["analysis_type"] = "evi"
+            screening_rows.append(evi_review)
+            if bundle.spec.formal_ei:
+                ei_review = screen_extremal_index_series(
+                    bundle.prepared.ei.series,
+                    name=bundle.spec.key,
+                    allow_zeros=bundle.spec.ei_allow_zeros,
+                ).to_record()
+                screening_rows.append(ei_review)
         summary_rows.append(application_summary_record(bundle))
         design_life_level_rows.extend(_application_design_life_level_rows(bundle))
         if bundle.spec.key in _REPORT_APPLICATION_KEYS:
@@ -2211,7 +2322,10 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
         if bundle.spec.formal_ei:
             ei_method_rows.extend(application_ei_method_rows(bundle))
         status("application", f"writing web figure for {bundle.spec.label}")
-        write_application_web_figure(bundle, web_dir)
+        write_application_web_figure(bundle, cases_dir)
+        for suffix in (".png", ".json"):
+            name = bundle.spec.figure_stem + suffix
+            shutil.copyfile(cases_dir / name, web_dir / name)
         if bundle.spec.key in _REPORT_APPLICATION_KEYS:
             status("application", f"writing report figures for {bundle.spec.label}")
             write_application_figures(bundle, fig_dir)
@@ -2225,8 +2339,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
 
     summary = pd.DataFrame(summary_rows).sort_values(["provider", "application"])
     summary.to_csv(out_dir / "application_summary.csv", index=False)
-    with (out_dir / "application_summary.json").open("w") as fh:
-        json.dump(summary_rows, fh, indent=2)
+    (out_dir / "application_summary.json").write_text(
+        pd.DataFrame(summary_rows).to_json(orient="records", indent=2, double_precision=15) + "\n",
+        encoding="utf-8",
+    )
+    write_application_report(bundles, out_dir, skipped=skipped)
 
     pd.DataFrame(design_life_level_rows).sort_values(
         ["application", "tau", "design_life_years"]
@@ -2255,7 +2372,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
     status("application", "writing application LaTeX summary table")
     summary_table = application_summary_table(report_bundles)
     (table_dir / "application_summary.tex").write_text(
-        _render_application_summary_latex(summary_table)
+        _render_application_summary_latex(summary_table),
+        encoding="utf-8",
     )
     status("application", "writing streamflow GEV scale-comparison table")
     streamflow_gev_check = application_streamflow_gev_check_table(report_bundles)
@@ -2292,7 +2410,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             },
             caption_raw=True,
             tabcolsep="1pt",
-        )
+        ),
+        encoding="utf-8",
     )
     status("application", "writing application LaTeX design-life-level table")
     (table_dir / "application_design_life_levels.tex").write_text(
@@ -2312,7 +2431,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "$\\tau$": r"$\tau$",
             },
             caption_raw=True,
-        )
+        ),
+        encoding="utf-8",
     )
     status("application", "writing application LaTeX EI comparison table")
     (table_dir / "application_ei.tex").write_text(
@@ -2326,7 +2446,8 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "two pooled-BM paths."
             ),
             label="tab:application-ei",
-        )
+        ),
+        encoding="utf-8",
     )
     status("application", "writing application supplementary selection-sensitivity table")
     (table_dir / "application_selection_sensitivity.tex").write_text(
@@ -2346,11 +2467,13 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
                 "$\\theta$ [range]": r"$\theta$ [range]",
             },
             caption_raw=True,
-        )
+        ),
+        encoding="utf-8",
     )
     status("application", "writing application extrapolation-distance table")
     (table_dir / "application_extrapolation.tex").write_text(
-        _render_application_extrapolation_latex(application_extrapolation_table(report_bundles))
+        _render_application_extrapolation_latex(application_extrapolation_table(report_bundles)),
+        encoding="utf-8",
     )
     status("application", "writing USGS screening disclosure table")
     (table_dir / "application_usgs_screening.tex").write_text(
@@ -2380,9 +2503,11 @@ def build_application_outputs(root: Path | str = ".") -> dict[str, Path]:
             },
             caption_raw=True,
             tabcolsep="1pt",
-        )
+        ),
+        encoding="utf-8",
     )
     outputs = {
+        "application_report": out_dir / "report.html",
         "application_series_registry": out_dir / "application_series_registry.csv",
         "application_screening": out_dir / "application_screening.csv",
         "application_summary": out_dir / "application_summary.csv",

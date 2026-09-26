@@ -512,7 +512,7 @@ def main():
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--case", choices=[s.key for s in APPLICATIONS])
     parser.add_argument(
-        "--output", type=Path, default=ROOT / "out/applications/shrinkage_sensitivity"
+        "--output", type=Path, default=ROOT / "out/research/application_shrinkage_sensitivity"
     )
     args = parser.parse_args()
     if args.workers < 1:

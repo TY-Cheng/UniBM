@@ -16,8 +16,8 @@ import pandas as pd
 from netCDF4 import Dataset
 
 ROOT = Path(__file__).resolve().parents[2]
-RAW = ROOT / "data/raw/pilots/goes"
-OUT = ROOT / "data/processed/pilots"
+RAW = ROOT / "data/raw/goes"
+OUT = ROOT / "data/processed/inputs"
 START, STOP = pd.Timestamp("1995-01-03"), pd.Timestamp("2026-01-01")
 LEGACY = "https://data.ngdc.noaa.gov/instruments/solar-space-observing/particle-detectors/sem/goes/access/science/xrs/"
 MODERN = "https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/"

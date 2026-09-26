@@ -173,7 +173,7 @@ def main():
     """Retain per-scenario evidence without reusing earlier fitted results."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--out", type=Path, default=ROOT / "out/benchmark/wald_ci_scale_calibration"
+        "--out", type=Path, default=ROOT / "out/research/wald_ci_scale_calibration"
     )
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
     parser.add_argument("--limit-reps", type=int, default=100)

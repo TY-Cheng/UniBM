@@ -95,7 +95,7 @@ def resolve_repo_dirs(dir_work: Path | str | None = None) -> dict[str, Path]:
         "DIR_DATA_RAW_USGS": data_root / "raw" / "usgs",
         "DIR_DATA_RAW_FEMA": data_root / "raw" / "fema",
         "DIR_DATA_RAW_CPI": data_root / "raw" / "cpi",
-        "DIR_DATA_DERIVED": data_root / "derived",
+        "DIR_DATA_PROCESSED": data_root / "processed",
         "DIR_DATA_METADATA": data_root / "metadata",
         "DIR_DATA_METADATA_APPLICATION": data_root / "metadata" / "application",
         "DIR_OUT": work / "out",

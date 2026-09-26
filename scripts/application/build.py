@@ -90,9 +90,6 @@ __all__ = [
 
 def main() -> None:
     outputs = build_application_outputs()
-    from application.docs_cases import build_documented_cases, EXTRA_KEYS
-
-    build_documented_cases(keys=EXTRA_KEYS, available=True)
     for name, path in outputs.items():
         status("application", f"{name}: {path}")
 

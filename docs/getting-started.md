@@ -7,17 +7,17 @@ the package layer, not on the full repo orchestration under
 
 ## Installation
 
-**Source checkout:** 0.3.1 (unreleased). **Latest published release:** 0.3.0.
+**Latest published release:** v0.3.1.
 
-Install [UniBM 0.3.0 from PyPI](https://pypi.org/project/unibm/0.3.0/) with Python
+Install [UniBM v0.3.1 from PyPI](https://pypi.org/project/unibm/0.3.1/) with Python
 3.11 or later:
 
 ```bash
-python -m pip install unibm==0.3.0
+python -m pip install unibm==0.3.1
 ```
 
-When upgrading from 0.2.0, review the
-[0.3.0 API migration notes](api/public-api.md#api-migration) for removed
+When upgrading from v0.2.0, review the
+[v0.3.0 API migration notes](api/public-api.md#api-migration) for removed
 arguments and stricter validation.
 
 ## Source checkout and development
@@ -52,7 +52,7 @@ The repo-level workflow details stay in the repository `README.md` and
 
 ## Package usage
 
-These examples target UniBM 0.3.x. Since 0.2.0, all six core workflow
+These examples target UniBM v0.3.x. Since v0.2.0, all six core workflow
 functions are also available directly from `unibm`; see
 [Top-level convenience imports](api/public-api.md#top-level-convenience-imports).
 
@@ -117,8 +117,8 @@ For a quick guide to which returned fields matter most, see
 
 ## Bootstrap threads
 
-Since 0.2.0, EVI estimation and EVI/EI bootstrap functions accept `n_threads`.
-This option is not part of the published 0.1.0 release.
+Since v0.2.0, EVI estimation and EVI/EI bootstrap functions accept `n_threads`.
+This option is not part of the published v0.1.0 release.
 
 - `None` (default) selects a small pool from the workload and available CPUs;
   fewer than 2,048 observations stay serial. Automatic selection uses at most
@@ -148,7 +148,7 @@ use, so the batch budget is not a total process memory limit.
 
 ## Optional native acceleration
 
-The source checkout uses optional Cython kernels for EVI mode KDE, bootstrap
+UniBM uses optional Cython kernels for EVI mode KDE, bootstrap
 quantile rank searches, and long-series EI bootstrap rolling minima.
 The same APIs and `n_threads` setting work with or without the extension.
 Mode and quantile bootstrap reuse repeated-maxima counts and budget their tables
@@ -170,8 +170,7 @@ This does not reduce bootstrap replicates or relax adaptive precision tolerances
 Native wheels are specific to their Python/platform tags; a pure Python wheel
 provides the fallback wherever the runtime dependencies are supported. See the
 [build and platform notes](https://github.com/TY-Cheng/UniBM/blob/main/CONTRIBUTING.md#native-acceleration).
-The additional bootstrap and window-selection optimizations are in the unreleased
-0.3.1 source checkout.
+Version v0.3.1 adds the bootstrap and window-selection optimizations.
 
 ## Plotting
 

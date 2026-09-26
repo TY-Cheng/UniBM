@@ -107,7 +107,7 @@ class ConfigPathTests(unittest.TestCase):
             self.assertEqual(dirs["DIR_WORK"], code_root)
             self.assertEqual(dirs["DIR_DATA"], code_root / "data")
             self.assertEqual(dirs["DIR_DATA_RAW"], code_root / "data" / "raw")
-            self.assertEqual(dirs["DIR_DATA_DERIVED"], code_root / "data" / "derived")
+            self.assertEqual(dirs["DIR_DATA_PROCESSED"], code_root / "data" / "processed")
             self.assertEqual(dirs["DIR_DATA_METADATA"], code_root / "data" / "metadata")
             self.assertEqual(dirs["DIR_REPORT"], artifact_root)
             self.assertEqual(dirs["DIR_REPORT_FIGURE"], artifact_root / "Figure")
